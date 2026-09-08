@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+out/stills/
+# master haute qualite : regenerable a l'identique via tools/omnipotard_intro.py
+out/omnipotard_intro_1080p60.mp4

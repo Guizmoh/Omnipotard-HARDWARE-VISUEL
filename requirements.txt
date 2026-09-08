@@ -1,0 +1,2 @@
+numpy>=1.24
+pillow>=10.0   # uniquement pour l'export d'images cles (--stills)
