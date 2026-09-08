@@ -74,4 +74,8 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 |---|---|
 | `out/omnipotard_intro_1080p60_web.mp4` | 6 Mo — partage, réseaux, prévisualisation |
 | `out/omnipotard_poster.png` | image fixe du titre (vignette) |
-| `out/omnipotard_intro_1080p60.mp4` | master CRF 16 (~39 Mo) — **non versionné**, à régénérer avec la commande ci-dessus pour le montage |
+| `out/omnipotard_intro_1080p60_hq.mp4` | 23 Mo (CRF 19) — qualité montage : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60_hq.mp4 --crf 19` |
+| `out/omnipotard_intro_1080p60.mp4` | master CRF 16 (~39 Mo) — `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4` |
+
+Les deux masters ne sont **pas versionnés** (poids) : le rendu étant déterministe,
+la commande indiquée les reproduit à l'identique en ~2 min 30.
