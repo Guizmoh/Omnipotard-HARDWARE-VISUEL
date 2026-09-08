@@ -1,25 +1,48 @@
 # Glitch-visualisateur — intro OMNIPOTARD
 
 Générateur d'une intro vidéo « oscilloscope » (vert fluo sur noir) pour les clips
-**Omnipotard** : un balayage d'oscillateur dessine une MPC, puis le titre se
-reforme à partir de sinusoïdes.
+**Omnipotard** : un balayage d'oscillateur dessine une MPC Live III, la machine
+joue un groove dub, puis fond dans la forme d'onde du morceau — d'où le titre
+sort, écrit d'un seul trait continu par la courbe audio.
 
 ![affiche](out/omnipotard_poster.png)
 
-## Le déroulé (10 s, 1920×1080, 60 fps)
+## Le déroulé (12,8 s — 4 mesures à 75 BPM, 1920×1080 @ 60 fps)
+
+Tout est calé sur la grille musicale : le balayage se termine **pile sur le
+drop**, et le titre apparaît **pile sur la mesure 4**.
 
 | temps | séquence | ce qui se passe |
 |---|---|---|
-| 0,00 – 0,85 s | **amorce** | le réticule s'allume, la trace se stabilise sur la ligne de base |
-| 0,85 – 4,20 s | **balayage** | le faisceau balaie l'écran de gauche à droite ; l'onde de l'oscillateur s'écrase au fur et à mesure et **laisse derrière elle le tracé de la MPC** (châssis, écran, molette, potards, touches, grille de 16 pads) |
-| 4,20 – 5,60 s | **groove** | les pads s'allument sur un motif de 16 pas, l'écran affiche la forme d'onde |
-| 5,60 – 6,55 s | **dissolution** | la machine fond en trois sinusoïdes |
-| 6,55 – 8,40 s | **titre** | le texte, d'abord *déroulé* le long des sinusoïdes, se replie lettre par lettre en **OMNIPOTARD** — les traits restent faits d'une ondulation |
-| 8,40 – 9,52 s | **maintien** | passage de lecture sur le titre, soulignement sinusoïdal |
-| 9,52 – 10,0 s | **extinction** | collapse cathodique : l'image se referme sur une ligne puis un point |
+| 0,0 – 0,9 s | **amorce** | le réticule s'allume, la trace se stabilise sur la ligne de base |
+| 0,9 – 3,2 s | **balayage** | le faisceau balaie l'écran ; l'onde de l'oscillateur s'écrase et laisse derrière elle le tracé de la **MPC Live III** |
+| 3,2 – 8,0 s | **groove dub** | la machine joue : pads, bande de 16 pas, Q-Links, touch strip et écran bougent **sur les évènements réels de la bande-son** |
+| 8,0 – 9,6 s | **dissolution** | break : la machine fond dans la forme d'onde du morceau |
+| 9,6 – 11,2 s | **titre** | impact, puis la courbe audio **écrit OMNIPOTARD d'un seul trait**, entre-t-elle et ressort en onde de part et d'autre du mot |
+| 11,2 – 12,4 s | **maintien** | le nom reste dans la courbe, vibrant avec la musique |
+| 12,4 – 12,8 s | **extinction** | collapse cathodique : l'image se referme sur une ligne puis un point |
 
-La bande-son est synthétisée par le même script : sweep d'oscillateur → groove
-MPC (kick / snare / hats) → riser → impact sur l'apparition du titre → nappe.
+## L'image est pilotée par le son
+
+La bande-son est synthétisée par le même script (dub ambient : sub, one-drop,
+skank sur les contretemps parti dans un écho à bande, nappe et réverbe). Elle
+sert ensuite de **source d'animation** — il n'y a aucune synchronisation à
+refaire à la main :
+
+- la grande courbe **est** la forme d'onde du morceau (avec calibre automatique,
+  comme un vrai oscilloscope) ;
+- chaque pad s'allume sur l'évènement qui le déclenche : grosse caisse, rimshot,
+  charley, notes de basse, accords ;
+- la bande de 16 pas suit le pas courant du séquenceur ;
+- les Q-Links, les bandeaux, le touch strip et les vu-mètres de l'écran suivent
+  les enveloppes grave / medium / aigu.
+
+## La machine
+
+La silhouette reprend la **MPC Live III** : bande de 16 boutons de step-séquenceur
+sur l'arête haute, écran tactile 7" à gauche, quatre Q-Links surmontés de leurs
+bandeaux d'affichage, molette encastrée en haut à droite, grille de 16 pads MPCe
+en bas à droite, et le touch strip vertical le long des pads.
 
 ## Rendu
 
@@ -30,7 +53,7 @@ python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4
 ```
 
 Le rendu est **déterministe** (tout est graine + temps) : deux exécutions
-donnent le même fichier au bit près. Environ 2 min 30 sur 4 cœurs.
+donnent le même fichier au bit près. Environ 3 min sur 4 cœurs.
 
 ### Options utiles
 
@@ -42,13 +65,13 @@ python3 tools/omnipotard_intro.py -W 3840 -H 2160 -o out/intro_4k.mp4
 python3 tools/omnipotard_intro.py -W 1080 -H 1920 -o out/intro_vertical.mp4
 
 # images clés en PNG, pour vérifier avant d'encoder
-python3 tools/omnipotard_intro.py --stills out/stills --still-times 2.1,4.9,7.2,8.8
+python3 tools/omnipotard_intro.py --stills out/stills --still-times 3.4,4.6,8.6,10.6,11.6
 
 # variantes
---duration 8        # la timeline entière se remet à l'échelle
+--duration 9.6      # toute la timeline ET le tempo se remettent à l'échelle
 --fps 30            # ou 24, 50…
 --crf 12            # qualité d'encodage (plus bas = plus gros)
---no-audio          # image seule (pour poser sa propre musique)
+--no-audio          # image seule, mais l'animation reste pilotée par le son
 --no-curve          # supprime la courbure du tube cathodique
 --seed 12           # change le grain et les décalages de glitch
 --jobs 8            # nombre de processus de rendu
@@ -59,23 +82,28 @@ python3 tools/omnipotard_intro.py --stills out/stills --still-times 2.1,4.9,7.2,
 Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 (x ∈ [-1,78 ; 1,78], y ∈ [-1 ; 1], origine au centre) :
 
-- **le mot** : `text_paths("OMNIPOTARD", …)` dans `Renderer.__init__` — l'alphabet
-  monotrait est le dictionnaire `GLYPHS` (ajouter une lettre = ajouter ses traits) ;
+- **le mot** : `build_title_curve("OMNIPOTARD", …)` — l'alphabet monotrait est le
+  dictionnaire `GLYPHS` (ajouter une lettre = ajouter ses traits) ;
+- **la place du mot dans la courbe** : `TITLE_H`, `CURVE_AMP` (amplitude de
+  l'onde), `CURVE_WIN` (base de temps affichée), `MOD_OF` (à quel point chaque
+  partie du tracé ondule avec la musique) ;
+- **la musique** : `KICKS`, `RIMS`, `HATS`, `PERCS`, `SKANKS`, `BASSLINE` (motif
+  de 16 pas), `NOTES` (la gamme), et les voix `kick()`, `rim()`, `skank()`,
+  `bass()` dans `synth_audio()` ;
+- **quel pad s'allume sur quoi** : `PAD_OF`, `PAD_BASS`, `PAD_SKANK` ;
+- **la machine** : `build_mpc()` — chaque organe est un `Path` étiqueté
+  (`body`, `step0…step15`, `lcd`, `qlink*`, `wheel`, `strip`, `pad0…pad15`) ;
 - **la couleur** : `VERT_FLUO` (#39FF14) et `VERT_HALO` ;
-- **la machine** : `build_mpc()` — chaque organe est un `Path` taggué
-  (`body`, `lcd`, `wheel`, `knob*`, `fn*`, `btn*`, `pad0…pad15`) ;
-- **le motif de pads** : `PATTERN`, 16 pas de `(numéro de pad, force)` ;
-- **le minutage** : `Timeline.KEYS` ;
-- **les glitchs** : `GLITCHES`, liste de `(instant, durée)`.
+- **le minutage** : `Timeline.KEYS` ; **les glitchs** : `GLITCHES`.
 
 ## Fichiers produits
 
 | fichier | usage |
 |---|---|
-| `out/omnipotard_intro_1080p60_web.mp4` | 6 Mo — partage, réseaux, prévisualisation |
+| `out/omnipotard_intro_1080p60_web.mp4` | version légère — partage, réseaux, prévisualisation |
 | `out/omnipotard_poster.png` | image fixe du titre (vignette) |
-| `out/omnipotard_intro_1080p60_hq.mp4` | 23 Mo (CRF 19) — qualité montage : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60_hq.mp4 --crf 19` |
-| `out/omnipotard_intro_1080p60.mp4` | master CRF 16 (~39 Mo) — `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4` |
+| `out/omnipotard_intro_1080p60_hq.mp4` | qualité montage : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60_hq.mp4 --crf 20` |
+| `out/omnipotard_intro_1080p60.mp4` | master : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 16` |
 
 Les deux masters ne sont **pas versionnés** (poids) : le rendu étant déterministe,
-la commande indiquée les reproduit à l'identique en ~2 min 30.
+les commandes ci-dessus les reproduisent à l'identique en ~3 min.
