@@ -35,8 +35,14 @@ import numpy as np
 # En 16/9 la zone visible est x dans [-1.78, 1.78], y dans [-1, 1].
 # --------------------------------------------------------------------------
 
-VERT_FLUO = (0.24, 1.00, 0.16)   # #39FF14
-VERT_HALO = (0.10, 1.00, 0.34)   # halo legerement plus froid
+# Palettes : coeur du trait, halo, coeur sur-expose, fond de dalle.
+PALETTES = {
+    "vert":      ((0.24, 1.00, 0.16), (0.10, 1.00, 0.34), (0.85, 1.00, 0.88), (0.0, 0.0, 0.0)),
+    "orange":    ((1.00, 0.45, 0.07), (1.00, 0.11, 0.02), (1.00, 0.93, 0.80), (0.0, 0.0, 0.0)),
+    "bleu":      ((0.22, 0.66, 1.00), (0.05, 0.26, 1.00), (0.86, 0.96, 1.00), (0.0, 0.0, 0.0)),
+    "bleu-fond": ((0.62, 0.90, 1.00), (0.14, 0.48, 1.00), (0.92, 0.98, 1.00),
+                  (0.022, 0.066, 0.168)),
+}
 
 SR = 48000
 DUREE_REF = 9.916                # 14 temps a 84,7 BPM (le tempo du morceau)
@@ -275,6 +281,18 @@ BTN_ROWS = (-0.275, -0.382, -0.489)
 BTN_X0, BTN_W, BTN_H, BTN_GAP, BTN_N = 0.018, 0.185, 0.084, 0.030, 5
 GRILLE = (-1.340, -0.800, 1.340, -0.570)
 MIC, MIC_R = (0.0, -0.520), 0.025
+
+# L'ecran de la machine : c'est la que se joue la fin. Le zoom de camera et
+# l'echelle de la composition sont inverses l'un de l'autre (SCR_S * CAM_Z = 1),
+# si bien que le logo garde exactement la meme taille a l'image qu'avant — seul
+# le cadre change : on est desormais dans la dalle de la MPC.
+SCR_IN = (SCREEN[0] + 0.028, SCREEN[1] + 0.028, SCREEN[2] - 0.028, SCREEN[3] - 0.028)
+SCR_C = ((SCR_IN[0] + SCR_IN[2]) * 0.5, (SCR_IN[1] + SCR_IN[3]) * 0.5)
+CAM_Z = 2.60
+SCR_S = 1.0 / CAM_Z
+SCR_HW = (SCR_IN[2] - SCR_IN[0]) * 0.5 * CAM_Z      # decoupe, en composition
+SCR_HH = (SCR_IN[3] - SCR_IN[1]) * 0.5 * CAM_Z
+SCR_OY = 0.0475                                     # centrage vertical du bloc
 
 
 def pad_rect(i, j):
@@ -638,7 +656,7 @@ def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
                 bass(at, name, dur * six)
 
     # --------------------------------- 3. break : la matiere part dans l'echo
-    b0, t0 = tl.start("melt"), tl.start("title")
+    b0, t0 = tl.start("zoom"), tl.start("title")
     add(dry, _whoosh(t0 - b0, sr, rng, up=True), b0, 0.85)
     add(rev, _whoosh(t0 - b0, sr, rng, up=True), b0, 0.40)
     chord(b0, ck, 0.95)
@@ -697,7 +715,7 @@ class Timeline:
         ("boot", 0.0000, 1.0623),   # la piste s'enregistre, sur la musique
         ("sweep", 1.0623, 3.1870),  # la mue se joue pendant le break du morceau
         ("groove", 2.8329, 5.6658),  # le drop du morceau, une mesure pleine
-        ("melt", 5.6658, 6.3740),
+        ("zoom", 5.6658, 6.3740),   # la camera entre dans l'ecran de la machine
         ("title", 6.3740, 8.4987),
         ("hold", 8.4987, 9.5610),
         ("out", 9.5610, 9.9160),
@@ -746,7 +764,8 @@ STEP_LIT = frozenset(KICKS + RIMS + HATS + PERCS + SKANKS)
 
 
 class Renderer:
-    def __init__(self, w, h, fps, duration, audio, curve=True, seed=7):
+    def __init__(self, w, h, fps, duration, audio, curve=True, seed=7,
+                 palette="vert", subtitle=SUB_TXT):
         self.W, self.H = w, h
         self.fps = fps
         self.dur = duration
@@ -758,7 +777,13 @@ class Renderer:
 
         # la machine reste cadree quel que soit le format (16/9, carre, vertical)
         self.scale = min(h * 0.5, w * 0.5 / 1.30)
+        fluo, halo, hotc, bg = PALETTES[palette]
+        self.c_fluo, self.c_halo = fluo, halo
+        self.c_hot = np.float32(hotc)
+        self.c_bg = np.float32(bg)
         self._zoom = 1.0                     # respiration de l'image sur les kicks
+        self._cam = (0.0, 0.0)               # camera : centre, puis dans l'ecran
+        self._cam_z = 1.0
         self.sigma = max(0.60, h / 1080.0 * 0.95)
         # un trait garde la meme luminosite quelle que soit la definition
         self.gain = (self.scale * self.sigma) / (360.0 * 0.6333)
@@ -799,7 +824,7 @@ class Renderer:
          self.ts, self.tlen) = build_title_curve("OMNIPOTARD", TITLE_H, 0.0)
         tx = self.tP[self.tkind == TRAIT][:, 0]
         self.word_x = (float(tx.min()), float(tx.max()))
-        sub = text_paths(SUB_TXT, SUB_H, 0.0, SUB_Y, tag="sub", tracking=SUB_TRACK)
+        sub = text_paths(subtitle, SUB_H, 0.0, SUB_Y, tag="sub", tracking=SUB_TRACK)
         self.subP = np.vstack([q.P for q in sub])
         subN = []
         for q in sub:
@@ -809,6 +834,7 @@ class Renderer:
         self.subN = np.vstack(subN)
         self.tw = np.array([WEIGHT_OF[int(k)] for k in self.tkind])
         self.tth = np.array([THICK_OF[int(k)] for k in self.tkind])
+        self.is_line = ((self.tkind == TRAIT) | (self.tkind == TRANSIT)).astype(np.float64)
 
         if curve:
             self._build_warp()
@@ -904,9 +930,22 @@ class Renderer:
     # -- geometrie ecran ---------------------------------------------------
 
     def to_px(self, P, collapse=1.0, shake=(0.0, 0.0)):
-        s = self.scale * self._zoom
-        return (self.W * 0.5 + P[:, 0] * s + shake[0],
-                self.H * 0.5 - P[:, 1] * s * collapse + shake[1])
+        s = self.scale * self._zoom * self._cam_z
+        cx, cy = self._cam
+        return (self.W * 0.5 + (P[:, 0] - cx) * s + shake[0],
+                self.H * 0.5 - (P[:, 1] - cy) * s * collapse + shake[1])
+
+    def in_screen(self, P):
+        """Composition -> monde, posee dans l'ecran de la machine.
+
+        Renvoie aussi le masque de decoupe : une dalle n'affiche que ce qui
+        tient dedans."""
+        yc = P[:, 1] - SCR_OY
+        m = (np.abs(P[:, 0]) <= SCR_HW) & (np.abs(yc) <= SCR_HH)
+        Q = np.empty_like(P)
+        Q[:, 0] = SCR_C[0] + P[:, 0] * SCR_S
+        Q[:, 1] = SCR_C[1] + yc * SCR_S
+        return Q, m
 
     def _build_warp(self):
         W, H = self.W, self.H
@@ -967,7 +1006,9 @@ class Renderer:
             beam.add(px, py, 0.55 * alpha * blink)
 
     def _dyn(self, beam, P, w, collapse, melt, t):
-        """Couche animee (organes qui bougent), soumise a la dissolution."""
+        """Couche animee de la machine. Le poids est compense par le zoom de
+        camera : un trait du monde s'etale sur d'autant plus de pixels."""
+        w = w * self._cam_z
         if melt >= 0.99:
             return
         if melt > 0:
@@ -1004,6 +1045,7 @@ class Renderer:
             a *= 1.0 - self.body_mask(xs, sweep_x, melt)
             a *= self.morph_at(xs, sweep_x)      # nait a mesure que le clip fond
         hit = self.bass_hit(t)
+        a = a * self._cam_z
         P = np.stack([xs, self.wave_y(xs, t)], axis=1)
         px, py = self.to_px(P, collapse)
         beam.add(px, py, 0.85 * a * (1.0 + 0.85 * hit))
@@ -1114,7 +1156,8 @@ class Renderer:
         pulse = 1.0 + 0.28 * e_low
         jx = shake * rng.uniform(-9, 9)
         ghost = 1.0 - smoothstep(tl.start("groove") - 0.25, tl.start("groove"), t)
-        trem = 1.0 + 0.6 * e_low + 0.5 * self.bass_hit(t)     # le trait respire
+        trem = (1.0 + 0.6 * e_low + 0.5 * self.bass_hit(t))  # le trait respire
+        trem /= 0.45 + 0.55 * self._cam_z                    # sans enfler au zoom
 
         half = BODY[3]
         for p in self.mpc:
@@ -1156,7 +1199,7 @@ class Renderer:
                 w *= (1.0 - melt) ** 0.7
                 P = self._melt(P, melt, t)
             px, py = self.to_px(P, collapse, (jx, 0.0))
-            beam.add(px, py, w)
+            beam.add(px, py, w * self._cam_z)
 
         # ---- organes animes
         if melt >= 0.99:
@@ -1198,7 +1241,7 @@ class Renderer:
 
         # ecran : forme d'onde du morceau + niveaux
         sx0, sy0, sx1, sy1 = SCREEN
-        if self.morph_at(sx0, sweep_x) > 0.5:
+        if self.morph_at(sx0, sweep_x) > 0.5 and t < tl.start("zoom"):
             m = 0.05
             x_hi = sx1 - m if self.morph_at(sx1, sweep_x) > 0.5 else min(sx1 - m, sweep_x)
             x_lo = sx0 + m
@@ -1225,15 +1268,13 @@ class Renderer:
         par une, au rythme des doubles-croches.
         """
         u = np.clip(self.tl.at("title", t), 0.0, 1.0)
-        return float(np.interp(u, (0.0, 0.14, 0.86, 1.0), (-1.95, -1.14, 1.14, 1.95)))
+        return float(np.interp(u, (0.0, 0.14, 0.86, 1.0), (-1.42, -1.14, 1.14, 1.42)))
 
     def _draw_title(self, beam, t, collapse, u_out, dx=0.0):
-        """Le mot nait de la frequence : le front passe, l'onde s'efface
-        derriere lui et chaque lettre se detache de la courbe."""
+        """Le mot nait de la frequence, sur l'ecran de la machine : le front
+        passe, l'onde s'efface derriere lui et chaque lettre s'en detache."""
         xf = self.title_front(t)
         wy = self.wave_y(self.tP[:, 0], t)
-
-        # chaque point quitte l'onde quand le front le depasse
         k = np.clip((xf - self.tP[:, 0] + 0.055) / 0.185, 0.0, 1.0)
         k = k * k * (3.0 - 2.0 * k)
 
@@ -1241,31 +1282,40 @@ class Renderer:
         P[:, 1] = wy * (1.0 - k) + (self.tP[:, 1] + self.wave_mod(P[:, 0]) * wy) * k
         P[:, 0] = P[:, 0] + dx
 
-        w = self.tw * (0.12 + 0.88 * k)
-        w = w + 2.4 * np.exp(-((k - 0.62) / 0.26) ** 2) * (xf < 1.9)   # eclat de detachement
-        if xf >= 1.9:
+        # le fil est deja en place avant le passage du front : seuls les traits
+        # de lettres montent en intensite au fur et a mesure.
+        w = self.tw * np.where(self.is_line > 0, 0.10 + 0.90 * k, 1.0)
+        w = w + 2.4 * np.exp(-((k - 0.62) / 0.26) ** 2) * self.is_line * (xf < 1.42)
+        if xf >= 1.42:
             w = self.tw * (1.0 + 0.10 * self.env_at(self.e_low, t)
                            + 0.45 * self.bass_hit(t))
         if u_out > 0:
             w = w * max(0.0, 1.0 - u_out * 1.35)
 
-        th = self.tth * k
+        th = self.tth * np.where(self.is_line > 0, k, 1.0)
         for off, ow in ((0.0, 1.0), (1.0, 0.60), (-1.0, 0.60)):
-            px, py = self.to_px(P + self.tN * (off * th)[:, None], collapse)
-            beam.add(px, py, w * ow)
+            Q, m = self.in_screen(P + self.tN * (off * th)[:, None])
+            if not np.any(m):
+                continue
+            px, py = self.to_px(Q[m], collapse)
+            beam.add(px, py, (w * ow)[m])
 
-        # le front lui-meme : trait vertical + point chaud sur la courbe
-        if -1.94 < xf < 1.94:
-            ys = np.linspace(-0.52, 0.52, 620)
-            taper = np.exp(-(ys / 0.34) ** 4)          # plat au centre, fondu aux bords
+        # le front de lecture, borne a la hauteur de la dalle
+        if -1.41 < xf < 1.41:
+            ys = np.linspace(-SCR_HH * 0.94, SCR_HH * 0.94, 620)
+            taper = np.exp(-(ys / (SCR_HH * 0.66)) ** 4)
             for j in range(4):
-                Q = np.stack([np.full(len(ys), xf - j * 0.022), ys], axis=1)
-                px, py = self.to_px(Q, collapse)
-                beam.add(px, py, taper * (0.95 if j == 0 else 0.26) * (0.58 ** j))
+                Q, m = self.in_screen(np.stack([np.full(len(ys), xf - j * 0.022), ys], axis=1))
+                if not np.any(m):
+                    continue
+                px, py = self.to_px(Q[m], collapse)
+                beam.add(px, py, (taper * (0.95 if j == 0 else 0.26) * (0.58 ** j))[m])
             dot = np.stack([np.full(60, xf), np.linspace(-0.02, 0.02, 60)
                             + float(self.wave_y(np.array([xf]), t)[0])], axis=1)
-            px, py = self.to_px(dot, collapse)
-            beam.add(px, py, 2.2)
+            Q, m = self.in_screen(dot)
+            if np.any(m):
+                px, py = self.to_px(Q[m], collapse)
+                beam.add(px, py, 2.2)
 
     def _draw_sub(self, beam, t, collapse, u_out, dx=0.0):
         """HARDWARE ONLY : volet lumineux qui passe juste apres le mot."""
@@ -1286,8 +1336,11 @@ class Renderer:
             w = w * max(0.0, 1.0 - u_out * 1.35)
         th = (0.0032 * k)[:, None]
         for off, ow in ((0.0, 1.0), (1.0, 0.55), (-1.0, 0.55)):
-            px, py = self.to_px(P + self.subN * (off * th), collapse)
-            beam.add(px, py, w * ow)
+            Q, m = self.in_screen(P + self.subN * (off * th))
+            if not np.any(m):
+                continue
+            px, py = self.to_px(Q[m], collapse)
+            beam.add(px, py, (w * ow)[m])
 
     # -- image -------------------------------------------------------------
 
@@ -1298,6 +1351,10 @@ class Renderer:
 
         # l'image respire sur chaque grosse caisse pendant que la machine joue
         self._zoom = 1.0 + 0.020 * self.kick_hit(t)
+        # puis la camera entre dans l'ecran de la machine
+        kz = ease_in_out(float(np.clip(tl.at("zoom", t), 0.0, 1.0)))
+        self._cam = (SCR_C[0] * kz, SCR_C[1] * kz)
+        self._cam_z = 1.0 + (CAM_Z - 1.0) * kz
 
         collapse = 1.0
         u_out = tl.at("out", t)
@@ -1307,12 +1364,11 @@ class Renderer:
 
         shake = self.glitch_at(t)
 
-        grid_a = smoothstep(0.05, 0.55, t) * (1.0 - 0.55 * smoothstep(tl.start("melt"),
-                                                                     tl.end("title"), t))
+        grid_a = smoothstep(0.05, 0.55, t) * (1.0 - kz)      # le reticule reste dehors
         self._grid(beam, t, grid_a * (1.0 if u_out <= 0 else max(0.0, 1 - u_out * 2)), collapse)
         self._hud(beam, t, collapse,
-                  smoothstep(0.15, 0.6, t) * (1.0 - smoothstep(tl.start("melt"),
-                                                               tl.end("melt"), t)))
+                  smoothstep(0.15, 0.6, t) * (1.0 - smoothstep(tl.start("zoom"),
+                                                               tl.end("zoom"), t)))
 
         # ---- 1 et 2. le clip qui s'enregistre, puis le balayage
         u_sweep = tl.at("sweep", t)
@@ -1322,8 +1378,8 @@ class Renderer:
             self._daw_clip(beam, t, collapse, sweep_x, rng)
 
         # ---- 3. la machine
-        melt = float(np.clip(tl.at("melt", t), 0, 1))
-        if u_sweep > 0 and melt < 0.995:
+        melt = 0.0                       # la machine ne se dissout plus : on y entre
+        if u_sweep > 0:
             self._machine(beam, t, collapse, sweep_x, melt, rng, shake)
 
         # tete de balayage
@@ -1341,15 +1397,14 @@ class Renderer:
         a_wave = 0.0
         if t >= tl.start("groove"):
             a_wave = 0.48 * smoothstep(tl.start("groove"), tl.start("groove") + 0.4, t)
-        if t >= tl.start("melt"):
-            a_wave = 0.48 + 0.52 * smoothstep(tl.start("melt"), tl.start("melt") + 0.45, t)
-        xf = self.title_front(t) if t >= tl.start("title") else None
+        if t >= tl.start("zoom"):
+            a_wave *= 1.0 - smoothstep(tl.start("zoom"), tl.start("zoom") + 0.45, t)
         if u_out > 0:
             a_wave *= max(0.0, 1.0 - u_out * 1.6)
-        self._wave_line(beam, t, collapse, a_wave, xf, sweep_x, melt)
+        self._wave_line(beam, t, collapse, a_wave, None, sweep_x, melt)
 
         # ---- 5. le titre, ecrit par la courbe
-        if t >= tl.start("title") and u_out < 0.95:
+        if t >= tl.start("zoom") and u_out < 0.95:
             dx = shake * float(rng.uniform(-0.055, 0.055)) if u_out > 0 else 0.0
             self._draw_title(beam, t, collapse, max(0.0, u_out), dx)
             self._draw_sub(beam, t, collapse, max(0.0, u_out), dx)
@@ -1370,8 +1425,11 @@ class Renderer:
         img = np.zeros((H, W, 3), dtype=np.float32)
         base = np.clip(inten, 0, 1.6)
         for c in range(3):
-            img[:, :, c] = VERT_FLUO[c] * base + VERT_HALO[c] * np.clip(glow, 0, 3.0) * 0.55
-        img += (np.clip(hot * 1.25, 0, 1.0) ** 1.25)[..., None] * np.float32([0.85, 1.0, 0.88])
+            img[:, :, c] = self.c_fluo[c] * base + self.c_halo[c] * np.clip(glow, 0, 3.0) * 0.55
+        img += (np.clip(hot * 1.25, 0, 1.0) ** 1.25)[..., None] * self.c_hot
+        # le fond passe sous les textures : scanlines, vignettage et grain
+        # le travaillent comme le reste de la dalle.
+        img += self.c_bg
 
         yy = np.arange(H, dtype=np.float32)[:, None]
         period = max(2.0, H / 360.0)
@@ -1458,6 +1516,9 @@ def main():
     ap.add_argument("--music-start", type=float, default=MUSIC_START,
                     help="debut de l'extrait dans le morceau (s)")
     ap.add_argument("--synth", action="store_true", help="force la bande-son de synthese")
+    ap.add_argument("--palette", default="vert", choices=sorted(PALETTES),
+                    help="couleur du trace (et fond de dalle pour bleu-fond)")
+    ap.add_argument("--subtitle", default=SUB_TXT, help="ligne sous le logo")
     ap.add_argument("--no-curve", action="store_true", help="desactive la courbure CRT")
     ap.add_argument("--no-audio", action="store_true", help="video muette (l'image reste pilotee par le son)")
     ap.add_argument("--stills", default="", help="dossier ou exporter des images cles PNG")
@@ -1476,7 +1537,8 @@ def main():
 
     global _R
     _R = Renderer(args.width, args.height, args.fps, args.duration, audio,
-                  curve=not args.no_curve, seed=args.seed)
+                  curve=not args.no_curve, seed=args.seed,
+                  palette=args.palette, subtitle=args.subtitle.upper())
 
     if args.stills:
         from PIL import Image
@@ -1639,15 +1701,18 @@ def load_music(path=MUSIC_PATH, duration=DUREE_REF, start=MUSIC_START, sr=SR, se
 
     t = np.arange(n) / sr
     g0 = tl.start("groove")
-    m0, t0, o0 = tl.start("melt"), tl.start("title"), tl.start("out")
+    m0, t0, o0 = tl.start("zoom"), tl.start("title"), tl.start("out")
 
     # --- montage : le morceau est mat avant le drop, evide pendant le break
     dull = np.stack([_lowpass(st[:, c], 42) for c in range(2)], axis=1)
     thin = st - np.stack([_lowpass(st[:, c], 30) for c in range(2)], axis=1)
-    a_dull = _ramp(t, [(0, .88), (g0 - 0.30, .78), (g0 - 0.02, .05), (g0, 0)])[:, None]
+    # le morceau reste audible des le debut : juste mat et un peu en retrait,
+    # il s'ouvre progressivement au lieu de sauter au drop.
+    a_dull = _ramp(t, [(0, .58), (g0 - 0.60, .50), (g0 - 0.05, .12), (g0, 0)])[:, None]
     a_thin = _ramp(t, [(0, 0), (m0 - 0.02, 0), (m0 + 0.10, .85), (t0 - 0.12, .85),
                        (t0, 0)])[:, None]
-    gain = _ramp(t, [(0, .48), (g0 - 0.02, .58), (g0, 1.0), (m0, 1.0), (m0 + 0.10, .55),
+    gain = _ramp(t, [(0, .72), (g0 - 0.60, .80), (g0 - 0.02, .90), (g0, 1.0),
+                     (m0, 1.0), (m0 + 0.10, .55),
                      (t0, 1.0), (o0, 1.0), (o0 + 0.16, 0.0)])[:, None]
     mix = (st * (1.0 - a_dull - a_thin) + dull * a_dull + thin * a_thin) * gain
 

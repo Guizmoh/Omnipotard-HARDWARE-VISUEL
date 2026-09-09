@@ -14,13 +14,19 @@ drop**, et le titre apparaît **pile sur l'impact**.
 
 | temps | séquence | ce qui se passe |
 |---|---|---|
-| 0,0 – 1,06 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit derrière la tête d'enregistrement. Le morceau joue, étouffé et baissé |
-| 1,06 – 3,19 s | **transformation** | le clip **se déplie en MPC Live III**, pendant le break du morceau — chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place |
-| 2,83 – 5,67 s | **groove** | **le drop du morceau** tombe pile ici, avant la fin de la mue : la machine joue déjà pendant que son flanc droit finit de se déployer |
-| 5,67 – 6,37 s | **break** | le morceau est évidé de ses graves et baissé, un souffle monte, la machine fond dans la forme d'onde |
-| 6,37 – 8,50 s | **titre** | impact, puis un front de lecture **balaie lentement de gauche à droite** : les lettres se détachent du fil d'onde une par une, puis **HARDWARE ONLY** passe sous le nom |
-| 8,50 – 9,56 s | **maintien** | le logo repose sur le fil, qui continue de vibrer avec la musique |
+| 0,0 – 1,06 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit derrière la tête d'enregistrement. Le morceau joue, mat et un peu en retrait |
+| 1,06 – 3,19 s | **transformation** | le clip **se déplie en MPC Live III** — chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place |
+| 2,83 – 5,67 s | **groove** | le morceau s'ouvre en grand, avant la fin de la mue : la machine joue déjà pendant que son flanc droit finit de se déployer |
+| 5,67 – 6,37 s | **entrée dans l'écran** | la caméra **plonge dans la dalle 7" de la MPC**. La machine ne se dissout plus : on y entre. Le morceau est évidé de ses graves, un souffle monte |
+| 6,37 – 8,50 s | **titre** | **sur l'écran de la machine** : impact, puis un front de lecture balaie lentement de gauche à droite, les lettres se détachent du fil d'onde une par une, puis la ligne de bas de casse passe sous le nom |
+| 8,50 – 9,56 s | **maintien** | le logo repose sur le fil, dans la dalle, encadré par le boîtier — pads à gauche, Q-Links à droite |
 | 9,56 – 9,92 s | **extinction** | **rafales de glitch**, souffle de sortie, puis collapse cathodique |
+
+Le zoom de caméra et l'échelle de la composition sont inverses l'un de l'autre
+(`SCR_S × CAM_Z = 1`) : le logo garde exactement la même taille à l'image
+qu'avant, seul le cadre change. Et comme un trait du monde s'étale sur d'autant
+plus de pixels une fois la caméra avancée, son intensité est compensée par le
+zoom — sinon la machine s'assombrissait en approchant.
 
 ## L'image est pilotée par le son
 
@@ -94,6 +100,8 @@ python3 tools/omnipotard_intro.py --stills out/stills --still-times 0.6,1.9,2.85
 --duration 8        # toute la timeline se remet à l'échelle (le tempo reste dans les 80-90 BPM)
 --fps 30            # ou 24, 50…
 --crf 12            # qualité d'encodage (plus bas = plus gros)
+--palette bleu      # vert (défaut), orange (rouge/orange), bleu, bleu-fond
+--subtitle "DAWLESS MUSIC"   # la ligne sous le logo
 --music autre.mp3   # un autre morceau (le tempo et la batterie sont redétectés)
 --music-start 41.2  # où commencer l'extrait, à caler sur une barre de mesure
 --synth             # revenir à la bande-son entièrement synthétisée
@@ -137,14 +145,30 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 - **quel pad s'allume sur quoi** : `PAD_OF`, `PAD_BASS`, `PAD_SKANK` ;
 - **la machine** : `build_mpc()` — chaque organe est un `Path` étiqueté
   (`body`, `step0…step15`, `lcd`, `qlink*`, `wheel`, `strip`, `pad0…pad15`) ;
-- **la couleur** : `VERT_FLUO` (#39FF14) et `VERT_HALO` ;
-- **le sous-titre** : `SUB_TXT`, `SUB_H`, `SUB_TRACK` ;
+- **les couleurs** : le dictionnaire `PALETTES` — cœur du trait, halo, cœur
+  sur-exposé, fond de dalle. Le fond passe **sous** les textures, donc les
+  scanlines, le vignettage et le grain le travaillent comme le reste de l'image ;
+- **le sous-titre** : `--subtitle`, et `SUB_H` / `SUB_TRACK` pour sa taille et sa chasse ;
+- **l'entrée dans l'écran** : `SCR_IN`, `CAM_Z`, `Renderer.in_screen()` (la
+  découpe de la dalle) et la caméra dans `to_px()` ;
 - **le minutage** : `Timeline.KEYS` ; **les glitchs** : `GLITCHES` pour les coups
   ponctuels, `Renderer.glitch_at()` pour les rafales de l'extinction ;
 - **le clip d'ouverture** : `CLIP`, `WAVE_YMAX`, `DAW_COLS` et
   `Renderer._daw_clip()` ;
 - **les souffles** : `_whoosh()` (montant ou descendant) — bruit filtré seul,
   sans composante tonale.
+
+## Versions livrées
+
+| fichier | ce qui change |
+|---|---|
+| `omnipotard_intro_1080p60.mp4` | la référence : vert, « HARDWARE ONLY » |
+| `omnipotard_dawless.mp4` | « DAWLESS MUSIC » sous le logo |
+| `omnipotard_bleu_fond.mp4` | fond bleu travaillé par la texture cathodique |
+| `omnipotard_rouge_orange.mp4` | tracé orange, halo rouge |
+| `omnipotard_bleu.mp4` | tracé bleu |
+
+Les options se combinent : `--palette orange --subtitle "DAWLESS MUSIC"`.
 
 ## Fichiers produits
 
