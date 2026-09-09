@@ -39,7 +39,9 @@ VERT_FLUO = (0.24, 1.00, 0.16)   # #39FF14
 VERT_HALO = (0.10, 1.00, 0.34)   # halo legerement plus froid
 
 SR = 48000
-DUREE_REF = 9.625                # 20 temps a 125 BPM
+DUREE_REF = 9.916                # 14 temps a 84,7 BPM (le tempo du morceau)
+MUSIC_PATH = "assets/hint.mp3"   # morceau utilise ; --music pour en changer
+MUSIC_START = 19.8209             # le drop du morceau tombe pile sur la barre
 
 
 # ==========================================================================
@@ -666,7 +668,8 @@ def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
     st = np.stack([mix, right], axis=1)
     events.sort()
     return {"stereo": (np.clip(st, -1, 1) * 32767).astype("<i2"),
-            "mono": mix.astype(np.float32), "events": events, "sr": sr}
+            "mono": mix.astype(np.float32), "events": events, "sr": sr,
+            "beat": beat}
 
 
 def write_wav(path, data, sr=SR):
@@ -683,14 +686,14 @@ def write_wav(path, data, sr=SR):
 
 class Timeline:
     REF = DUREE_REF
-    KEYS = [                        # cales sur les temps (0,48125 s)
-        ("boot", 0.0000, 0.9625),   # la piste s'enregistre
-        ("sweep", 0.9625, 3.3688),  # le clip se transforme en machine
-        ("groove", 2.8875, 4.8125),  # le drop tombe avant la fin de la mue : la
-        ("melt", 4.8125, 5.7750),   # machine joue deja pendant qu'elle se
-        ("title", 5.7750, 8.1813),  # termine, ce qui resserre le montage
-        ("hold", 8.1813, 9.3500),
-        ("out", 9.3500, 9.6250),
+    KEYS = [                        # cales sur les temps du morceau (0,7082 s)
+        ("boot", 0.0000, 1.0623),   # la piste s'enregistre, sur la musique
+        ("sweep", 1.0623, 3.1870),  # la mue se joue pendant le break du morceau
+        ("groove", 2.8329, 5.6658),  # le drop du morceau, une mesure pleine
+        ("melt", 5.6658, 6.3740),
+        ("title", 6.3740, 8.4987),
+        ("hold", 8.4987, 9.5610),
+        ("out", 9.5610, 9.9160),
     ]
 
     def __init__(self, duration):
@@ -709,8 +712,8 @@ class Timeline:
         return self.seg[name][1]
 
 
-GLITCHES = [(2.87, .09), (3.85, .05), (4.79, .10), (5.75, .11),
-            (8.17, .06), (8.80, .05), (9.10, .06)]
+GLITCHES = [(2.82, .09), (3.90, .05), (5.64, .10), (6.36, .11),
+            (8.49, .06), (9.00, .05), (9.35, .06)]
 
 
 # ==========================================================================
@@ -743,8 +746,8 @@ class Renderer:
         self.tl = Timeline(duration)
         self.curve = curve
         self.seed = seed
-        self.bar = duration / 4.0
-        self.six = self.bar / 16.0
+        self.beat = float(audio.get("beat") or duration / 20.0)
+        self.six = self.beat / 4.0           # la double-croche du morceau
 
         # la machine reste cadree quel que soit le format (16/9, carre, vertical)
         self.scale = min(h * 0.5, w * 0.5 / 1.30)
@@ -1437,13 +1440,26 @@ def main():
     ap.add_argument("--crf", type=int, default=16)
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--music", default=MUSIC_PATH,
+                    help="morceau a utiliser ; vide ou --synth pour la musique de synthese")
+    ap.add_argument("--music-start", type=float, default=MUSIC_START,
+                    help="debut de l'extrait dans le morceau (s)")
+    ap.add_argument("--synth", action="store_true", help="force la bande-son de synthese")
     ap.add_argument("--no-curve", action="store_true", help="desactive la courbure CRT")
     ap.add_argument("--no-audio", action="store_true", help="video muette (l'image reste pilotee par le son)")
     ap.add_argument("--stills", default="", help="dossier ou exporter des images cles PNG")
     ap.add_argument("--still-times", default="0.9,1.7,2.1,2.6,4.2,6.2,7.6,8.4,9.1,10.0,10.8")
     args = ap.parse_args()
 
-    audio = synth_audio(args.duration, seed=args.seed)
+    if args.synth or not args.music or not os.path.exists(args.music):
+        if args.music and not args.synth and not os.path.exists(args.music):
+            print("morceau introuvable (%s) -> bande-son de synthese" % args.music, flush=True)
+        audio = synth_audio(args.duration, seed=args.seed)
+    else:
+        audio = load_music(args.music, args.duration, args.music_start, seed=args.seed)
+        print("morceau %s  extrait a %.2f s  battement %.4f s (%.1f BPM)  %d coups detectes"
+              % (args.music, args.music_start, audio["beat"], 60.0 / audio["beat"],
+                 len(audio["events"])), flush=True)
 
     global _R
     _R = Renderer(args.width, args.height, args.fps, args.duration, audio,
@@ -1502,6 +1518,159 @@ def main():
     print("\n%s  (%.1f s, %dx%d @ %dfps)" % (args.out, args.duration, args.width,
                                              args.height, args.fps))
 
+
+
+# ==========================================================================
+#  Morceau existant : chargement, analyse de la batterie, montage
+#  L'image reste pilotee par le son — les pads suivent donc les vrais coups.
+# ==========================================================================
+
+def _decode(path, start, duration, sr=SR):
+    """Decode un extrait en stereo flottant (recherche precise a l'echantillon)."""
+    out = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", path, "-ss", "%.6f" % start,
+         "-t", "%.6f" % duration, "-ac", "2", "-ar", str(sr), "-f", "f32le", "-"],
+        stdout=subprocess.PIPE, check=True).stdout
+    st = np.frombuffer(out, dtype="<f4").astype(np.float64).reshape(-1, 2)
+    n = int(duration * sr) + 1
+    if len(st) < n:
+        st = np.vstack([st, np.zeros((n - len(st), 2))])
+    return st[:n]
+
+
+def _frames(x, sr, hop=256, win=1024):
+    n = max(1, (len(x) - win) // hop)
+    idx = np.arange(n)[:, None] * hop + np.arange(win)[None, :]
+    S = np.abs(np.fft.rfft(x[idx] * np.hanning(win), axis=1))
+    return S, np.fft.rfftfreq(win, 1.0 / sr), sr / hop
+
+
+def _band_flux(S, freqs, lo, hi):
+    e = S[:, (freqs >= lo) & (freqs < hi)].sum(axis=1)
+    return np.maximum(np.diff(e, prepend=e[0]), 0.0)
+
+
+def _pick(flux, fps, thresh=2.0, gap=0.055):
+    """Sommets d'une courbe d'attaque -> (instant, force)."""
+    f = _lowpass(flux / (flux.std() + 1e-9), 3)
+    cand = np.where((f[1:-1] > thresh) & (f[1:-1] >= f[:-2]) & (f[1:-1] >= f[2:]))[0] + 1
+    out, last = [], -9.0
+    for i in cand:
+        t = i / fps
+        if t - last >= gap:
+            out.append((t, float(min(1.0, f[i] / (thresh * 2.6)))))
+            last = t
+    return out
+
+
+def detect_beat(mono, sr):
+    """Periode du battement, par autocorrelation de la courbe d'attaque."""
+    S, freqs, fps = _frames(mono, sr)
+    onset = sum(_band_flux(S, freqs, lo, hi) / (_band_flux(S, freqs, lo, hi).std() + 1e-9)
+                for lo, hi in ((30, 140), (160, 1200), (4000, 10000)))
+    o = onset - onset.mean()
+    ac = np.correlate(o, o, mode="full")[len(o) - 1:]
+    lags = np.arange(len(ac)) / fps
+    sel = (lags > 0.30) & (lags < 1.10)
+    i0 = int(np.where(sel)[0][0])
+    best = int(np.argmax(ac[sel])) + i0
+    # correction d'octave : sur un extrait court, l'autocorrelation attrape
+    # souvent la demi-periode. On remonte tant que le double est presque
+    # aussi fort et reste dans une plage de tempo credible.
+    for _ in range(2):
+        dbl = best * 2
+        if dbl < len(ac) and lags[dbl] < 1.10 and ac[dbl] > 0.72 * ac[best]:
+            best = dbl
+    return float(lags[best])
+
+
+def detect_hits(mono, sr):
+    """Coups de batterie par bande -> evenements de pads.
+
+    grave -> grosse caisse, medium -> caisse claire et percussions,
+    aigu -> charleston. Chaque famille garde le meme pad, pour qu'on
+    reconnaisse l'instrument a l'endroit ou il s'allume.
+    """
+    S, freqs, fps = _frames(mono, sr)
+    lag = 0.025          # la detection voit l'attaque au debut de sa fenetre
+    ev = []
+    for (lo, hi), kind, thresh, gap in (((30, 140), "kick", 2.1, 0.14),
+                                        ((160, 1200), "rim", 2.3, 0.10),
+                                        ((4000, 10000), "hat", 2.0, 0.055)):
+        for i, (t, f) in enumerate(_pick(_band_flux(S, freqs, lo, hi), fps, thresh, gap)):
+            if kind == "kick":
+                pads = (PAD_OF["kick"],) if f > 0.45 else (1,)
+            elif kind == "rim":
+                pads = (PAD_OF["rim"],) if f > 0.55 else (PAD_OF["perc"],)
+            else:
+                pads = (10, 11)[i % 2],
+            for pad in pads:
+                ev.append((t + lag, pad, max(0.30, f), DECAY_OF[kind]))
+    ev.sort()
+    return ev
+
+
+def _ramp(t, pts):
+    return np.interp(t, [p[0] for p in pts], [p[1] for p in pts])
+
+
+def load_music(path=MUSIC_PATH, duration=DUREE_REF, start=MUSIC_START, sr=SR, seed=3):
+    """Monte un extrait du morceau sur la scenographie, y ajoute les FX de
+    synthese (souffles, impact, sortie) et en extrait la batterie."""
+    tl = Timeline(duration)
+    st = _decode(path, start, duration, sr)
+    n = len(st)
+    mono_src = st.mean(axis=1)
+    beat = detect_beat(mono_src, sr)
+    events = detect_hits(mono_src, sr)
+
+    t = np.arange(n) / sr
+    g0 = tl.start("groove")
+    m0, t0, o0 = tl.start("melt"), tl.start("title"), tl.start("out")
+
+    # --- montage : le morceau est mat avant le drop, evide pendant le break
+    dull = np.stack([_lowpass(st[:, c], 42) for c in range(2)], axis=1)
+    thin = st - np.stack([_lowpass(st[:, c], 30) for c in range(2)], axis=1)
+    a_dull = _ramp(t, [(0, .80), (g0 - 0.30, .70), (g0 - 0.02, .05), (g0, 0)])[:, None]
+    a_thin = _ramp(t, [(0, 0), (m0 - 0.02, 0), (m0 + 0.10, .85), (t0 - 0.12, .85),
+                       (t0, 0)])[:, None]
+    gain = _ramp(t, [(0, .62), (g0 - 0.02, .70), (g0, 1.0), (m0, 1.0), (m0 + 0.10, .55),
+                     (t0, 1.0), (o0, 1.0), (o0 + 0.16, 0.0)])[:, None]
+    mix = (st * (1.0 - a_dull - a_thin) + dull * a_dull + thin * a_thin) * gain
+
+    # --- les FX, conserves tels quels
+    rng = np.random.default_rng(seed)
+    fx = np.zeros(n)
+
+    def add(sig, at, g=1.0):
+        i0 = max(0, int(at * sr))
+        i1 = min(n, i0 + len(sig))
+        if i1 > i0:
+            fx[i0:i1] += sig[:i1 - i0] * g
+
+    add(_whoosh(max(0.2, g0 - 0.02), sr, rng, up=True), 0.02, 1.05)     # riser d'entree
+    add(_whoosh(max(0.2, t0 - m0), sr, rng, up=True), m0, 1.15)         # riser du break
+    ti = np.arange(int(min(3.0, duration - t0) * sr)) / sr              # impact du titre
+    fi = 30.0 + 120.0 * np.exp(-ti * 9.0)
+    imp = np.sin(2 * math.pi * np.cumsum(fi) / sr) * np.exp(-ti * 1.9) * 0.80
+    imp += _lowpass(rng.standard_normal(len(ti)), 12) * np.exp(-ti * 3.5) * 0.22
+    add(imp, t0)
+    add(_whoosh(0.30, sr, rng, up=True), o0 - 0.24, 0.85)               # sortie
+    add(_whoosh(max(0.12, duration - o0), sr, rng, up=False), o0, 0.95)
+    tq = np.arange(int(min(0.35, duration - o0) * sr)) / sr
+    fq = 90.0 * np.exp(-tq * 14.0) + 26.0
+    add(np.sin(2 * math.pi * np.cumsum(fq) / sr) * np.exp(-tq * 7.0) * 0.55, o0)
+    fx *= _ramp(t, [(0, 1), (o0 + 0.20, 1), (duration, 0)])
+
+    mix += fx[:, None] * 0.95
+    mix = _tanh_limit(mix * 0.92, 1.35)
+    fade = (np.clip(t / 0.03, 0, 1) * np.clip((duration - t) / 0.10, 0, 1))[:, None]
+    mix *= fade
+    mix /= (np.max(np.abs(mix)) or 1.0) / 0.94
+
+    m = mix.mean(axis=1)
+    return {"stereo": (np.clip(mix, -1, 1) * 32767).astype("<i2"),
+            "mono": m.astype(np.float32), "events": events, "sr": sr, "beat": beat}
 
 if __name__ == "__main__":
     main()

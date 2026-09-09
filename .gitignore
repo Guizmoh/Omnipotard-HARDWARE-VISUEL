@@ -3,3 +3,8 @@ __pycache__/
 out/stills/
 # masters : regenerables a l'identique via tools/omnipotard_intro.py
 out/omnipotard_intro_1080p60.mp4
+
+# morceau source : non versionne (poids, et ce n'est pas a moi de le redistribuer)
+assets/*.mp3
+assets/*.wav
+assets/*.flac

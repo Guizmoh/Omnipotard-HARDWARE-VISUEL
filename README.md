@@ -7,20 +7,20 @@ sort, écrit d'un seul trait continu par la courbe audio.
 
 ![affiche](out/omnipotard_poster.png)
 
-## Le déroulé (9,6 s — 20 temps à 125 BPM, 1920×1080 @ 60 fps)
+## Le déroulé (9,9 s — 14 temps à 84,7 BPM, calé sur le morceau)
 
 Tout est calé sur la grille musicale : le balayage se termine **pile sur le
 drop**, et le titre apparaît **pile sur l'impact**.
 
 | temps | séquence | ce qui se passe |
 |---|---|---|
-| 0,0 – 0,96 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit de gauche à droite derrière la tête d'enregistrement |
-| 0,96 – 3,37 s | **transformation** | le clip **se déplie en MPC Live III** : chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place, de gauche à droite. La zone de mue est large — à chaque instant une bonne partie de la machine est en train de s'ouvrir |
-| 2,89 – 4,81 s | **groove dub techno** | le drop tombe **avant la fin de la mue** : la machine joue déjà (pads, bande de 16 pas, écran) pendant que son flanc droit finit de se déployer |
-| 4,81 – 5,78 s | **break** | souffle ; la machine fond dans la forme d'onde du morceau |
-| 5,78 – 8,18 s | **titre** | impact, puis un front de lecture **balaie lentement de gauche à droite** : les lettres se détachent du fil d'onde une par une, puis **HARDWARE ONLY** passe sous le nom |
-| 8,18 – 9,35 s | **maintien** | le logo repose sur le fil, qui continue de vibrer avec la musique |
-| 9,35 – 9,63 s | **extinction** | **rafales de glitch** (déchirures, datamosh, pertes de signal, décalage RVB), souffle de sortie, puis collapse cathodique |
+| 0,0 – 1,06 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit derrière la tête d'enregistrement. Le morceau joue, étouffé |
+| 1,06 – 3,19 s | **transformation** | le clip **se déplie en MPC Live III**, pendant le break du morceau — chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place |
+| 2,83 – 5,67 s | **groove** | **le drop du morceau** tombe pile ici, avant la fin de la mue : la machine joue déjà pendant que son flanc droit finit de se déployer |
+| 5,67 – 6,37 s | **break** | le morceau est évidé de ses graves et baissé, un souffle monte, la machine fond dans la forme d'onde |
+| 6,37 – 8,50 s | **titre** | impact, puis un front de lecture **balaie lentement de gauche à droite** : les lettres se détachent du fil d'onde une par une, puis **HARDWARE ONLY** passe sous le nom |
+| 8,50 – 9,56 s | **maintien** | le logo repose sur le fil, qui continue de vibrer avec la musique |
+| 9,56 – 9,92 s | **extinction** | **rafales de glitch**, souffle de sortie, puis collapse cathodique |
 
 ## L'image est pilotée par le son
 
@@ -36,8 +36,10 @@ refaire à la main :
   toute l'image et le mot est **posé dessus** : logo et onde ne font qu'un trait ;
 - le clip d'ouverture affiche l'enveloppe crête **du morceau lui-même** : on y
   voit le drop, le groove, le break, l'impact et la traîne ;
-- chaque pad s'allume sur l'évènement qui le déclenche : grosse caisse, rimshot,
-  charley, notes de basse, accords ;
+- **les pads suivent la vraie batterie du morceau** : le script détecte les
+  attaques par bande (grave → grosse caisse, medium → caisse claire et
+  percussions, aigu → charley) et chaque famille garde son pad, pour qu'on
+  reconnaisse l'instrument à l'endroit où il s'allume ;
 - la bande de 16 pas suit le pas courant du séquenceur ;
 - le fil d'onde **s'allume légèrement à chaque coup grave** (grosse caisse et
   notes de basse), avec un halo qui s'ajoute au trait ;
@@ -63,11 +65,15 @@ marquage et grille de haut-parleur en bas.
 ```bash
 pip install numpy pillow          # pillow seulement pour --stills
 sudo apt install ffmpeg
+# placer le morceau dans assets/hint.mp3 (non versionné), puis :
 python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4
 ```
 
+Le morceau n'est **pas versionné** : il faut le déposer dans `assets/`. Sans
+lui, le script bascule tout seul sur la bande-son de synthèse.
+
 Le rendu est **déterministe** (tout est graine + temps) : deux exécutions
-donnent le même fichier au bit près. Environ 1 min 55 sur 4 cœurs.
+donnent le même fichier au bit près. Environ 2 min sur 4 cœurs.
 
 ### Options utiles
 
@@ -85,6 +91,9 @@ python3 tools/omnipotard_intro.py --stills out/stills --still-times 0.6,1.9,2.85
 --duration 8        # toute la timeline se remet à l'échelle (le tempo reste dans les 80-90 BPM)
 --fps 30            # ou 24, 50…
 --crf 12            # qualité d'encodage (plus bas = plus gros)
+--music autre.mp3   # un autre morceau (le tempo et la batterie sont redétectés)
+--music-start 41.2  # où commencer l'extrait, à caler sur une barre de mesure
+--synth             # revenir à la bande-son entièrement synthétisée
 --no-audio          # image seule, mais l'animation reste pilotée par le son
 --no-curve          # supprime la courbure du tube cathodique
 --seed 12           # change le grain et les décalages de glitch
@@ -113,10 +122,13 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
   partie du tracé ondule avec la musique) ;
 - **la vitesse d'apparition des lettres** : `Renderer.title_front()` — le front
   ralentit sur la largeur du mot ; élargir le palier central espace les lettres ;
-- **la musique** : `KICKS`, `RIMS`, `HATS`, `SKANKS`, `BASSLINE` (motif de
-  16 pas), `NOTES` (la gamme), et les voix `kick()`, `chord()`, `shaker()`,
-  `rimshot()`, `bass()` dans `synth_audio()` ; l'écho à bande et la réverbe se
-  règlent dans le bloc « mixage » ;
+- **le montage du morceau** : `load_music()` — les courbes `a_dull`, `a_thin` et
+  `gain` sont l'automation (étouffé, évidé, plein) ; `MUSIC_START` choisit
+  l'extrait ;
+- **la détection de la batterie** : `detect_hits()` (seuils et écart minimum par
+  bande) et `detect_beat()` ;
+- **la musique de synthèse** (`--synth`) : `KICKS`, `RIMS`, `HATS`, `SKANKS`,
+  `BASSLINE`, `NOTES` et les voix de `synth_audio()` ;
 - **quel pad s'allume sur quoi** : `PAD_OF`, `PAD_BASS`, `PAD_SKANK` ;
 - **la machine** : `build_mpc()` — chaque organe est un `Path` étiqueté
   (`body`, `step0…step15`, `lcd`, `qlink*`, `wheel`, `strip`, `pad0…pad15`) ;
