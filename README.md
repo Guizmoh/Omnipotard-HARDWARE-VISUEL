@@ -18,7 +18,7 @@ drop**, et le titre apparaît **pile sur la mesure 4**.
 | 0,9 – 3,2 s | **balayage** | le faisceau balaie l'écran ; l'onde de l'oscillateur s'écrase et laisse derrière elle le tracé de la **MPC Live III** |
 | 3,2 – 8,0 s | **groove dub** | la machine joue : pads, bande de 16 pas, Q-Links, touch strip et écran bougent **sur les évènements réels de la bande-son** |
 | 8,0 – 9,6 s | **dissolution** | break : la machine fond dans la forme d'onde du morceau |
-| 9,6 – 11,2 s | **titre** | impact, puis la courbe audio **écrit OMNIPOTARD d'un seul trait**, entre-t-elle et ressort en onde de part et d'autre du mot |
+| 9,6 – 11,2 s | **titre** | impact, puis un front de lecture **balaie de gauche à droite** : l'onde s'efface derrière lui et chaque lettre s'en détache, l'une après l'autre |
 | 11,2 – 12,4 s | **maintien** | le nom reste dans la courbe, vibrant avec la musique |
 | 12,4 – 12,8 s | **extinction** | collapse cathodique : l'image se referme sur une ligne puis un point |
 
@@ -30,7 +30,8 @@ sert ensuite de **source d'animation** — il n'y a aucune synchronisation à
 refaire à la main :
 
 - la grande courbe **est** la forme d'onde du morceau (avec calibre automatique,
-  comme un vrai oscilloscope) ;
+  comme un vrai oscilloscope) — et c'est d'elle que le logo sort : chaque point
+  d'une lettre quitte la courbe au moment où le front le dépasse ;
 - chaque pad s'allume sur l'évènement qui le déclenche : grosse caisse, rimshot,
   charley, notes de basse, accords ;
 - la bande de 16 pas suit le pas courant du séquenceur ;
@@ -87,6 +88,8 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 - **la place du mot dans la courbe** : `TITLE_H`, `CURVE_AMP` (amplitude de
   l'onde), `CURVE_WIN` (base de temps affichée), `MOD_OF` (à quel point chaque
   partie du tracé ondule avec la musique) ;
+- **la vitesse d'apparition des lettres** : `Renderer.title_front()` — le front
+  ralentit sur la largeur du mot ; élargir le palier central espace les lettres ;
 - **la musique** : `KICKS`, `RIMS`, `HATS`, `PERCS`, `SKANKS`, `BASSLINE` (motif
   de 16 pas), `NOTES` (la gamme), et les voix `kick()`, `rim()`, `skank()`,
   `bass()` dans `synth_audio()` ;
@@ -103,7 +106,7 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 | `out/omnipotard_intro_1080p60_web.mp4` | version légère — partage, réseaux, prévisualisation |
 | `out/omnipotard_poster.png` | image fixe du titre (vignette) |
 | `out/omnipotard_intro_1080p60_hq.mp4` | qualité montage : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60_hq.mp4 --crf 20` |
-| `out/omnipotard_intro_1080p60.mp4` | master : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 16` |
+| `out/omnipotard_intro_1080p60.mp4` | master sans compromis : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 16` |
 
 Les deux masters ne sont **pas versionnés** (poids) : le rendu étant déterministe,
 les commandes ci-dessus les reproduisent à l'identique en ~3 min.

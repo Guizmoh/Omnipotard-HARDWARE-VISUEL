@@ -242,8 +242,21 @@ def text_paths(txt, height, x0, y0, step=STEP, center=True, tag="txt"):
 #  grille 4x4 en bas a droite, touch strip vertical le long des pads.
 # ==========================================================================
 
-PAD_X0, PAD_Y0, PAD_SZ, PAD_GAP = 0.22, -0.700, 0.170, 0.0433
-STEP_X0, STEP_Y0, STEP_W, STEP_H, STEP_GAP = -1.02, 0.600, 0.1013, 0.080, 0.0275
+# Disposition (unites = demi-hauteur d'image). La machine occupe presque toute
+# la largeur du cadre : les pads sont gros et biseautes, l'ecran large, la
+# molette franche — c'est ce trio qui fait lire "MPC" au premier coup d'oeil.
+BODY = (-1.253, -0.853, 1.253, 0.853)
+BODY_IN = (-1.188, -0.788, 1.188, 0.788)
+SCREEN = (-1.123, -0.022, -0.130, 0.589)          # dalle tactile 7" (16/10)
+PAD_X0, PAD_Y0, PAD_SZ, PAD_GAP = 0.140, -0.756, 0.2262, 0.0303
+STEP_X0, STEP_Y0, STEP_W, STEP_H, STEP_GAP = -1.123, 0.632, 0.1142, 0.086, 0.028
+QLINK = [(0.108, 0.432), (0.324, 0.432), (0.540, 0.432), (0.756, 0.432)]
+QLINK_R = 0.0626
+QDISP_W, QDISP_Y0, QDISP_Y1 = 0.184, 0.513, 0.589
+WHEEL, WHEEL_R = (1.021, 0.432), 0.135
+STRIP = (-0.022, -0.756, 0.098, 0.236)            # touch strip vertical
+BTN_ROWS = ((-0.173, 5, 0.140), (-0.324, 5, 0.140), (-0.486, 4, 0.189))
+BTN_X0, BTN_SPAN = -1.123, 0.972
 
 
 def pad_rect(i, j):
@@ -258,72 +271,66 @@ def step_rect(k):
     return x0, STEP_Y0, x0 + STEP_W, STEP_Y0 + STEP_H
 
 
-QLINK = [(0.10, 0.245), (0.30, 0.245), (0.50, 0.245), (0.70, 0.245)]
-QLINK_R = 0.072
-WHEEL = (0.935, 0.275)
-WHEEL_R = 0.145
-SCREEN = (-1.02, -0.04, -0.06, 0.56)
-STRIP = (0.055, -0.700, 0.165, 0.110)          # touch strip vertical
-
-
 def build_mpc(step=STEP):
+    """MPC Live III : bande de 16 pas en haut, ecran 7" a gauche, Q-Links et
+    molette a droite, grille 4x4 biseautee en bas a droite, touch strip."""
     P = []
     add = P.append
 
-    # chassis
-    add(Path(rrect_pts(-1.15, -0.78, 1.15, 0.78, 0.085), closed=True, tag="body", step=step))
-    add(Path(rrect_pts(-1.10, -0.73, 1.10, 0.73, 0.065), closed=True, tag="body", step=step))
+    add(Path(rrect_pts(*BODY, r=0.081), closed=True, tag="body", step=step))
+    add(Path(rrect_pts(*BODY_IN, r=0.059), closed=True, tag="body", step=step))
 
-    # bande de 16 pas (arete haute) — nouveaute de la Live III
+    # bande de 16 boutons de step-sequenceur (arete haute)
     for k in range(16):
-        x0, y0, x1, y1 = step_rect(k)
-        add(Path(rrect_pts(x0, y0, x1, y1, 0.014), closed=True, tag="step%d" % k, step=step))
+        add(Path(rrect_pts(*step_rect(k), r=0.014), closed=True, tag="step%d" % k, step=step))
 
-    # ecran tactile 7" (16/10)
+    # ecran + cadre
     sx0, sy0, sx1, sy1 = SCREEN
-    add(Path(rrect_pts(sx0, sy0, sx1, sy1, 0.022), closed=True, tag="lcd", step=step))
-    add(Path(rrect_pts(sx0 + 0.028, sy0 + 0.028, sx1 - 0.028, sy1 - 0.028, 0.014),
+    add(Path(rrect_pts(sx0, sy0, sx1, sy1, 0.020), closed=True, tag="lcd", step=step))
+    add(Path(rrect_pts(sx0 + 0.030, sy0 + 0.030, sx1 - 0.030, sy1 - 0.030, 0.012),
              closed=True, tag="lcd", step=step))
-    add(Path([(sx0 + 0.028, sy1 - 0.115), (sx1 - 0.028, sy1 - 0.115)], tag="lcd", step=step))
+    add(Path([(sx0 + 0.030, sy1 - 0.128), (sx1 - 0.030, sy1 - 0.128)], tag="lcd", step=step))
 
-    # Q-Links + bandeaux d'affichage
+    # Q-Links et leurs bandeaux
     for k, (cx, cy) in enumerate(QLINK):
         add(Path(circle_pts(cx, cy, QLINK_R), closed=True, tag="qlink%d" % k, step=step))
-        add(Path(rrect_pts(cx - 0.093, cy + 0.135, cx + 0.093, cy + 0.215, 0.012),
+        add(Path(circle_pts(cx, cy, QLINK_R * 0.30), closed=True, tag="qlink%d" % k, step=step))
+        add(Path(rrect_pts(cx - QDISP_W * 0.5, QDISP_Y0, cx + QDISP_W * 0.5, QDISP_Y1, 0.011),
                  closed=True, tag="qdisp%d" % k, step=step))
 
     # molette encastree
     add(Path(circle_pts(WHEEL[0], WHEEL[1], WHEEL_R), closed=True, tag="wheel", step=step))
-    add(Path(circle_pts(WHEEL[0], WHEEL[1], WHEEL_R * 0.42), closed=True, tag="wheel", step=step))
+    add(Path(circle_pts(WHEEL[0], WHEEL[1], WHEEL_R * 0.72), closed=True, tag="wheel", step=step))
+    add(Path(circle_pts(WHEEL[0], WHEEL[1], WHEEL_R * 0.30), closed=True, tag="wheel", step=step))
 
     # touch strip
-    add(Path(rrect_pts(STRIP[0], STRIP[1], STRIP[2], STRIP[3], 0.045), closed=True,
-             tag="strip", step=step))
+    add(Path(rrect_pts(*STRIP, r=0.048), closed=True, tag="strip", step=step))
 
-    # grille 4x4
+    # 16 pads : contour + biseau interieur (c'est ce relief qui fait la MPC)
     for i in range(4):
         for j in range(4):
             x0, y0, x1, y1 = pad_rect(i, j)
-            add(Path(rrect_pts(x0, y0, x1, y1, 0.028), closed=True,
-                     tag="pad%d" % (i * 4 + j), step=step))
+            k = i * 4 + j
+            add(Path(rrect_pts(x0, y0, x1, y1, 0.034), closed=True, tag="pad%d" % k, step=step))
+            add(Path(rrect_pts(x0 + 0.024, y0 + 0.024, x1 - 0.024, y1 - 0.024, 0.024),
+                     closed=True, tag="pad%d" % k, step=step))
 
-    # rangees de touches sous l'ecran
-    for row, (yy, n, w) in enumerate(((-0.20, 5, 0.155), (-0.36, 5, 0.155), (-0.52, 4, 0.200))):
-        gap = (0.92 - n * w) / (n - 1.0)
-        for k in range(n):
-            x0 = -1.02 + k * (w + gap)
-            add(Path(rrect_pts(x0, yy, x0 + w, yy + 0.092, 0.018), closed=True,
-                     tag="btn%d" % (row * 5 + k), step=step))
+    # touches et transport sous l'ecran
+    for row, (yy, nb, w) in enumerate(BTN_ROWS):
+        gap = (BTN_SPAN - nb * w) / (nb - 1.0)
+        for k in range(nb):
+            x0 = BTN_X0 + k * (w + gap)
+            add(Path(rrect_pts(x0, yy, x0 + w, yy + (0.086 if row < 2 else 0.096), 0.016),
+                     closed=True, tag="btn%d" % (row * 5 + k), step=step))
 
-    # marquage
-    P += text_paths("MPC LIVE", 0.082, -1.02, -0.700, step=step, center=False, tag="logo")
+    P += text_paths("MPC LIVE", 0.097, BTN_X0, -0.713, step=step, center=False, tag="logo")
     return P
 
 
-def pad_fill(k, nlines=7):
+def pad_fill(k, nlines=8):
     x0, y0, x1, y1 = pad_rect(k // 4, k % 4)
-    m = 0.024
-    return np.vstack([np.stack([np.linspace(x0 + m, x1 - m, 52), np.full(52, y)], axis=1)
+    m = 0.040
+    return np.vstack([np.stack([np.linspace(x0 + m, x1 - m, 56), np.full(56, y)], axis=1)
                       for y in np.linspace(y0 + m, y1 - m, nlines)])
 
 
@@ -863,17 +870,21 @@ class Renderer:
         out[:, 0] = P[:, 0] + 0.05 * k * np.sin(P[:, 1] * 9.0 + t * 3.0)
         return out
 
-    def _wave_line(self, beam, t, collapse, alpha, thick=True):
+    def _wave_line(self, beam, t, collapse, alpha, xf=None, thick=True):
+        """La courbe du morceau. Passe le front `xf` : elle s'efface derriere."""
         if alpha <= 0.01:
             return
         xs = np.linspace(-1.88, 1.88, 2600)
+        a = np.full(len(xs), float(alpha))
+        if xf is not None:
+            a *= smoothstep(xf - 0.16, xf + 0.02, xs)
         P = np.stack([xs, self.wave_y(xs, t)], axis=1)
         px, py = self.to_px(P, collapse)
-        beam.add(px, py, 0.85 * alpha)
+        beam.add(px, py, 0.85 * a)
         if thick:
             for dy in (0.0035, -0.0035):
                 px, py = self.to_px(P + np.array([0.0, dy]), collapse)
-                beam.add(px, py, 0.35 * alpha)
+                beam.add(px, py, 0.35 * a)
 
     def _machine(self, beam, t, collapse, sweep_x, melt, rng, shake):
         """La MPC Live III : trace revele par le balayage, organes pilotes par le son."""
@@ -940,19 +951,21 @@ class Renderer:
             v = np.clip(0.18 + 0.62 * (e_low if k % 2 == 0 else e_high)
                         + 0.20 * math.sin(t * 1.7 + k), 0.0, 1.0)
             a = math.radians(225.0 - 270.0 * v)
-            P, _, _ = resample([(cx, cy), (cx + QLINK_R * 0.82 * math.cos(a),
-                                           cy + QLINK_R * 0.82 * math.sin(a))])
+            P, _, _ = resample([(cx + QLINK_R * 0.36 * math.cos(a),
+                                 cy + QLINK_R * 0.36 * math.sin(a)),
+                                (cx + QLINK_R * 0.86 * math.cos(a),
+                                 cy + QLINK_R * 0.86 * math.sin(a))])
             self._dyn(beam, P, 1.15, collapse, melt, t)
-            bx0, by0 = cx - 0.093, cy + 0.135
-            self._dyn(beam, rect_fill(bx0 + 0.006, by0 + 0.006,
-                                      bx0 + 0.006 + 0.174 * v, by0 + 0.074, 3),
+            bx0 = cx - QDISP_W * 0.5 + 0.008
+            self._dyn(beam, rect_fill(bx0, QDISP_Y0 + 0.008,
+                                      bx0 + (QDISP_W - 0.016) * v, QDISP_Y1 - 0.008, 3),
                       0.75, collapse, melt, t)
 
         # touch strip : curseur lumineux
         if STRIP[0] <= sweep_x:
             sy = STRIP[1] + (STRIP[3] - STRIP[1]) * np.clip(0.12 + 0.8 * e_high, 0, 1)
-            self._dyn(beam, rect_fill(STRIP[0] + 0.012, sy - 0.022,
-                                      STRIP[2] - 0.012, sy + 0.022, 4),
+            self._dyn(beam, rect_fill(STRIP[0] + 0.014, sy - 0.026,
+                                      STRIP[2] - 0.014, sy + 0.026, 4),
                       0.85, collapse, melt, t)
 
         # ecran : forme d'onde du morceau + niveaux
@@ -976,30 +989,52 @@ class Renderer:
                     P, _, _ = resample([(bx, base), (bx, base + 0.16 * v)])
                     self._dyn(beam, P, 0.8, collapse, melt, t)
 
+    def title_front(self, t):
+        """Position du front qui balaie le mot, de gauche a droite.
+
+        Il ralentit sur la largeur du mot : les lettres se detachent alors une
+        par une, au rythme des doubles-croches.
+        """
+        u = np.clip(self.tl.at("title", t), 0.0, 1.0)
+        return float(np.interp(u, (0.0, 0.19, 0.81, 1.0), (-1.95, -1.12, 1.12, 1.95)))
+
     def _draw_title(self, beam, t, collapse, u_out):
-        """Le mot, ecrit d'un seul trait par la courbe audio."""
-        tl = self.tl
-        u = np.clip(tl.at("title", t), 0.0, 1.0)
-        reveal = u ** 0.85
+        """Le mot nait de la frequence : le front passe, l'onde s'efface
+        derriere lui et chaque lettre se detache de la courbe."""
+        xf = self.title_front(t)
+        wy = self.wave_y(self.tP[:, 0], t)
+
+        # chaque point quitte l'onde quand le front le depasse
+        k = np.clip((xf - self.tP[:, 0] + 0.055) / 0.185, 0.0, 1.0)
+        k = k * k * (3.0 - 2.0 * k)
+
         P = self.tP.copy()
-        P[:, 1] = P[:, 1] + self.tmod * self.wave_y(P[:, 0], t)
-        w = self.tw.copy()
-        N = self.tN
-        th = self.tth
-        if reveal < 1.0:
-            s_max = self.tlen * reveal
-            m = self.ts <= s_max
-            if not np.any(m):
-                return
-            P, w, N, th = P[m], w[m], N[m], th[m]
-            w = w + 2.2 * np.exp(-((s_max - self.ts[m]) / 0.045) ** 2)   # tete du faisceau
-        else:
-            w = w * (1.0 + 0.10 * self.env_at(self.e_low, t))
+        P[:, 1] = wy * (1.0 - k) + (self.tP[:, 1] + self.tmod * wy) * k
+
+        w = self.tw * (0.12 + 0.88 * k)
+        w = w + 2.4 * np.exp(-((k - 0.62) / 0.26) ** 2) * (xf < 1.9)   # eclat de detachement
+        if xf >= 1.9:
+            w = self.tw * (1.0 + 0.10 * self.env_at(self.e_low, t))
         if u_out > 0:
             w = w * max(0.0, 1.0 - u_out * 1.35)
+
+        th = self.tth * k
         for off, ow in ((0.0, 1.0), (1.0, 0.60), (-1.0, 0.60)):
-            px, py = self.to_px(P + N * (off * th)[:, None], collapse)
+            px, py = self.to_px(P + self.tN * (off * th)[:, None], collapse)
             beam.add(px, py, w * ow)
+
+        # le front lui-meme : trait vertical + point chaud sur la courbe
+        if -1.94 < xf < 1.94:
+            ys = np.linspace(-0.52, 0.52, 620)
+            taper = np.exp(-(ys / 0.34) ** 4)          # plat au centre, fondu aux bords
+            for j in range(4):
+                Q = np.stack([np.full(len(ys), xf - j * 0.022), ys], axis=1)
+                px, py = self.to_px(Q, collapse)
+                beam.add(px, py, taper * (0.95 if j == 0 else 0.26) * (0.58 ** j))
+            dot = np.stack([np.full(60, xf), np.linspace(-0.02, 0.02, 60)
+                            + float(self.wave_y(np.array([xf]), t)[0])], axis=1)
+            px, py = self.to_px(dot, collapse)
+            beam.add(px, py, 2.2)
 
     # -- image -------------------------------------------------------------
 
@@ -1083,12 +1118,10 @@ class Renderer:
             a_wave = 0.24 * smoothstep(tl.start("groove"), tl.start("groove") + 0.5, t)
         if t >= tl.start("melt"):
             a_wave = 0.24 + 0.76 * smoothstep(tl.start("melt"), tl.start("melt") + 0.55, t)
-        if t >= tl.start("title"):
-            a_wave *= 1.0 - smoothstep(tl.start("title"), tl.start("title") + 0.45 *
-                                       (tl.end("title") - tl.start("title")), t)
+        xf = self.title_front(t) if t >= tl.start("title") else None
         if u_out > 0:
             a_wave *= max(0.0, 1.0 - u_out * 1.6)
-        self._wave_line(beam, t, collapse, a_wave)
+        self._wave_line(beam, t, collapse, a_wave, xf)
 
         # ---- 5. le titre, ecrit par la courbe
         if t >= tl.start("title") and u_out < 0.95:
