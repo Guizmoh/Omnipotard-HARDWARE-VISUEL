@@ -497,16 +497,43 @@ def _whoosh(dur, sr, rng, up=True):
     n = max(16, int(dur * sr))
     u = np.arange(n) / (n - 1.0)
     nz = rng.standard_normal(n)
-    bands = [_lowpass(nz, 340), _lowpass(nz, 110), _lowpass(nz, 34), _lowpass(nz, 12)]
+    # bandes decalees vers le haut, la derniere est un vrai passe-haut :
+    # on cherche de l'air, pas un grondement.
+    bands = [_lowpass(nz, 150), _lowpass(nz, 48), _lowpass(nz, 16), nz - _lowpass(nz, 4)]
     bands = [b / (b.std() + 1e-9) for b in bands]
     pos = u if up else 1.0 - u
     out = np.zeros(n)
     for i, b in enumerate(bands):
-        out += b * np.exp(-((pos - i / 3.0) / 0.34) ** 2) * (1.0 if i < 3 else 0.55)
+        out += b * np.exp(-((pos - i / 3.0) / 0.34) ** 2) * (0.72, 0.95, 1.05, 1.00)[i]
     env = pos ** 1.4
     if up:
         env = env * (1.0 - 0.85 * np.clip((u - 0.92) / 0.08, 0, 1))
     return out * env * 0.115
+
+
+def _tv_off(dur, sr, rng):
+    """Extinction d'un televiseur : claquement de l'interrupteur, sifflement de
+    ligne qui meurt en glissant, image qui se referme, coup de transformateur."""
+    n = max(64, int(dur * sr))
+    t = np.arange(n) / sr
+    out = np.zeros(n)
+
+    k = int(0.004 * sr)                                  # claquement
+    cl = rng.standard_normal(k)
+    out[:k] += (cl - _lowpass(cl, 6)) * np.exp(-np.arange(k) / sr * 900.0) * 0.65
+
+    fw = 12500.0 * np.exp(-t * 3.2) + 900.0               # sifflement de ligne
+    out += np.sin(2 * math.pi * np.cumsum(fw) / sr) * np.exp(-t * 20.0) * 0.11
+
+    fc = 2600.0 * np.exp(-t * 26.0) + 70.0                # l'image se referme
+    out += np.sin(2 * math.pi * np.cumsum(fc) / sr) * np.exp(-t * 15.0) * 0.17
+
+    nz = rng.standard_normal(n)                           # souffle qui s'ecrase
+    out += (nz - _lowpass(nz, 5)) * np.exp(-t * 24.0) * 0.09
+
+    ft = 78.0 * np.exp(-t * 16.0) + 26.0                  # coup de transfo
+    out += np.sin(2 * math.pi * np.cumsum(ft) / sr) * np.exp(-t * 9.0) * 0.44
+    return out
 
 
 def _reverb_ir(sr, dur=2.6, decay=1.15, seed=5):
@@ -1712,7 +1739,7 @@ def load_music(path=MUSIC_PATH, duration=DUREE_REF, start=MUSIC_START, sr=SR, se
     a_thin = _ramp(t, [(0, 0), (m0 - 0.02, 0), (m0 + 0.10, .85), (t0 - 0.12, .85),
                        (t0, 0)])[:, None]
     gain = _ramp(t, [(0, .72), (g0 - 0.60, .80), (g0 - 0.02, .90), (g0, 1.0),
-                     (m0, 1.0), (m0 + 0.10, .55),
+                     (m0, 1.0), (m0 + 0.10, .66),
                      (t0, 1.0), (o0, 1.0), (o0 + 0.16, 0.0)])[:, None]
     mix = (st * (1.0 - a_dull - a_thin) + dull * a_dull + thin * a_thin) * gain
 
@@ -1727,19 +1754,18 @@ def load_music(path=MUSIC_PATH, duration=DUREE_REF, start=MUSIC_START, sr=SR, se
             fx[i0:i1] += sig[:i1 - i0] * g
 
     add(_whoosh(max(0.2, g0 - 0.02), sr, rng, up=True), 0.02, 1.05)     # riser d'entree
-    add(_whoosh(max(0.2, t0 - m0), sr, rng, up=True), m0, 1.15)         # riser du break
+    add(_whoosh(max(0.2, t0 - m0), sr, rng, up=True), m0, 0.17)         # entree dans
+    #                                          l'ecran : le souffle passe a 15 %
     ti = np.arange(int(min(3.0, duration - t0) * sr)) / sr              # impact du titre
     fi = 30.0 + 120.0 * np.exp(-ti * 9.0)
     imp = np.sin(2 * math.pi * np.cumsum(fi) / sr) * np.exp(-ti * 1.9) * 0.80
     imp += _lowpass(rng.standard_normal(len(ti)), 12) * np.exp(-ti * 3.5) * 0.22
     add(imp, t0)
-    add(_whoosh(0.30, sr, rng, up=True), o0 - 0.24, 0.85)               # sortie
-    add(_whoosh(max(0.12, duration - o0), sr, rng, up=False), o0, 0.95)
-    tq = np.arange(int(min(0.35, duration - o0) * sr)) / sr
-    fq = 90.0 * np.exp(-tq * 14.0) + 26.0
-    add(np.sin(2 * math.pi * np.cumsum(fq) / sr) * np.exp(-tq * 7.0) * 0.55, o0)
-    fx *= _ramp(t, [(0, 1), (o0 + 0.20, 1), (duration, 0)])
+    add(_tv_off(max(0.20, duration - o0), sr, rng), o0, 1.0)            # extinction
+    fx *= _ramp(t, [(0, 1), (duration - 0.04, 1), (duration, 0)])
 
+    # un peu de reverbe sur les FX seuls : c'est ce qui les rend aeriens
+    fx = fx + _fft_conv(fx, _reverb_ir(sr, dur=2.4, decay=1.2)) * 0.55
     mix += fx[:, None] * 0.74
     mix = _tanh_limit(mix * 0.92, 1.35)
     fade = (np.clip(t / 0.03, 0, 1) * np.clip((duration - t) / 0.10, 0, 1))[:, None]

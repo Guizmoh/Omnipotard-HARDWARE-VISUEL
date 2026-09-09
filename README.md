@@ -155,8 +155,10 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
   ponctuels, `Renderer.glitch_at()` pour les rafales de l'extinction ;
 - **le clip d'ouverture** : `CLIP`, `WAVE_YMAX`, `DAW_COLS` et
   `Renderer._daw_clip()` ;
-- **les souffles** : `_whoosh()` (montant ou descendant) — bruit filtré seul,
-  sans composante tonale.
+- **les souffles** : `_whoosh()` — quatre bandes de bruit dont la dernière est
+  un vrai passe-haut, sans composante tonale ; une réverbe leur est appliquée à
+  part, c'est elle qui les rend aériens ;
+- **l'extinction finale** : `_tv_off()` ;
 
 ## Versions livrées
 
@@ -166,7 +168,7 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 | `omnipotard_dawless.mp4` | « DAWLESS MUSIC » sous le logo |
 | `omnipotard_bleu_fond.mp4` | fond bleu travaillé par la texture cathodique |
 | `omnipotard_rouge_orange.mp4` | tracé orange, halo rouge |
-| `omnipotard_bleu.mp4` | tracé bleu |
+| `omnipotard_bleu.mp4` | tracé bleu — la version demandée en dernier |
 
 Les options se combinent : `--palette orange --subtitle "DAWLESS MUSIC"`.
 
