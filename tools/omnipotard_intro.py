@@ -45,7 +45,7 @@ PALETTES = {
 }
 
 SR = 48000
-DUREE_REF = 10.5                 # 15 temps a 85,2 BPM (le tempo du morceau)
+DUREE_REF = 11.5                 # 15 temps + 1s de maintien sur le logo
 MUSIC_PATH = "assets/hint.mp3"   # morceau utilise ; --music pour en changer
 MUSIC_START = 0.0                # tout debut du morceau
 # 19.8209 : l'autre point d'accroche essaye — musique, break d'une seconde,
@@ -520,19 +520,19 @@ def _tv_off(dur, sr, rng):
 
     k = int(0.004 * sr)                                  # claquement
     cl = rng.standard_normal(k)
-    out[:k] += (cl - _lowpass(cl, 6)) * np.exp(-np.arange(k) / sr * 900.0) * 0.65
+    out[:k] += (cl - _lowpass(cl, 6)) * np.exp(-np.arange(k) / sr * 900.0) * 0.46
 
     fw = 12500.0 * np.exp(-t * 3.2) + 900.0               # sifflement de ligne
     out += np.sin(2 * math.pi * np.cumsum(fw) / sr) * np.exp(-t * 20.0) * 0.11
 
     fc = 2600.0 * np.exp(-t * 26.0) + 70.0                # l'image se referme
-    out += np.sin(2 * math.pi * np.cumsum(fc) / sr) * np.exp(-t * 15.0) * 0.17
+    out += np.sin(2 * math.pi * np.cumsum(fc) / sr) * np.exp(-t * 15.0) * 0.13
 
     nz = rng.standard_normal(n)                           # souffle qui s'ecrase
     out += (nz - _lowpass(nz, 5)) * np.exp(-t * 24.0) * 0.09
 
     ft = 78.0 * np.exp(-t * 16.0) + 26.0                  # coup de transfo
-    out += np.sin(2 * math.pi * np.cumsum(ft) / sr) * np.exp(-t * 9.0) * 0.44
+    out += np.sin(2 * math.pi * np.cumsum(ft) / sr) * np.exp(-t * 9.0) * 0.30
     return out
 
 
@@ -744,8 +744,8 @@ class Timeline:
         ("groove", 2.816, 5.632),   # le drop — une mesure pleine de groove
         ("zoom", 5.632, 6.336),     # la camera entre dans l'ecran de la machine
         ("title", 6.336, 9.152),    # quatre temps : le balayage prend son temps
-        ("hold", 9.152, 10.208),
-        ("out", 10.208, 10.500),
+        ("hold", 9.152, 11.208),    # +1s : le logo reste plus longtemps
+        ("out", 11.208, 11.500),
     ]
 
     def __init__(self, duration):
@@ -765,7 +765,7 @@ class Timeline:
 
 
 GLITCHES = [(2.79, .09), (4.22, .05), (5.61, .10), (6.31, .11),
-            (9.13, .06), (9.70, .05), (10.05, .06)]
+            (9.13, .06), (10.70, .05), (11.05, .06)]
 
 
 # ==========================================================================
@@ -879,7 +879,7 @@ class Renderer:
                 g = max(g, 1.0 - (t - gt) / gd)
         u = self.tl.at("out", t)
         if 0.0 <= u < 0.80:
-            burst = 0.62 + 0.38 * math.sin(u * 31.0) ** 2
+            burst = 0.40 + 0.24 * math.sin(u * 31.0) ** 2
             g = max(g, burst * (1.0 - 0.55 * smoothstep(0.42, 0.80, u)))
         return g
 
@@ -1386,8 +1386,8 @@ class Renderer:
         collapse = 1.0
         u_out = tl.at("out", t)
         if u_out > 0.30:
-            collapse = max(0.006,
-                           (1.0 - ease_in_out(min(1.0, (u_out - 0.30) / 0.42))) ** 1.6)
+            collapse = max(0.028,
+                           (1.0 - ease_in_out(min(1.0, (u_out - 0.30) / 0.42))) ** 1.3)
 
         shake = self.glitch_at(t)
 
@@ -1506,7 +1506,7 @@ class Renderer:
             if 0.66 < u_out < 0.80:
                 cy, cx = H // 2, W // 2
                 r = max(2, int(H * 0.006))
-                img[cy - r:cy + r, cx - int(r * 2.5):cx + int(r * 2.5)] += 1.4
+                img[cy - r:cy + r, cx - int(r * 2.5):cx + int(r * 2.5)] += 0.9
 
         np.clip(img, 0.0, 1.0, out=img)
         return ((img ** (1.0 / 1.06)) * 255.0 + 0.5).astype(np.uint8)
@@ -1728,6 +1728,7 @@ def load_music(path=MUSIC_PATH, duration=DUREE_REF, start=MUSIC_START, sr=SR, se
 
     t = np.arange(n) / sr
     g0 = tl.start("groove")
+    sw0, sw1 = tl.start("sweep"), tl.end("sweep")
     m0, t0, o0 = tl.start("zoom"), tl.start("title"), tl.start("out")
 
     # --- montage : le morceau est mat avant le drop, evide pendant le break
@@ -1753,19 +1754,22 @@ def load_music(path=MUSIC_PATH, duration=DUREE_REF, start=MUSIC_START, sr=SR, se
         if i1 > i0:
             fx[i0:i1] += sig[:i1 - i0] * g
 
-    add(_whoosh(max(0.2, g0 - 0.02), sr, rng, up=True), 0.02, 1.05)     # riser d'entree
+    add(_whoosh(sw1 - sw0, sr, rng, up=True), sw0, 0.55)     # souffle pendant
+    #                                       que la machine apparait (fenetre sweep)
     add(_whoosh(max(0.2, t0 - m0), sr, rng, up=True), m0, 0.17)         # entree dans
     #                                          l'ecran : le souffle passe a 15 %
     ti = np.arange(int(min(3.0, duration - t0) * sr)) / sr              # impact du titre
-    fi = 30.0 + 120.0 * np.exp(-ti * 9.0)
-    imp = np.sin(2 * math.pi * np.cumsum(fi) / sr) * np.exp(-ti * 1.9) * 0.80
-    imp += _lowpass(rng.standard_normal(len(ti)), 12) * np.exp(-ti * 3.5) * 0.22
+    fi = 30.0 + 120.0 * np.exp(-ti * 9.0)                                   # (bass tres attenuee)
+    imp = np.sin(2 * math.pi * np.cumsum(fi) / sr) * np.exp(-ti * 1.9) * 0.22
+    imp += _lowpass(rng.standard_normal(len(ti)), 12) * np.exp(-ti * 3.5) * 0.07
     add(imp, t0)
+    add(_whoosh(0.55, sr, rng, up=True), t0 - 0.55, 0.13)  # tres leger souffle qui
+    #                                             atterrit pile quand le titre arrive
     add(_tv_off(max(0.20, duration - o0), sr, rng), o0, 1.0)            # extinction
     fx *= _ramp(t, [(0, 1), (duration - 0.04, 1), (duration, 0)])
 
     # un peu de reverbe sur les FX seuls : c'est ce qui les rend aeriens
-    fx = fx + _fft_conv(fx, _reverb_ir(sr, dur=2.4, decay=1.2)) * 0.55
+    fx = fx + _fft_conv(fx, _reverb_ir(sr, dur=2.0, decay=1.0)) * 0.28
     mix += fx[:, None] * 0.74
     mix = _tanh_limit(mix * 0.92, 1.35)
     fade = (np.clip(t / 0.03, 0, 1) * np.clip((duration - t) / 0.10, 0, 1))[:, None]

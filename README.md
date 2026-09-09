@@ -7,7 +7,7 @@ sort, écrit d'un seul trait continu par la courbe audio.
 
 ![affiche](out/omnipotard_poster.png)
 
-## Le déroulé (10,5 s — 15 temps à 85,2 BPM, calé sur le morceau)
+## Le déroulé (11,5 s — 15 temps + 1 s de maintien, calé sur le morceau)
 
 Tout est calé sur la grille musicale : le balayage se termine **pile sur le
 drop**, et le titre apparaît **pile sur l'impact**.
@@ -19,8 +19,8 @@ drop**, et le titre apparaît **pile sur l'impact**.
 | 2,82 – 5,63 s | **groove** | le morceau s'ouvre en grand, avant la fin de la mue : la machine joue déjà pendant que son flanc droit finit de se déployer |
 | 5,63 – 6,34 s | **entrée dans l'écran** | la caméra **plonge dans la dalle 7" de la MPC**. La machine ne se dissout plus : on y entre. Le morceau est évidé de ses graves, un souffle monte |
 | 6,34 – 9,15 s | **titre** | **sur l'écran de la machine** : impact, puis un front de lecture balaie de gauche à droite pendant quatre temps — une lettre par double-croche — et les lettres se détachent du fil d'onde une par une, puis la ligne de bas de casse passe sous le nom |
-| 9,15 – 10,21 s | **maintien** | le logo repose sur le fil, dans la dalle, encadré par le boîtier — pads à gauche, Q-Links à droite |
-| 10,21 – 10,50 s | **extinction** | **rafales de glitch**, souffle de sortie, puis collapse cathodique |
+| 9,15 – 11,21 s | **maintien** | le logo repose sur le fil, dans la dalle, encadré par le boîtier — pads à gauche, Q-Links à droite (+1 s par rapport aux versions précédentes) |
+| 11,21 – 11,50 s | **extinction** | rafales de glitch adoucies, souffle de sortie, puis collapse cathodique — moins abrupte que la version précédente |
 
 Le zoom de caméra et l'échelle de la composition sont inverses l'un de l'autre
 (`SCR_S × CAM_Z = 1`) : le logo garde exactement la même taille à l'image
@@ -157,8 +157,13 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
   `Renderer._daw_clip()` ;
 - **les souffles** : `_whoosh()` — quatre bandes de bruit dont la dernière est
   un vrai passe-haut, sans composante tonale ; une réverbe leur est appliquée à
-  part, c'est elle qui les rend aériens ;
-- **l'extinction finale** : `_tv_off()` ;
+  part (dosée bas, pour rester discrète) — c'est elle qui les rend aériens ;
+  le souffle qui accompagne la matérialisation de la machine ne joue que
+  pendant la fenêtre `sweep` ;
+- **l'impact du titre** : très en retrait, avec un souffle léger qui atterrit
+  à sa place dans `load_music()` ;
+- **l'extinction finale** : `_tv_off()` (audio) et le burst de `glitch_at()` +
+  la formule de `collapse` dans `intensity()` (visuel) ;
 
 ## Versions livrées
 
