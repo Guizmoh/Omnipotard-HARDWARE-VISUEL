@@ -207,6 +207,8 @@ GLYPHS = {
     "V": (0.64, [[(0, 1), (.32, 0), (.64, 1)]]),
     "H": (0.62, [[(0, 0), (0, 1)], [(.62, 0), (.62, 1)], [(0, .50), (.62, .50)]]),
     "W": (0.86, [[(0, 1), (.19, 0), (.43, .64), (.67, 0), (.86, 1)]]),
+    "0": (0.46, [[(0, .18), (.14, 0), (.32, 0), (.46, .18), (.46, .82), (.32, 1), (.14, 1), (0, .82), (0, .18)]]),
+    "1": (0.26, [[(0, .80), (.13, 1), (.13, 0)], [(0, 0), (.26, 0)]]),
     "S": (0.60, [[(.60, .84), (.44, 1), (.16, 1), (0, .84), (0, .66), (.16, .50), (.44, .50), (.60, .34), (.60, .16), (.44, 0), (.16, 0), (0, .16)]]),
     "U": (0.62, [[(0, 1), (0, .18), (.18, 0), (.44, 0), (.62, .18), (.62, 1)]]),
     "Y": (0.62, [[(0, 1), (.31, .55), (.62, 1)], [(.31, .55), (.31, 0)]]),
@@ -457,23 +459,24 @@ def _tape_echo(x, delay, sr, fb=0.52, taps=7, damp=9):
 
 
 def _whoosh(dur, sr, rng, up=True):
-    """Woosh : quatre bandes de bruit dont le centre spectral monte (ou descend),
-    plus une composante tonale. Sert de riser et de sortie."""
+    """Souffle : bruit filtre dont le centre spectral s'ouvre (ou se referme).
+
+    Pas de composante tonale et pas de bande criarde : on veut de l'air, pas
+    un effet de transition tape-a-l'oeil.
+    """
     n = max(16, int(dur * sr))
     u = np.arange(n) / (n - 1.0)
     nz = rng.standard_normal(n)
-    bands = [_lowpass(nz, 300), _lowpass(nz, 80), _lowpass(nz, 20), nz - _lowpass(nz, 5)]
-    bands = [b / (b.std() + 1e-9) for b in bands]   # meme niveau pour chaque bande
+    bands = [_lowpass(nz, 340), _lowpass(nz, 110), _lowpass(nz, 34), _lowpass(nz, 12)]
+    bands = [b / (b.std() + 1e-9) for b in bands]
     pos = u if up else 1.0 - u
     out = np.zeros(n)
     for i, b in enumerate(bands):
-        out += b * np.exp(-((pos - i / 3.0) / 0.30) ** 2)
-    f = 140.0 * (2600.0 / 140.0) ** pos
-    out += np.sin(2 * math.pi * np.cumsum(f) / sr) * 0.55 * pos ** 2
-    env = pos ** 1.7
+        out += b * np.exp(-((pos - i / 3.0) / 0.34) ** 2) * (1.0 if i < 3 else 0.55)
+    env = pos ** 1.4
     if up:
-        env = env * (1.0 - 0.90 * np.clip((u - 0.94) / 0.06, 0, 1))
-    return out * env * 0.26
+        env = env * (1.0 - 0.85 * np.clip((u - 0.92) / 0.08, 0, 1))
+    return out * env * 0.115
 
 
 def _reverb_ir(sr, dur=2.6, decay=1.15, seed=5):
@@ -590,8 +593,8 @@ def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
 
     # ------------------------------------------- 1. riser woosh d'ouverture
     g0, g1 = tl.start("groove"), tl.end("groove")
-    add(dry, _whoosh(g0 - 0.02, sr, rng, up=True), 0.02, 1.15)
-    add(rev, _whoosh(g0 - 0.02, sr, rng, up=True), 0.02, 0.45)
+    add(dry, _whoosh(g0 - 0.02, sr, rng, up=True), 0.02, 0.85)
+    add(rev, _whoosh(g0 - 0.02, sr, rng, up=True), 0.02, 0.30)
 
     # ------------------------------------------------- 2. groove dub
     n_steps = max(4, int(round((g1 - g0) / six)))
@@ -617,8 +620,8 @@ def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
 
     # --------------------------------- 3. break : deuxieme woosh vers le titre
     b0, t0 = tl.start("melt"), tl.start("title")
-    add(dry, _whoosh(t0 - b0, sr, rng, up=True), b0, 1.25)
-    add(rev, _whoosh(t0 - b0, sr, rng, up=True), b0, 0.55)
+    add(dry, _whoosh(t0 - b0, sr, rng, up=True), b0, 0.95)
+    add(rev, _whoosh(t0 - b0, sr, rng, up=True), b0, 0.35)
     skank(b0, sk, 0.8)                      # dernier skank jete dans l'echo
 
     # ------------------------------------------ 4. impact puis nappe ambient
@@ -645,8 +648,8 @@ def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
 
     # ------------------------------------------------- 5. sortie : woosh + coupe
     o0 = tl.start("out")
-    add(dry, _whoosh(0.30, sr, rng, up=True), o0 - 0.24, 1.1)
-    add(dry, _whoosh(max(0.12, duration - o0), sr, rng, up=False), o0, 1.2)
+    add(dry, _whoosh(0.30, sr, rng, up=True), o0 - 0.24, 0.80)
+    add(dry, _whoosh(max(0.12, duration - o0), sr, rng, up=False), o0, 0.85)
     tq = seg(min(0.35, duration - o0))
     fq = 90 * np.exp(-tq * 14) + 26
     add(dry, np.sin(2 * math.pi * np.cumsum(fq) / sr) * np.exp(-tq * 7) * 0.55, o0)
@@ -682,8 +685,8 @@ def write_wav(path, data, sr=SR):
 class Timeline:
     REF = DUREE_REF
     KEYS = [                       # cales sur les temps (0,75 s a 80 BPM)
-        ("boot", 0.00, 0.30),
-        ("sweep", 0.30, 1.50),     # se termine sur le drop (temps 2)
+        ("boot", 0.00, 0.62),      # la piste s'enregistre
+        ("sweep", 0.62, 1.50),     # se termine sur le drop (temps 2)
         ("groove", 1.50, 3.00),
         ("melt", 3.00, 3.75),      # break : woosh vers l'impact
         ("title", 3.75, 5.05),     # l'impact tombe sur le temps 5
@@ -718,6 +721,12 @@ GLITCHES = [(1.47, .07), (2.24, .05), (2.98, .08), (3.72, .09),
 TITLE_H = 0.27
 CURVE_AMP = 0.28
 CURVE_WIN = 0.070          # fenetre d'analyse affichee (s) — "base de temps"
+# clip audio facon station de travail (Audacity / Live)
+CLIP = (-1.74, -0.50, 1.74, 0.50)
+CLIP_BAR_H = 0.12
+WAVE_YMAX = 0.36
+DAW_COLS = 560
+
 SUB_TXT = "HARDWARE ONLY"
 SUB_H, SUB_Y, SUB_TRACK = 0.065, -0.300, 0.55
 MOD_OF = {ONDE: 1.0, TRAIT: 0.055, TRANSIT: 0.30}
@@ -761,6 +770,13 @@ class Renderer:
         self.e_full = env(mono, 0.030)
         self.e_low = env(low, 0.045)
         self.e_high = env(mono - low, 0.012)
+        # enveloppe crete du morceau : c'est le dessin du clip
+        edges = np.linspace(0, len(mono), DAW_COLS + 1).astype(np.int64)
+        env = np.array([np.abs(mono[a:b]).max() if b > a else 0.0
+                        for a, b in zip(edges[:-1], edges[1:])])
+        self.daw = (env / (env.max() or 1.0)) ** 0.82
+        self.daw_x = np.linspace(CLIP[0] + 0.02, CLIP[2] - 0.02, DAW_COLS)
+
         ev = audio["events"]
         self.ev_t = np.array([e[0] for e in ev], dtype=np.float64)
         self.ev_pad = np.array([e[1] for e in ev], dtype=np.int32)
@@ -935,6 +951,89 @@ class Renderer:
             for dy in (0.0035, -0.0035):
                 px, py = self.to_px(P + np.array([0.0, dy]), collapse)
                 beam.add(px, py, 0.35 * a)
+
+    def _daw_clip(self, beam, t, collapse, sweep_x, rng):
+        """Ouverture : une piste qui s'enregistre, facon station de travail.
+
+        La tete d'enregistrement remplit la forme d'onde de gauche a droite,
+        puis le balayage de l'oscilloscope efface le clip en devoilant la
+        machine — la MPC sort litteralement du morceau enregistre.
+        """
+        tl = self.tl
+        b0, b1 = tl.start("boot"), tl.end("boot")
+        x0, y0, x1, y1 = CLIP
+        rec = np.clip((t - (b0 + 0.16 * (b1 - b0))) / (0.84 * (b1 - b0)), 0.0, 1.0)
+        head = x0 + (x1 - x0) * rec
+        gone = sweep_x if t >= tl.start("sweep") else -9.0     # efface par le balayage
+        frame_a = (smoothstep(b0, b0 + 0.16 * (b1 - b0), t)
+                   * (1.0 - smoothstep(tl.start("sweep"), tl.start("sweep")
+                                       + 0.30 * (tl.end("sweep") - tl.start("sweep")), t)))
+        if frame_a <= 0.01 and rec >= 1.0 and gone > x1:
+            return
+
+        # --- cadre du clip, bandeau de titre, reglure temporelle
+        if frame_a > 0.01:
+            for pts in (rrect_pts(x0, y0, x1, y1, 0.02),
+                        rrect_pts(x0, y1, x1, y1 + CLIP_BAR_H, 0.02)):
+                P, _, _ = resample(np.vstack([pts, pts[:1]]))
+                m = P[:, 0] > gone
+                px, py = self.to_px(P[m], collapse)
+                beam.add(px, py, 0.50 * frame_a)
+            for q in text_paths("AUDIO 01", 0.075, x0 + 0.05, y1 + 0.025,
+                                center=False, tag="clip"):
+                m = q.P[:, 0] > gone
+                px, py = self.to_px(q.P[m], collapse)
+                beam.add(px, py, 0.60 * frame_a)
+            for k in range(33):
+                gx = x0 + (x1 - x0) * k / 32.0
+                if gx <= gone:
+                    continue
+                h = 0.055 if k % 4 == 0 else 0.028
+                P, _, _ = resample([(gx, y1), (gx, y1 - h)])
+                px, py = self.to_px(P, collapse)
+                beam.add(px, py, (0.55 if k % 4 == 0 else 0.32) * frame_a)
+            # temoin d'enregistrement
+            if rec < 1.0 and (math.sin(t * 22.0) > -0.2):
+                P = np.vstack([circle_pts(x1 - 0.10, y1 + 0.06, r, 60)
+                               for r in (0.010, 0.018, 0.028)])
+                px, py = self.to_px(P, collapse)
+                beam.add(px, py, 1.1 * frame_a)
+
+        # --- ligne de zero + forme d'onde
+        xs = self.daw_x
+        h = WAVE_YMAX * self.daw
+        keep = (xs <= head) & (xs > gone)
+        if not np.any(keep):
+            return
+        eat = np.clip((xs - gone) / 0.18, 0.0, 1.0)            # aspiree par le balayage
+        hh = h * eat
+        P0 = np.stack([xs[keep], np.zeros(int(keep.sum()))], axis=1)
+        px, py = self.to_px(P0, collapse)
+        beam.add(px, py, 0.42)
+
+        # remplissage en colonnes (comme les traits verticaux d'un editeur)
+        K = 220
+        u = np.linspace(-1.0, 1.0, K)
+        sel = keep & (hh > 0.004)
+        if np.any(sel):
+            hs = hh[sel]
+            X = np.repeat(xs[sel][:, None], K, axis=1).ravel()
+            Y = (hs[:, None] * u[None, :]).ravel()
+            w = np.repeat(0.62 * (2.0 * hs / K) / STEP, K)
+            px, py = self.to_px(np.stack([X, Y], axis=1), collapse)
+            beam.add(px, py, w)
+            # contours haut et bas, plus francs
+            for sgn in (1.0, -1.0):
+                px, py = self.to_px(np.stack([xs[sel], sgn * hs], axis=1), collapse)
+                beam.add(px, py, 0.55)
+
+        # --- tete d'enregistrement
+        if 0.0 < rec < 1.0:
+            ys = np.linspace(y0 - 0.03, y1 + CLIP_BAR_H, 620)
+            for j in range(3):
+                P = np.stack([np.full(len(ys), head - j * 0.018), ys], axis=1)
+                px, py = self.to_px(P, collapse)
+                beam.add(px, py, (1.25 if j == 0 else 0.30) * (0.6 ** j))
 
     def _machine(self, beam, t, collapse, sweep_x, melt, rng, shake):
         """La MPC Live III : trace revele par le balayage, organes pilotes par le son."""
@@ -1127,36 +1226,11 @@ class Renderer:
                   smoothstep(0.15, 0.6, t) * (1.0 - smoothstep(tl.start("melt"),
                                                                tl.end("melt"), t)))
 
-        # ---- 1. amorce : la trace se stabilise
-        if t < tl.start("sweep") + 0.4:
-            a = 1.0 - smoothstep(tl.start("sweep"), tl.start("sweep") + 0.35, t)
-            if a > 0.01:
-                n = 1600
-                x = np.linspace(-1.75, 1.75, n)
-                base = smoothstep(0.0, 0.45, t)
-                y = (rng.standard_normal(n) * 0.004 + 0.012 * np.sin(x * 40 + t * 30))
-                y *= 1.0 + 6.0 * (1.0 - base)
-                px, py = self.to_px(np.stack([x, y], axis=1), collapse)
-                beam.add(px, py, 1.15 * a)
-
-        # ---- 2. balayage de l'oscillateur
+        # ---- 1 et 2. le clip qui s'enregistre, puis le balayage
         u_sweep = tl.at("sweep", t)
         sweep_x = -2.10 + 4.25 * ease_in_out(np.clip(u_sweep, 0, 1)) if u_sweep > 0 else -2.10
-
-        if tl.start("boot") < t < tl.start("groove"):
-            amp = 0.50 * (1.0 - ease_out(np.clip(u_sweep, 0, 1), 1.5)) + 0.02
-            freq = 2.4 + 5.2 * np.clip(u_sweep, 0, 1)
-            xs = np.linspace(-1.88, 1.88, 2400)
-
-            def osc(tt):
-                y = amp * (np.sin(freq * math.pi * xs + tt * 7.0)
-                           + 0.32 * np.sin(freq * 2.7 * math.pi * xs - tt * 4.0))
-                return np.stack([xs, y * 0.85], axis=1)
-
-            dt = 1.0 / self.fps
-            for k in range(6):
-                px, py = self.to_px(osc(t - k * dt * 0.85), collapse)
-                beam.add(px, py, 0.46 * (0.55 ** k))
+        if t < tl.start("groove"):
+            self._daw_clip(beam, t, collapse, sweep_x, rng)
 
         # ---- 3. la machine
         melt = float(np.clip(tl.at("melt", t), 0, 1))

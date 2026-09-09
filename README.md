@@ -14,13 +14,13 @@ drop**, et le titre apparaît **pile sur l'impact**.
 
 | temps | séquence | ce qui se passe |
 |---|---|---|
-| 0,0 – 0,3 s | **amorce** | le réticule s'allume, la trace se stabilise sur la ligne de base |
-| 0,3 – 1,5 s | **balayage** | le faisceau balaie l'écran et laisse derrière lui le tracé de la **MPC Live III**, pendant qu'un **riser woosh** monte |
+| 0,0 – 0,62 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit de gauche à droite derrière la tête d'enregistrement |
+| 0,62 – 1,5 s | **balayage** | le faisceau balaie l'écran, **aspire le clip** et laisse à sa place le tracé de la **MPC Live III** — la machine sort du morceau enregistré |
 | 1,5 – 3,0 s | **groove dub** | drop : la machine joue, pads, bande de 16 pas, Q-Links, touch strip et écran bougent **sur les évènements réels de la bande-son** |
-| 3,0 – 3,75 s | **break** | deuxième woosh ; la machine fond dans la forme d'onde du morceau |
+| 3,0 – 3,75 s | **break** | deuxième souffle ; la machine fond dans la forme d'onde du morceau |
 | 3,75 – 5,05 s | **titre** | impact, puis un front de lecture **balaie de gauche à droite** : l'onde s'efface derrière lui et chaque lettre s'en détache, l'une après l'autre, puis **HARDWARE ONLY** passe sous le nom |
 | 5,05 – 5,78 s | **maintien** | le nom reste dans la courbe, vibrant avec la musique |
-| 5,78 – 6,0 s | **extinction** | **rafales de glitch** (déchirures, datamosh, pertes de signal, décalage RVB), woosh de sortie, puis collapse cathodique |
+| 5,78 – 6,0 s | **extinction** | **rafales de glitch** (déchirures, datamosh, pertes de signal, décalage RVB), souffle de sortie, puis collapse cathodique |
 
 ## L'image est pilotée par le son
 
@@ -33,6 +33,8 @@ refaire à la main :
 - la grande courbe **est** la forme d'onde du morceau (avec calibre automatique,
   comme un vrai oscilloscope) — et c'est d'elle que le logo sort : chaque point
   d'une lettre quitte la courbe au moment où le front le dépasse ;
+- le clip d'ouverture affiche l'enveloppe crête **du morceau lui-même** : on y
+  voit le drop, le groove, le break, l'impact et la traîne ;
 - chaque pad s'allume sur l'évènement qui le déclenche : grosse caisse, rimshot,
   charley, notes de basse, accords ;
 - la bande de 16 pas suit le pas courant du séquenceur ;
@@ -103,7 +105,10 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 - **le sous-titre** : `SUB_TXT`, `SUB_H`, `SUB_TRACK` ;
 - **le minutage** : `Timeline.KEYS` ; **les glitchs** : `GLITCHES` pour les coups
   ponctuels, `Renderer.glitch_at()` pour les rafales de l'extinction ;
-- **les woosh** : `_whoosh()` (montant ou descendant).
+- **le clip d'ouverture** : `CLIP`, `WAVE_YMAX`, `DAW_COLS` et
+  `Renderer._daw_clip()` ;
+- **les souffles** : `_whoosh()` (montant ou descendant) — bruit filtré seul,
+  sans composante tonale.
 
 ## Fichiers produits
 
