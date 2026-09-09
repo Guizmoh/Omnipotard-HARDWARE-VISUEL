@@ -782,7 +782,7 @@ WAVE_YMAX = 0.36
 DAW_COLS = 560
 
 SUB_TXT = "HARDWARE ONLY"
-SUB_H, SUB_Y, SUB_TRACK = 0.065, -0.175, 0.55
+SUB_H, SUB_Y, SUB_TRACK = 0.065, -0.260, 0.55   # plus bas, plus loin du logo
 WEIGHT_OF = {ONDE: 0.80, TRAIT: 1.15, TRANSIT: 0.10, LIAISON: 0.80}
 THICK_OF = {ONDE: 0.0030, TRAIT: 0.0052, TRANSIT: 0.0, LIAISON: 0.0030}
 
@@ -1016,10 +1016,6 @@ class Renderer:
             P = np.stack([np.linspace(-1.66, 1.66, 380), np.full(380, y)], axis=1)
             px, py = self.to_px(P, collapse)
             beam.add(px, py, 0.080 * alpha)
-        for P in (np.stack([np.linspace(-1.68, 1.68, 900), np.zeros(900)], axis=1),
-                  np.stack([np.zeros(560), np.linspace(-0.95, 0.95, 560)], axis=1)):
-            px, py = self.to_px(P, collapse)
-            beam.add(px, py, 0.15 * alpha)
 
     def _hud(self, beam, t, collapse, alpha):
         if alpha <= 0.01:
@@ -1358,7 +1354,7 @@ class Renderer:
         P = self.subP.copy()
         P[:, 1] = P[:, 1] + 0.030 * self.wave_y(P[:, 0], t)
         P[:, 0] = P[:, 0] + dx
-        w = 0.78 * k + 1.30 * np.exp(-((k - 0.60) / 0.30) ** 2) * (u < 1.0)
+        w = 0.40 * k + 0.55 * np.exp(-((k - 0.60) / 0.30) ** 2) * (u < 1.0)  # plus fonce
         if u_out > 0:
             w = w * max(0.0, 1.0 - u_out * 1.35)
         th = (0.0032 * k)[:, None]

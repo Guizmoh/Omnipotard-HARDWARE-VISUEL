@@ -87,7 +87,7 @@ donnent le même fichier au bit près. Environ 2 min sur 4 cœurs.
 ### Options utiles
 
 ```bash
-# 4K
+# 4K (le rendu est plus long, mais la meme luminosite qu'en 1080p)
 python3 tools/omnipotard_intro.py -W 3840 -H 2160 -o out/intro_4k.mp4
 
 # format vertical (shorts / reels) — la machine reste cadrée automatiquement
