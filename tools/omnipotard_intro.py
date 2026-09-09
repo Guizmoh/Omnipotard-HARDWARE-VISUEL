@@ -41,7 +41,9 @@ VERT_HALO = (0.10, 1.00, 0.34)   # halo legerement plus froid
 SR = 48000
 DUREE_REF = 9.916                # 14 temps a 84,7 BPM (le tempo du morceau)
 MUSIC_PATH = "assets/hint.mp3"   # morceau utilise ; --music pour en changer
-MUSIC_START = 19.8209             # le drop du morceau tombe pile sur la barre
+MUSIC_START = 0.0                # tout debut du morceau
+# 19.8209 : l'autre point d'accroche essaye — musique, break d'une seconde,
+# puis drop pile sur la barre de mesure (--music-start 19.8209).
 
 
 # ==========================================================================
@@ -164,12 +166,17 @@ def resample(pts, step=STEP, closed=False):
 
 
 class Path:
-    """Chemin discretise : points + abscisse curviligne + etiquette."""
+    """Chemin discretise : points, normales, abscisse curviligne, etiquette."""
 
-    __slots__ = ("P", "s", "tag")
+    __slots__ = ("P", "N", "s", "ph", "tag")
 
     def __init__(self, pts, closed=False, tag="", step=STEP):
         self.P, self.s, _ = resample(pts, step, closed)
+        tan = np.gradient(self.P, axis=0)
+        tan /= (np.linalg.norm(tan, axis=1, keepdims=True) + 1e-12)
+        self.N = np.stack([-tan[:, 1], tan[:, 0]], axis=1)
+        # phase stable par organe : chaque piece tremble pour son compte
+        self.ph = (sum(ord(c) for c in tag) % 97) * 0.0647
         self.tag = tag
 
 
@@ -1107,13 +1114,19 @@ class Renderer:
         pulse = 1.0 + 0.28 * e_low
         jx = shake * rng.uniform(-9, 9)
         ghost = 1.0 - smoothstep(tl.start("groove") - 0.25, tl.start("groove"), t)
+        trem = 1.0 + 0.6 * e_low + 0.5 * self.bass_hit(t)     # le trait respire
 
         half = BODY[3]
         for p in self.mpc:
             mo = self.morph_at(p.P[:, 0], sweep_x)
             if mo.max() <= 0.003:
                 continue
-            P = p.P.copy()
+            # le trait n'est jamais parfaitement stable : c'est un faisceau,
+            # pas un dessin. Il ondule doucement le long de son parcours, un
+            # peu plus fort quand le grave pousse.
+            wob = (0.0021 * np.sin(p.s * 8.5 + t * 2.4 + p.ph)
+                   + 0.0013 * np.sin(p.s * 39.0 - t * 6.8 + p.ph * 2.3)) * trem
+            P = p.P + p.N * wob[:, None]
             # au repos, chaque point est ecrase dans l'enveloppe du clip :
             # la machine se deplie hors de la forme d'onde enregistree.
             src = self.clip_env(P[:, 0]) * (P[:, 1] / half)
@@ -1572,14 +1585,14 @@ def detect_beat(mono, sr):
     ac = np.correlate(o, o, mode="full")[len(o) - 1:]
     lags = np.arange(len(ac)) / fps
     sel = (lags > 0.30) & (lags < 1.10)
-    i0 = int(np.where(sel)[0][0])
-    best = int(np.argmax(ac[sel])) + i0
-    # correction d'octave : sur un extrait court, l'autocorrelation attrape
-    # souvent la demi-periode. On remonte tant que le double est presque
-    # aussi fort et reste dans une plage de tempo credible.
-    for _ in range(2):
-        dbl = best * 2
-        if dbl < len(ac) and lags[dbl] < 1.10 and ac[dbl] > 0.72 * ac[best]:
+    # ponderation : un extrait court fait ressortir la demi-periode, alors on
+    # privilegie les tempos plausibles (autour de 100 BPM) avant de choisir.
+    pref = np.zeros_like(ac)
+    pref[sel] = np.exp(-0.5 * (np.log(lags[sel] / 0.62) / 0.55) ** 2)
+    best = int(np.argmax(ac * pref))
+    for _ in range(2):                    # et on remonte encore d'une octave
+        dbl = best * 2                    # si le double tient presque aussi bien
+        if dbl < len(ac) and lags[dbl] < 1.10 and ac[dbl] > 0.62 * ac[best]:
             best = dbl
     return float(lags[best])
 
@@ -1631,10 +1644,10 @@ def load_music(path=MUSIC_PATH, duration=DUREE_REF, start=MUSIC_START, sr=SR, se
     # --- montage : le morceau est mat avant le drop, evide pendant le break
     dull = np.stack([_lowpass(st[:, c], 42) for c in range(2)], axis=1)
     thin = st - np.stack([_lowpass(st[:, c], 30) for c in range(2)], axis=1)
-    a_dull = _ramp(t, [(0, .80), (g0 - 0.30, .70), (g0 - 0.02, .05), (g0, 0)])[:, None]
+    a_dull = _ramp(t, [(0, .88), (g0 - 0.30, .78), (g0 - 0.02, .05), (g0, 0)])[:, None]
     a_thin = _ramp(t, [(0, 0), (m0 - 0.02, 0), (m0 + 0.10, .85), (t0 - 0.12, .85),
                        (t0, 0)])[:, None]
-    gain = _ramp(t, [(0, .62), (g0 - 0.02, .70), (g0, 1.0), (m0, 1.0), (m0 + 0.10, .55),
+    gain = _ramp(t, [(0, .48), (g0 - 0.02, .58), (g0, 1.0), (m0, 1.0), (m0 + 0.10, .55),
                      (t0, 1.0), (o0, 1.0), (o0 + 0.16, 0.0)])[:, None]
     mix = (st * (1.0 - a_dull - a_thin) + dull * a_dull + thin * a_thin) * gain
 
@@ -1662,7 +1675,7 @@ def load_music(path=MUSIC_PATH, duration=DUREE_REF, start=MUSIC_START, sr=SR, se
     add(np.sin(2 * math.pi * np.cumsum(fq) / sr) * np.exp(-tq * 7.0) * 0.55, o0)
     fx *= _ramp(t, [(0, 1), (o0 + 0.20, 1), (duration, 0)])
 
-    mix += fx[:, None] * 0.95
+    mix += fx[:, None] * 0.74
     mix = _tanh_limit(mix * 0.92, 1.35)
     fade = (np.clip(t / 0.03, 0, 1) * np.clip((duration - t) / 0.10, 0, 1))[:, None]
     mix *= fade

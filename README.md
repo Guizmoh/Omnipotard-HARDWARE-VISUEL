@@ -14,7 +14,7 @@ drop**, et le titre apparaît **pile sur l'impact**.
 
 | temps | séquence | ce qui se passe |
 |---|---|---|
-| 0,0 – 1,06 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit derrière la tête d'enregistrement. Le morceau joue, étouffé |
+| 0,0 – 1,06 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit derrière la tête d'enregistrement. Le morceau joue, étouffé et baissé |
 | 1,06 – 3,19 s | **transformation** | le clip **se déplie en MPC Live III**, pendant le break du morceau — chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place |
 | 2,83 – 5,67 s | **groove** | **le drop du morceau** tombe pile ici, avant la fin de la mue : la machine joue déjà pendant que son flanc droit finit de se déployer |
 | 5,67 – 6,37 s | **break** | le morceau est évidé de ses graves et baissé, un souffle monte, la machine fond dans la forme d'onde |
@@ -45,6 +45,9 @@ refaire à la main :
   notes de basse), avec un halo qui s'ajoute au trait ;
 - **l'image respire sur chaque grosse caisse** pendant que la machine joue :
   un zoom d'environ 1,5 % qui se relâche en un quart de seconde ;
+- **le tracé de la machine tremble** en permanence, comme une trace
+  d'oscilloscope : une ondulation lente le long du parcours plus une ride fine,
+  chaque organe avec sa propre phase, amplifiée quand le grave pousse ;
 - pendant le groove, le fil **passe derrière la machine** : il entre par le bord
   gauche, disparaît sous le châssis et ressort à droite — la MPC est un morceau
   de la bande ;
@@ -115,6 +118,8 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 - **le halo sur les graves** : `Renderer.bass_hit()` ;
 - **le zoom sur les kicks** : `Renderer.kick_hit()` et le facteur `_zoom`
   appliqué dans `to_px()` ;
+- **le tremblement du trait** : la variable `wob` dans `Renderer._machine()`
+  (les deux amplitudes) et le facteur `trem` qui la module ;
 - **le recouvrement groove / mue** : les bornes `sweep` et `groove` de
   `Timeline.KEYS` se chevauchent volontairement ;
 - **la place du mot dans la courbe** : `TITLE_H`, `CURVE_AMP` (amplitude de
