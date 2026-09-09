@@ -7,20 +7,20 @@ sort, écrit d'un seul trait continu par la courbe audio.
 
 ![affiche](out/omnipotard_poster.png)
 
-## Le déroulé (6 s — 8 temps à 80 BPM, 1920×1080 @ 60 fps)
+## Le déroulé (11 s — 16 temps à ~87 BPM, 1920×1080 @ 60 fps)
 
 Tout est calé sur la grille musicale : le balayage se termine **pile sur le
 drop**, et le titre apparaît **pile sur l'impact**.
 
 | temps | séquence | ce qui se passe |
 |---|---|---|
-| 0,0 – 0,62 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit de gauche à droite derrière la tête d'enregistrement |
-| 0,62 – 1,5 s | **balayage** | le faisceau balaie l'écran, **aspire le clip** et laisse à sa place le tracé de la **MPC Live III** — la machine sort du morceau enregistré |
-| 1,5 – 3,0 s | **groove dub** | drop : la machine joue, pads, bande de 16 pas, Q-Links, touch strip et écran bougent **sur les évènements réels de la bande-son** |
-| 3,0 – 3,75 s | **break** | deuxième souffle ; la machine fond dans la forme d'onde du morceau |
-| 3,75 – 5,05 s | **titre** | impact, puis un front de lecture **balaie de gauche à droite** : l'onde s'efface derrière lui et chaque lettre s'en détache, l'une après l'autre, puis **HARDWARE ONLY** passe sous le nom |
-| 5,05 – 5,78 s | **maintien** | le nom reste dans la courbe, vibrant avec la musique |
-| 5,78 – 6,0 s | **extinction** | **rafales de glitch** (déchirures, datamosh, pertes de signal, décalage RVB), souffle de sortie, puis collapse cathodique |
+| 0,0 – 1,38 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit de gauche à droite derrière la tête d'enregistrement |
+| 1,38 – 2,75 s | **transformation** | le clip **se déplie en MPC Live III** : chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place, de gauche à droite, pendant que le clip s'efface d'autant |
+| 2,75 – 5,5 s | **groove dub** | drop : la machine joue, pads, bande de 16 pas, Q-Links, touch strip et écran bougent **sur les évènements réels de la bande-son** |
+| 5,5 – 6,88 s | **break** | souffle ; la machine fond dans la forme d'onde du morceau |
+| 6,88 – 9,63 s | **titre** | impact, puis un front de lecture **balaie lentement de gauche à droite** : les lettres se détachent du fil d'onde une par une (une par double-croche), puis **HARDWARE ONLY** passe sous le nom |
+| 9,63 – 10,65 s | **maintien** | le logo repose sur le fil, qui continue de vibrer avec la musique |
+| 10,65 – 11,0 s | **extinction** | **rafales de glitch** (déchirures, datamosh, pertes de signal, décalage RVB), souffle de sortie, puis collapse cathodique |
 
 ## L'image est pilotée par le son
 
@@ -32,7 +32,8 @@ refaire à la main :
 
 - la grande courbe **est** la forme d'onde du morceau (avec calibre automatique,
   comme un vrai oscilloscope) — et c'est d'elle que le logo sort : chaque point
-  d'une lettre quitte la courbe au moment où le front le dépasse ;
+  d'une lettre quitte la courbe au moment où le front le dépasse. Le fil traverse
+  toute l'image et le mot est **posé dessus** : logo et onde ne font qu'un trait ;
 - le clip d'ouverture affiche l'enveloppe crête **du morceau lui-même** : on y
   voit le drop, le groove, le break, l'impact et la traîne ;
 - chaque pad s'allume sur l'évènement qui le déclenche : grosse caisse, rimshot,
@@ -59,7 +60,7 @@ python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4
 ```
 
 Le rendu est **déterministe** (tout est graine + temps) : deux exécutions
-donnent le même fichier au bit près. Environ 1 min 20 sur 4 cœurs.
+donnent le même fichier au bit près. Environ 2 min 15 sur 4 cœurs.
 
 ### Options utiles
 
@@ -71,10 +72,10 @@ python3 tools/omnipotard_intro.py -W 3840 -H 2160 -o out/intro_4k.mp4
 python3 tools/omnipotard_intro.py -W 1080 -H 1920 -o out/intro_vertical.mp4
 
 # images clés en PNG, pour vérifier avant d'encoder
-python3 tools/omnipotard_intro.py --stills out/stills --still-times 1.0,2.4,4.1,5.2,5.85
+python3 tools/omnipotard_intro.py --stills out/stills --still-times 0.9,2.1,4.2,8.4,10.0
 
 # variantes
---duration 12       # toute la timeline se remet à l'échelle (le tempo reste a 80 BPM)
+--duration 8        # toute la timeline se remet à l'échelle (le tempo reste dans les 80-90 BPM)
 --fps 30            # ou 24, 50…
 --crf 12            # qualité d'encodage (plus bas = plus gros)
 --no-audio          # image seule, mais l'animation reste pilotée par le son
@@ -89,7 +90,10 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 (x ∈ [-1,78 ; 1,78], y ∈ [-1 ; 1], origine au centre) :
 
 - **le mot** : `build_title_curve("OMNIPOTARD", …)` — l'alphabet monotrait est le
-  dictionnaire `GLYPHS` (ajouter une lettre = ajouter ses traits) ;
+  dictionnaire `GLYPHS` (ajouter une lettre = ajouter ses traits) ; chaque glyphe
+  doit toucher `y = 0` pour rester accroché au fil ;
+- **l'amortissement de l'onde sous le mot** : `Renderer.wave_mod()` ;
+- **la mue du clip en machine** : `Renderer.morph_at()` et `clip_env()` ;
 - **la place du mot dans la courbe** : `TITLE_H`, `CURVE_AMP` (amplitude de
   l'onde), `CURVE_WIN` (base de temps affichée), `MOD_OF` (à quel point chaque
   partie du tracé ondule avec la musique) ;
@@ -116,6 +120,6 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 |---|---|
 | `out/omnipotard_intro_1080p60_web.mp4` | version légère — partage, réseaux, prévisualisation |
 | `out/omnipotard_poster.png` | image fixe du titre (vignette) |
-| `out/omnipotard_intro_1080p60.mp4` | master CRF 16 (~25 Mo) pour le montage — **non versionné** : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 16` |
+| `out/omnipotard_intro_1080p60.mp4` | master CRF 19 (~25 Mo) pour le montage — **non versionné** : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 19` |
 
 Le rendu étant déterministe, cette commande reproduit le master à l'identique.

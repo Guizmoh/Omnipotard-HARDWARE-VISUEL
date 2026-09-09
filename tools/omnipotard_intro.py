@@ -39,7 +39,7 @@ VERT_FLUO = (0.24, 1.00, 0.16)   # #39FF14
 VERT_HALO = (0.10, 1.00, 0.34)   # halo legerement plus froid
 
 SR = 48000
-DUREE_REF = 6.0                  # format court : 8 temps a 80 BPM
+DUREE_REF = 11.0                 # 16 temps a ~87 BPM
 
 
 # ==========================================================================
@@ -360,39 +360,43 @@ def rect_fill(x0, y0, x1, y1, nlines=4, m=0.008):
 #  La courbe du titre : un seul trait continu, de la ligne de base au mot
 # ==========================================================================
 
-ONDE, TRAIT, TRANSIT = 0, 1, 2
+ONDE, TRAIT, TRANSIT, LIAISON = 0, 1, 2, 3
 
 
 def build_title_curve(txt, height, y0, x_in=-1.88, x_out=1.88, step=STEP):
-    """Ligne de base -> lettres tracees d'un seul trait -> ligne de base.
+    """Un seul fil continu : la ligne d'onde traverse toute l'image et le mot
+    est pose dessus.
 
-    Renvoie (P, kind, s, longueur). `kind` distingue l'onde, les traits de
-    lettres et les sauts de faisceau (traces en faible intensite, comme le
-    retour de spot d'un oscilloscope).
+    Chaque glyphe touche deja la ligne de base, donc le trace du logo et le fil
+    ne font qu'un — aucune liaison en diagonale n'est necessaire. Seuls les
+    sauts internes aux lettres a plusieurs traits restent, en faible intensite,
+    comme un retour de spot.
     """
     strokes = glyph_strokes(txt, height, 0.0, y0)
-    first = strokes[0][1][0]
-    last = strokes[-1][1][-1]
-    segs = [([(x_in, 0.0), (first[0] - 0.10, 0.0)], ONDE),
-            ([(first[0] - 0.10, 0.0), first], TRANSIT)]
-    prev = None
-    for _, pts in strokes:
-        if prev is not None:
-            segs.append(([prev, pts[0]], TRANSIT))
-        segs.append((pts, TRAIT))
-        prev = pts[-1]
-    segs.append(([last, (last[0] + 0.10, 0.0)], TRANSIT))
-    segs.append(([(last[0] + 0.10, 0.0), (x_out, 0.0)], ONDE))
+    xs = [q[0] for _, st in strokes for q in st]
+    wx0, wx1 = min(xs), max(xs)
+    segs = [([(x_in, y0), (wx0, y0)], ONDE),
+            ([(wx0, y0), (wx1, y0)], LIAISON),
+            ([(wx1, y0), (x_out, y0)], ONDE)]
+    prev, prev_gi = None, None
+    for gi, st in strokes:
+        if prev is not None and gi == prev_gi:
+            segs.append(([prev, tuple(st[0])], TRANSIT))
+        segs.append((st, TRAIT))
+        prev, prev_gi = tuple(st[-1]), gi
 
     Ps, Ns, ks, ss, off = [], [], [], [], 0.0
     for pts, kind in segs:
-        p, s, length = resample(pts, step)
-        tan = np.gradient(p, axis=0)
+        pts = np.asarray(pts, dtype=np.float64)
+        if float(np.linalg.norm(np.diff(pts, axis=0), axis=1).sum()) < 1e-6:
+            continue
+        q, sq, length = resample(pts, step)
+        tan = np.gradient(q, axis=0)
         tan /= (np.linalg.norm(tan, axis=1, keepdims=True) + 1e-12)
-        Ps.append(p)
+        Ps.append(q)
         Ns.append(np.stack([-tan[:, 1], tan[:, 0]], axis=1))
-        ks.append(np.full(len(p), kind, dtype=np.int8))
-        ss.append(s + off)
+        ks.append(np.full(len(q), kind, dtype=np.int8))
+        ss.append(sq + off)
         off += length
     return (np.vstack(Ps), np.vstack(Ns), np.concatenate(ks),
             np.concatenate(ss), off)
@@ -684,14 +688,14 @@ def write_wav(path, data, sr=SR):
 
 class Timeline:
     REF = DUREE_REF
-    KEYS = [                       # cales sur les temps (0,75 s a 80 BPM)
-        ("boot", 0.00, 0.62),      # la piste s'enregistre
-        ("sweep", 0.62, 1.50),     # se termine sur le drop (temps 2)
-        ("groove", 1.50, 3.00),
-        ("melt", 3.00, 3.75),      # break : woosh vers l'impact
-        ("title", 3.75, 5.05),     # l'impact tombe sur le temps 5
-        ("hold", 5.05, 5.78),
-        ("out", 5.78, 6.00),
+    KEYS = [                       # cales sur les temps (0,6875 s)
+        ("boot", 0.000, 1.375),    # la piste s'enregistre
+        ("sweep", 1.375, 2.750),   # le clip se transforme en machine
+        ("groove", 2.750, 5.500),  # une mesure pleine de groove
+        ("melt", 5.500, 6.875),    # break : souffle vers l'impact
+        ("title", 6.875, 9.625),   # le fil ecrit le logo, lettre par lettre
+        ("hold", 9.625, 10.650),
+        ("out", 10.650, 11.000),
     ]
 
     def __init__(self, duration):
@@ -710,8 +714,8 @@ class Timeline:
         return self.seg[name][1]
 
 
-GLITCHES = [(1.47, .07), (2.24, .05), (2.98, .08), (3.72, .09),
-            (5.02, .05), (5.40, .05), (5.62, .06)]
+GLITCHES = [(2.72, .09), (4.12, .05), (5.48, .10), (6.85, .11),
+            (9.60, .06), (10.10, .05), (10.40, .06)]
 
 
 # ==========================================================================
@@ -728,10 +732,9 @@ WAVE_YMAX = 0.36
 DAW_COLS = 560
 
 SUB_TXT = "HARDWARE ONLY"
-SUB_H, SUB_Y, SUB_TRACK = 0.065, -0.300, 0.55
-MOD_OF = {ONDE: 1.0, TRAIT: 0.055, TRANSIT: 0.30}
-WEIGHT_OF = {ONDE: 0.80, TRAIT: 1.15, TRANSIT: 0.07}
-THICK_OF = {ONDE: 0.0028, TRAIT: 0.0052, TRANSIT: 0.0}
+SUB_H, SUB_Y, SUB_TRACK = 0.065, -0.175, 0.55
+WEIGHT_OF = {ONDE: 0.80, TRAIT: 1.15, TRANSIT: 0.10, LIAISON: 0.80}
+THICK_OF = {ONDE: 0.0030, TRAIT: 0.0052, TRANSIT: 0.0, LIAISON: 0.0030}
 
 # pas programmes dans le motif : ils restent faiblement allumes
 STEP_LIT = frozenset(KICKS + RIMS + HATS + PERCS + SKANKS)
@@ -786,7 +789,9 @@ class Renderer:
         # ---- geometrie
         self.mpc = build_mpc()
         (self.tP, self.tN, self.tkind,
-         self.ts, self.tlen) = build_title_curve("OMNIPOTARD", TITLE_H, -TITLE_H * 0.5)
+         self.ts, self.tlen) = build_title_curve("OMNIPOTARD", TITLE_H, 0.0)
+        tx = self.tP[self.tkind == TRAIT][:, 0]
+        self.word_x = (float(tx.min()), float(tx.max()))
         sub = text_paths(SUB_TXT, SUB_H, 0.0, SUB_Y, tag="sub", tracking=SUB_TRACK)
         self.subP = np.vstack([q.P for q in sub])
         subN = []
@@ -795,7 +800,6 @@ class Renderer:
             tan /= (np.linalg.norm(tan, axis=1, keepdims=True) + 1e-12)
             subN.append(np.stack([-tan[:, 1], tan[:, 0]], axis=1))
         self.subN = np.vstack(subN)
-        self.tmod = np.array([MOD_OF[int(k)] for k in self.tkind])
         self.tw = np.array([WEIGHT_OF[int(k)] for k in self.tkind])
         self.tth = np.array([THICK_OF[int(k)] for k in self.tkind])
 
@@ -822,6 +826,22 @@ class Renderer:
     def env_at(self, arr, t):
         i = int(np.clip(t * self.eh, 0, len(arr) - 1))
         return float(arr[i])
+
+    def wave_mod(self, x):
+        """Amplitude de l'onde le long du fil : pleine au loin, presque nulle
+        sous le mot, avec une transition douce — le trace reste continu."""
+        a, b = self.word_x
+        inside = smoothstep(a - 0.32, a + 0.02, x) * (1.0 - smoothstep(b - 0.02, b + 0.32, x))
+        return 1.0 - 0.92 * inside
+
+    def clip_env(self, x):
+        """Demi-hauteur de la forme d'onde du clip a l'abscisse x."""
+        return WAVE_YMAX * np.interp(x, self.daw_x, self.daw)
+
+    def morph_at(self, x, sweep_x):
+        """0 = encore dans le clip, 1 = deploye en machine."""
+        m = np.clip((sweep_x - np.asarray(x) + 0.20) / 0.42, 0.0, 1.0)
+        return m * m * (3.0 - 2.0 * m)
 
     def wave_y(self, x, t, amp=CURVE_AMP, win=CURVE_WIN, agc=True):
         """Forme d'onde du morceau, etalee sur la largeur de l'ecran.
@@ -964,7 +984,7 @@ class Renderer:
         x0, y0, x1, y1 = CLIP
         rec = np.clip((t - (b0 + 0.16 * (b1 - b0))) / (0.84 * (b1 - b0)), 0.0, 1.0)
         head = x0 + (x1 - x0) * rec
-        gone = sweep_x if t >= tl.start("sweep") else -9.0     # efface par le balayage
+        gone = sweep_x - 0.24 if t >= tl.start("sweep") else -9.0   # cadre efface
         frame_a = (smoothstep(b0, b0 + 0.16 * (b1 - b0), t)
                    * (1.0 - smoothstep(tl.start("sweep"), tl.start("sweep")
                                        + 0.30 * (tl.end("sweep") - tl.start("sweep")), t)))
@@ -1002,14 +1022,17 @@ class Renderer:
         # --- ligne de zero + forme d'onde
         xs = self.daw_x
         h = WAVE_YMAX * self.daw
-        keep = (xs <= head) & (xs > gone)
+        keep = xs <= head
         if not np.any(keep):
             return
-        eat = np.clip((xs - gone) / 0.18, 0.0, 1.0)            # aspiree par le balayage
-        hh = h * eat
+        left = 1.0 - self.morph_at(xs, sweep_x) if t >= tl.start("sweep") else np.ones(len(xs))
+        hh = h * left                                          # la matiere passe dans la machine
+        keep = keep & (left > 0.01)
+        if not np.any(keep):
+            return
         P0 = np.stack([xs[keep], np.zeros(int(keep.sum()))], axis=1)
         px, py = self.to_px(P0, collapse)
-        beam.add(px, py, 0.42)
+        beam.add(px, py, 0.42 * left[keep])
 
         # remplissage en colonnes (comme les traits verticaux d'un editeur)
         K = 220
@@ -1019,13 +1042,13 @@ class Renderer:
             hs = hh[sel]
             X = np.repeat(xs[sel][:, None], K, axis=1).ravel()
             Y = (hs[:, None] * u[None, :]).ravel()
-            w = np.repeat(0.62 * (2.0 * hs / K) / STEP, K)
+            w = np.repeat(0.62 * (2.0 * hs / K) / STEP * left[sel], K)
             px, py = self.to_px(np.stack([X, Y], axis=1), collapse)
             beam.add(px, py, w)
             # contours haut et bas, plus francs
             for sgn in (1.0, -1.0):
                 px, py = self.to_px(np.stack([xs[sel], sgn * hs], axis=1), collapse)
-                beam.add(px, py, 0.55)
+                beam.add(px, py, 0.55 * left[sel])
 
         # --- tete d'enregistrement
         if 0.0 < rec < 1.0:
@@ -1047,13 +1070,18 @@ class Renderer:
         pulse = 1.0 + 0.28 * e_low
         jx = shake * rng.uniform(-9, 9)
 
+        half = BODY[3]
         for p in self.mpc:
-            m = p.P[:, 0] <= sweep_x
-            if not m.any():
+            mo = self.morph_at(p.P[:, 0], sweep_x)
+            if mo.max() <= 0.003:
                 continue
-            P = p.P[m]
-            w = np.full(len(P), 0.50 * pulse)
-            w += 1.6 * np.exp(-((sweep_x - P[:, 0]) / 0.075) ** 2)   # front de trace
+            P = p.P.copy()
+            # au repos, chaque point est ecrase dans l'enveloppe du clip :
+            # la machine se deplie hors de la forme d'onde enregistree.
+            src = self.clip_env(P[:, 0]) * (P[:, 1] / half)
+            P[:, 1] = src * (1.0 - mo) + p.P[:, 1] * mo
+            w = 0.50 * pulse * mo
+            w += 1.5 * np.exp(-((mo - 0.55) / 0.26) ** 2)            # front de mue
             tag = p.tag
             if tag.startswith("pad"):
                 k = int(tag[3:])
@@ -1141,7 +1169,7 @@ class Renderer:
         par une, au rythme des doubles-croches.
         """
         u = np.clip(self.tl.at("title", t), 0.0, 1.0)
-        return float(np.interp(u, (0.0, 0.19, 0.81, 1.0), (-1.95, -1.12, 1.12, 1.95)))
+        return float(np.interp(u, (0.0, 0.14, 0.86, 1.0), (-1.95, -1.14, 1.14, 1.95)))
 
     def _draw_title(self, beam, t, collapse, u_out, dx=0.0):
         """Le mot nait de la frequence : le front passe, l'onde s'efface
@@ -1154,7 +1182,7 @@ class Renderer:
         k = k * k * (3.0 - 2.0 * k)
 
         P = self.tP.copy()
-        P[:, 1] = wy * (1.0 - k) + (self.tP[:, 1] + self.tmod * wy) * k
+        P[:, 1] = wy * (1.0 - k) + (self.tP[:, 1] + self.wave_mod(P[:, 0]) * wy) * k
         P[:, 0] = P[:, 0] + dx
 
         w = self.tw * (0.12 + 0.88 * k)
@@ -1371,7 +1399,7 @@ def main():
     ap.add_argument("--no-curve", action="store_true", help="desactive la courbure CRT")
     ap.add_argument("--no-audio", action="store_true", help="video muette (l'image reste pilotee par le son)")
     ap.add_argument("--stills", default="", help="dossier ou exporter des images cles PNG")
-    ap.add_argument("--still-times", default="0.2,1.0,1.6,2.4,3.4,4.1,4.6,5.2,5.6,5.85,5.93")
+    ap.add_argument("--still-times", default="0.9,1.7,2.1,2.6,4.2,6.2,7.6,8.4,9.1,10.0,10.8")
     args = ap.parse_args()
 
     audio = synth_audio(args.duration, seed=args.seed)
