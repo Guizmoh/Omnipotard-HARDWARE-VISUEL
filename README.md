@@ -7,19 +7,19 @@ sort, écrit d'un seul trait continu par la courbe audio.
 
 ![affiche](out/omnipotard_poster.png)
 
-## Le déroulé (9,6 s — 14 temps à 87 BPM, 1920×1080 @ 60 fps)
+## Le déroulé (9,6 s — 20 temps à 125 BPM, 1920×1080 @ 60 fps)
 
 Tout est calé sur la grille musicale : le balayage se termine **pile sur le
 drop**, et le titre apparaît **pile sur l'impact**.
 
 | temps | séquence | ce qui se passe |
 |---|---|---|
-| 0,0 – 1,03 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit de gauche à droite derrière la tête d'enregistrement |
-| 1,03 – 3,44 s | **transformation** | le clip **se déplie en MPC Live III** : chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place, de gauche à droite. La zone de mue est large — à chaque instant une bonne partie de la machine est en train de s'ouvrir |
-| 2,75 – 4,81 s | **groove dub** | le drop tombe **avant la fin de la mue** : la machine joue déjà (pads, bande de 16 pas, écran) pendant que son flanc droit finit de se déployer |
-| 4,81 – 5,5 s | **break** | souffle ; la machine fond dans la forme d'onde du morceau |
-| 5,5 – 8,25 s | **titre** | impact, puis un front de lecture **balaie lentement de gauche à droite** : les lettres se détachent du fil d'onde une par une, puis **HARDWARE ONLY** passe sous le nom |
-| 8,25 – 9,35 s | **maintien** | le logo repose sur le fil, qui continue de vibrer avec la musique |
+| 0,0 – 0,96 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit de gauche à droite derrière la tête d'enregistrement |
+| 0,96 – 3,37 s | **transformation** | le clip **se déplie en MPC Live III** : chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place, de gauche à droite. La zone de mue est large — à chaque instant une bonne partie de la machine est en train de s'ouvrir |
+| 2,89 – 4,81 s | **groove dub techno** | le drop tombe **avant la fin de la mue** : la machine joue déjà (pads, bande de 16 pas, écran) pendant que son flanc droit finit de se déployer |
+| 4,81 – 5,78 s | **break** | souffle ; la machine fond dans la forme d'onde du morceau |
+| 5,78 – 8,18 s | **titre** | impact, puis un front de lecture **balaie lentement de gauche à droite** : les lettres se détachent du fil d'onde une par une, puis **HARDWARE ONLY** passe sous le nom |
+| 8,18 – 9,35 s | **maintien** | le logo repose sur le fil, qui continue de vibrer avec la musique |
 | 9,35 – 9,63 s | **extinction** | **rafales de glitch** (déchirures, datamosh, pertes de signal, décalage RVB), souffle de sortie, puis collapse cathodique |
 
 ## L'image est pilotée par le son
@@ -41,6 +41,8 @@ refaire à la main :
 - la bande de 16 pas suit le pas courant du séquenceur ;
 - le fil d'onde **s'allume légèrement à chaque coup grave** (grosse caisse et
   notes de basse), avec un halo qui s'ajoute au trait ;
+- **l'image respire sur chaque grosse caisse** pendant que la machine joue :
+  un zoom d'environ 1,5 % qui se relâche en un quart de seconde ;
 - pendant le groove, le fil **passe derrière la machine** : il entre par le bord
   gauche, disparaît sous le châssis et ressort à droite — la MPC est un morceau
   de la bande ;
@@ -102,6 +104,8 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
   ralentit l'ouverture de chaque organe) et `clip_env()` ;
 - **le fil masqué par la machine** : `Renderer.body_mask()` ;
 - **le halo sur les graves** : `Renderer.bass_hit()` ;
+- **le zoom sur les kicks** : `Renderer.kick_hit()` et le facteur `_zoom`
+  appliqué dans `to_px()` ;
 - **le recouvrement groove / mue** : les bornes `sweep` et `groove` de
   `Timeline.KEYS` se chevauchent volontairement ;
 - **la place du mot dans la courbe** : `TITLE_H`, `CURVE_AMP` (amplitude de
@@ -109,9 +113,10 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
   partie du tracé ondule avec la musique) ;
 - **la vitesse d'apparition des lettres** : `Renderer.title_front()` — le front
   ralentit sur la largeur du mot ; élargir le palier central espace les lettres ;
-- **la musique** : `KICKS`, `RIMS`, `HATS`, `PERCS`, `SKANKS`, `BASSLINE` (motif
-  de 16 pas), `NOTES` (la gamme), et les voix `kick()`, `rim()`, `skank()`,
-  `bass()` dans `synth_audio()` ;
+- **la musique** : `KICKS`, `RIMS`, `HATS`, `SKANKS`, `BASSLINE` (motif de
+  16 pas), `NOTES` (la gamme), et les voix `kick()`, `chord()`, `shaker()`,
+  `rimshot()`, `bass()` dans `synth_audio()` ; l'écho à bande et la réverbe se
+  règlent dans le bloc « mixage » ;
 - **quel pad s'allume sur quoi** : `PAD_OF`, `PAD_BASS`, `PAD_SKANK` ;
 - **la machine** : `build_mpc()` — chaque organe est un `Path` étiqueté
   (`body`, `step0…step15`, `lcd`, `qlink*`, `wheel`, `strip`, `pad0…pad15`) ;

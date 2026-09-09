@@ -39,7 +39,7 @@ VERT_FLUO = (0.24, 1.00, 0.16)   # #39FF14
 VERT_HALO = (0.10, 1.00, 0.34)   # halo legerement plus froid
 
 SR = 48000
-DUREE_REF = 9.625                # 14 temps a 87 BPM
+DUREE_REF = 9.625                # 20 temps a 125 BPM
 
 
 # ==========================================================================
@@ -408,25 +408,24 @@ def build_title_curve(txt, height, y0, x_in=-1.88, x_out=1.88, step=STEP):
 #  Chaque evenement rythmique renvoie aussi le pad qu'il allume a l'image.
 # ==========================================================================
 
-NOTES = {"G1": 49.00, "A1": 55.00, "C2": 65.41, "D2": 73.42, "E2": 82.41,
+NOTES = {"G1": 49.00, "A1": 55.00, "C2": 65.41, "D2": 73.42, "E2": 82.41, "G4": 392.0,
          "A2": 110.0, "C3": 130.8, "E3": 164.8, "G3": 196.0, "B3": 246.9,
          "A3": 220.0, "C4": 261.6, "E4": 329.6}
 
 # motif de 16 pas, joue deux fois (dub : one drop, skank sur les contretemps)
-KICKS = (0, 4, 8, 12)
-RIMS = (4, 12)
-HATS = (3, 7, 9, 11, 13, 15)
-PERCS = (5, 13)
-SKANKS = (2, 6, 10, 14)
-BASSLINE = (((0, "A1", 3), (5, "C2", 2)),
-            ((0, "A1", 3), (5, "E2", 2), (11, "G1", 2)))
+KICKS = (0, 4, 8, 12)          # quatre au sol
+RIMS = (8,)                    # accent sur le troisieme temps
+HATS = (3, 7, 11, 15)          # shaker sur les doubles
+PERCS = ()
+SKANKS = (2, 6, 10, 14)        # l'accord des contretemps
+BASSLINE = (((0, "A1", 6), (10, "C2", 4)),)
 
 # pad allume par famille d'evenement (grille 4x4, 0 = en bas a gauche)
 PAD_OF = {"kick": 0, "rim": 5, "hat": 10, "perc": 6}
 PAD_BASS = {"A1": 1, "G1": 1, "C2": 2, "D2": 2, "E2": 3}
 PAD_SKANK = (12, 13, 14, 15)
-DECAY_OF = {"kick": 5.5, "rim": 9.0, "hat": 15.0, "perc": 13.0,
-            "bass": 4.5, "skank": 6.5}
+DECAY_OF = {"kick": 4.5, "rim": 8.0, "hat": 14.0, "perc": 13.0,
+            "bass": 3.0, "skank": 5.0}
 
 
 def _lowpass(x, width):
@@ -503,7 +502,7 @@ def _fft_conv(x, h):
 def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
     """Renvoie {'stereo', 'mono', 'events', 'sr'} — dub ambient en 4 mesures."""
     tl = Timeline(duration)
-    beat = duration / 14.0                # 14 temps sur toute la piece (87 BPM)
+    beat = duration / 20.0                # 20 temps sur toute la piece (125 BPM)
     six = beat / 4.0
     n = int(duration * sr) + 1
     rng = np.random.default_rng(seed)
@@ -528,137 +527,135 @@ def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
 
     # ---------------------------------------------------------------- voix
     def kick(at, f=1.0):
-        t = seg(0.60)
-        fr = 42 + 95 * np.exp(-t * 20)
-        s = np.sin(2 * math.pi * np.cumsum(fr) / sr) * np.exp(-t * 5.0)
-        s[:int(0.004 * sr)] += rng.standard_normal(int(0.004 * sr)) * 0.35
-        add(dry, s, at, 0.80 * f)
+        """Grosse caisse ronde et profonde, sans clic : le pouls dub techno."""
+        t = seg(0.85)
+        fr = 43.0 + 66.0 * np.exp(-t * 24.0)
+        s = np.sin(2 * math.pi * np.cumsum(fr) / sr) * np.exp(-t * 4.0)
+        s += _lowpass(rng.standard_normal(len(t)), 70) * np.exp(-t * 26.0) * 0.22
+        add(dry, s, at, 0.90 * f)
         add(rev, s, at, 0.10 * f)
         fire(at, "kick", PAD_OF["kick"], f)
 
-    def rim(at, f=1.0):
-        t = seg(0.20)
-        nz = _highpass(rng.standard_normal(len(t)), 5)
-        s = (nz * np.exp(-t * 42) * 0.7
-             + np.sin(2 * math.pi * 880 * t) * np.exp(-t * 55) * 0.5
-             + np.sin(2 * math.pi * 1720 * t) * np.exp(-t * 70) * 0.25)
-        add(dry, s, at, 0.34 * f)
-        add(ech, s, at, 0.85 * f)     # le rim part dans l'echo : signature dub
-        add(rev, s, at, 0.45 * f)
-        fire(at, "rim", PAD_OF["rim"], f)
-
-    def hat(at, f=1.0):
-        t = seg(0.10)
-        s = _highpass(rng.standard_normal(len(t)), 3) * np.exp(-t * 58)
-        add(dry, s, at, 0.13 * f)
-        add(rev, s, at, 0.10 * f)
-        fire(at, "hat", PAD_OF["hat"], f)
-
-    def perc(at, f=1.0):
-        t = seg(0.16)
-        s = _highpass(rng.standard_normal(len(t)), 9) * np.exp(-t * 26)
-        add(dry, s, at, 0.10 * f)
-        add(ech, s, at, 0.35 * f)
-        fire(at, "perc", PAD_OF["perc"], f)
-
-    def skank(at, k, f=1.0):
-        """Accord bref sur le contretemps, envoye dans l'echo."""
-        t = seg(0.30)
-        env = np.exp(-t * 16) * np.minimum(t / 0.004, 1.0)
+    def chord(at, k, f=1.0):
+        """L'accord bref des contretemps : peu de direct, beaucoup d'echo.
+        C'est lui qui fait le grain dub techno."""
+        t = seg(0.60)
+        env = np.minimum(t / 0.010, 1.0) * np.exp(-t * 8.5)
         s = np.zeros(len(t))
-        for h, g in ((1.0, 1.0), (2.0, 0.42), (3.0, 0.20), (4.0, 0.10)):
-            for f0, gg in ((NOTES["A3"], 1.0), (NOTES["C4"], 0.85), (NOTES["E4"], 0.7)):
-                s += np.sin(2 * math.pi * f0 * h * t) * g * gg
-        s = _lowpass(s * env, 4) * 0.09
-        add(dry, s, at, 0.55 * f)
-        add(ech, s, at, 1.0 * f)
-        add(rev, s, at, 0.35 * f)
+        for f0, g in ((NOTES["A3"], 1.0), (NOTES["C4"], 0.85),
+                      (NOTES["E4"], 0.72), (NOTES["G4"], 0.55)):
+            s += g * (np.sin(2 * math.pi * f0 * t)
+                      + 0.45 * np.sin(4 * math.pi * f0 * t + 0.4)
+                      + 0.18 * np.sin(6 * math.pi * f0 * t))
+        s = _lowpass(s * env, 6)
+        s = s - _lowpass(s, 90)                 # timbre creux, sans bas
+        add(dry, s, at, 0.05 * f)
+        add(ech, s, at, 0.17 * f)
+        add(rev, s, at, 0.11 * f)
         fire(at, "skank", PAD_SKANK[k % 4], f)
 
+    def shaker(at, f=1.0):
+        t = seg(0.11)
+        s = _highpass(rng.standard_normal(len(t)), 4) * np.exp(-t * 48)
+        add(dry, s, at, 0.045 * f)
+        add(rev, s, at, 0.08 * f)
+        fire(at, "hat", PAD_OF["hat"], 0.5 * f)
+
+    def rimshot(at, f=1.0):
+        t = seg(0.26)
+        nz = _highpass(rng.standard_normal(len(t)), 6)
+        s = nz * np.exp(-t * 32) * 0.6 + np.sin(2 * math.pi * 620 * t) * np.exp(-t * 44) * 0.4
+        add(dry, s, at, 0.10 * f)
+        add(ech, s, at, 0.60 * f)
+        add(rev, s, at, 0.38 * f)
+        fire(at, "rim", PAD_OF["rim"], f)
+
     def bass(at, name, dur, f=1.0):
+        """Sub tenu, presque sans harmonique."""
         t = seg(dur)
         f0 = NOTES[name]
-        env = np.minimum(t / 0.012, 1.0) * np.exp(-t * 2.2)
-        env *= np.clip((dur - t) / 0.08, 0, 1)
-        s = (np.sin(2 * math.pi * f0 * t) + 0.22 * np.sin(4 * math.pi * f0 * t)) * env
-        add(dry, _tanh_limit(s * 0.8, 1.6), at, 0.55 * f)
-        fire(at, "bass", PAD_BASS[name], 0.75 * f)
+        env = np.minimum(t / 0.030, 1.0) * np.exp(-t * 1.0)
+        env *= np.clip((dur - t) / 0.12, 0, 1)
+        s = (np.sin(2 * math.pi * f0 * t) + 0.12 * np.sin(4 * math.pi * f0 * t)) * env
+        add(dry, s, at, 0.50 * f)
+        fire(at, "bass", PAD_BASS[name], 0.7 * f)
 
-    # ------------------------------------------- nappe grave continue
+    # ------------------------------- le lit : nappe, sub, souffle de bande
     t_all = np.arange(n) / sr
-    drone = (0.085 * np.sin(2 * math.pi * 55 * t_all)
-             + 0.045 * np.sin(2 * math.pi * 110 * t_all + 0.7)
-             + 0.020 * np.sin(2 * math.pi * 82.41 * t_all + 1.9))
-    drone *= np.clip(smoothstep(0.0, beat * 0.9, t_all), 0, 1)
-    drone *= 1.0 - smoothstep(tl.start("out"), duration, t_all)
-    dry += drone
+    swell = (np.clip(smoothstep(0.0, beat * 2.2, t_all), 0, 1)
+             * (1.0 - smoothstep(duration - 0.55, duration, t_all)))
+    swell = swell * (0.86 + 0.14 * np.sin(2 * math.pi * 0.19 * t_all))
 
-    # ------------------------------------------- 1. riser woosh d'ouverture
+    pad = np.zeros(n)
+    for name, g in (("A2", 1.0), ("C3", 0.80), ("E3", 0.70),
+                    ("G3", 0.55), ("B3", 0.40), ("E4", 0.22)):
+        f0 = NOTES[name]
+        pad += g * (np.sin(2 * math.pi * f0 * t_all + f0)
+                    + 0.55 * np.sin(2 * math.pi * f0 * 1.004 * t_all))   # battement
+    opening = np.clip(smoothstep(0.0, tl.start("title"), t_all), 0, 1)   # le filtre s'ouvre
+    pad = _lowpass(pad, 70) * (1.0 - opening) + _lowpass(pad, 11) * opening
+    dry += pad * swell * 0.032
+    rev += pad * swell * 0.050
+
+    dry += np.sin(2 * math.pi * 55.0 * t_all) * swell * 0.095            # sub tenu
+
+    hiss = _lowpass(rng.standard_normal(n), 14)
+    dry += hiss * swell * 0.032
+    crackle = (rng.random(n) < 0.00028).astype(np.float64) * rng.standard_normal(n)
+    dry += _lowpass(crackle, 3) * swell * 0.22                           # grain de bande
+
+    # ------------------------------------------- 1. souffle d'ouverture
     g0, g1 = tl.start("groove"), tl.end("groove")
-    add(dry, _whoosh(g0 - 0.02, sr, rng, up=True), 0.02, 0.85)
+    add(dry, _whoosh(g0 - 0.02, sr, rng, up=True), 0.02, 0.75)
     add(rev, _whoosh(g0 - 0.02, sr, rng, up=True), 0.02, 0.30)
 
-    # ------------------------------------------------- 2. groove dub
+    # ------------------------------------------------- 2. groove dub techno
     n_steps = max(4, int(round((g1 - g0) / six)))
-    sk = 0
-    for s_i in range(n_steps):
-        at = g0 + s_i * six
-        k = s_i % 16
-        b = (s_i // 16) % 2
+    ck = 0
+    for i in range(n_steps):
+        at = g0 + i * six
+        k = i % 16
         if k in KICKS:
-            kick(at, 1.0 if k % 8 == 0 else 0.82)
-        if k in RIMS:
-            rim(at, 0.95)
-        if k in HATS:
-            hat(at, 0.55)
-        if k in PERCS:
-            perc(at, 0.5)
+            kick(at, 1.0 if k == 0 else 0.92)
         if k in SKANKS:
-            skank(at, sk, 0.9 if k in (2, 10) else 0.7)
-            sk += 1
-        for st, name, dur in BASSLINE[b]:
+            chord(at, ck, 0.95 if k in (2, 10) else 0.72)
+            ck += 1
+        if k in HATS:
+            shaker(at, 0.7)
+        if k in RIMS:
+            rimshot(at, 0.7)
+        for st, name, dur in BASSLINE[0]:
             if st == k:
-                bass(at, name, dur * six * 0.95)
+                bass(at, name, dur * six)
 
-    # --------------------------------- 3. break : deuxieme woosh vers le titre
+    # --------------------------------- 3. break : la matiere part dans l'echo
     b0, t0 = tl.start("melt"), tl.start("title")
-    add(dry, _whoosh(t0 - b0, sr, rng, up=True), b0, 0.95)
-    add(rev, _whoosh(t0 - b0, sr, rng, up=True), b0, 0.35)
-    skank(b0, sk, 0.8)                      # dernier skank jete dans l'echo
+    add(dry, _whoosh(t0 - b0, sr, rng, up=True), b0, 0.85)
+    add(rev, _whoosh(t0 - b0, sr, rng, up=True), b0, 0.40)
+    chord(b0, ck, 0.95)
+    chord(b0 + 2 * six, ck + 1, 0.60)
 
-    # ------------------------------------------ 4. impact puis nappe ambient
-    ti = seg(min(2.4, duration - t0))
-    fi = 34 + 130 * np.exp(-ti * 11)
-    imp = np.sin(2 * math.pi * np.cumsum(fi) / sr) * np.exp(-ti * 2.4) * 0.85
-    imp += _lowpass(rng.standard_normal(len(ti)), 10) * np.exp(-ti * 4.5) * 0.25
+    # -------------------------------------------- 4. impact puis longue traine
+    ti = seg(min(3.2, duration - t0))
+    fi = 30.0 + 120.0 * np.exp(-ti * 9.0)
+    imp = np.sin(2 * math.pi * np.cumsum(fi) / sr) * np.exp(-ti * 1.9) * 0.95
+    imp += _lowpass(rng.standard_normal(len(ti)), 12) * np.exp(-ti * 3.5) * 0.28
     add(dry, imp, t0)
-    add(rev, imp * 0.35, t0)
+    add(rev, imp * 0.45, t0)
+    for k in range(3):
+        chord(t0 + (4 + 6 * k) * six, ck + 2 + k, 0.34 - 0.09 * k)
 
-    tp = seg(max(0.4, duration - t0))
-    envp = np.clip(smoothstep(0.0, 0.45, tp), 0, 1) * np.exp(-tp * 0.45)
-    chord = np.zeros(len(tp))
-    for name, g in (("A2", 1.0), ("C3", 0.75), ("E3", 0.62), ("G3", 0.45), ("B3", 0.30)):
-        f0 = NOTES[name]
-        chord += g * (np.sin(2 * math.pi * f0 * tp + f0)
-                      + 0.25 * np.sin(2 * math.pi * f0 * 2 * tp))
-    chord *= envp * 0.055 * (1.0 + 0.12 * np.sin(2 * math.pi * 0.8 * tp))
-    add(dry, chord, t0, 0.9)
-    add(rev, chord, t0, 1.1)
-    add(dry, np.sin(2 * math.pi * 55 * tp) * envp * 0.10, t0)
-    for k in range(2):
-        skank(t0 + (3 + 4 * k) * six, sk + 1 + k, 0.26 - 0.06 * k)
-
-    # ------------------------------------------------- 5. sortie : woosh + coupe
+    # ------------------------------------------------------ 5. sortie
     o0 = tl.start("out")
-    add(dry, _whoosh(0.30, sr, rng, up=True), o0 - 0.24, 0.80)
-    add(dry, _whoosh(max(0.12, duration - o0), sr, rng, up=False), o0, 0.85)
+    add(dry, _whoosh(0.30, sr, rng, up=True), o0 - 0.24, 0.70)
+    add(dry, _whoosh(max(0.12, duration - o0), sr, rng, up=False), o0, 0.80)
     tq = seg(min(0.35, duration - o0))
-    fq = 90 * np.exp(-tq * 14) + 26
-    add(dry, np.sin(2 * math.pi * np.cumsum(fq) / sr) * np.exp(-tq * 7) * 0.55, o0)
+    fq = 90.0 * np.exp(-tq * 14.0) + 26.0
+    add(dry, np.sin(2 * math.pi * np.cumsum(fq) / sr) * np.exp(-tq * 7.0) * 0.50, o0)
 
     # ------------------------------------------------------------- mixage
-    mix = dry + _tape_echo(ech, beat * 0.75, sr, fb=0.50, taps=7) * 0.55
-    mix += _fft_conv(rev, _reverb_ir(sr)) * 0.42
+    mix = dry + _tape_echo(ech, beat * 0.75, sr, fb=0.64, taps=10, damp=13) * 0.60
+    mix += _fft_conv(rev, _reverb_ir(sr, dur=3.4, decay=1.7)) * 0.55
     mix = _tanh_limit(mix * 0.95, 1.4)
     fade = np.clip(np.arange(n) / (0.04 * sr), 0, 1) * np.clip((n - np.arange(n)) / (0.10 * sr), 0, 1)
     mix *= fade
@@ -686,13 +683,13 @@ def write_wav(path, data, sr=SR):
 
 class Timeline:
     REF = DUREE_REF
-    KEYS = [                        # cales sur les temps (0,6875 s)
-        ("boot", 0.0000, 1.0313),   # la piste s'enregistre
-        ("sweep", 1.0313, 3.4375),  # le clip se transforme en machine
-        ("groove", 2.7500, 4.8125),  # le drop tombe avant la fin de la mue : la
-        ("melt", 4.8125, 5.5000),   # machine joue deja pendant qu'elle se
-        ("title", 5.5000, 8.2500),  # termine, ce qui resserre le montage
-        ("hold", 8.2500, 9.3500),
+    KEYS = [                        # cales sur les temps (0,48125 s)
+        ("boot", 0.0000, 0.9625),   # la piste s'enregistre
+        ("sweep", 0.9625, 3.3688),  # le clip se transforme en machine
+        ("groove", 2.8875, 4.8125),  # le drop tombe avant la fin de la mue : la
+        ("melt", 4.8125, 5.7750),   # machine joue deja pendant qu'elle se
+        ("title", 5.7750, 8.1813),  # termine, ce qui resserre le montage
+        ("hold", 8.1813, 9.3500),
         ("out", 9.3500, 9.6250),
     ]
 
@@ -712,8 +709,8 @@ class Timeline:
         return self.seg[name][1]
 
 
-GLITCHES = [(2.73, .09), (3.78, .05), (4.79, .10), (5.47, .11),
-            (8.23, .06), (8.80, .05), (9.10, .06)]
+GLITCHES = [(2.87, .09), (3.85, .05), (4.79, .10), (5.75, .11),
+            (8.17, .06), (8.80, .05), (9.10, .06)]
 
 
 # ==========================================================================
@@ -751,6 +748,7 @@ class Renderer:
 
         # la machine reste cadree quel que soit le format (16/9, carre, vertical)
         self.scale = min(h * 0.5, w * 0.5 / 1.30)
+        self._zoom = 1.0                     # respiration de l'image sur les kicks
         self.sigma = max(0.60, h / 1080.0 * 0.95)
         # un trait garde la meme luminosite quelle que soit la definition
         self.gain = (self.scale * self.sigma) / (360.0 * 0.6333)
@@ -874,6 +872,14 @@ class Renderer:
                 out[int(pad)] = max(out.get(int(pad), 0.0), float(val))
         return out
 
+    def kick_hit(self, t):
+        """Enveloppe des grosses caisses seules : sert au zoom de l'image."""
+        dt = t - self.ev_t
+        m = (dt >= 0.0) & (dt < 0.45) & (self.ev_pad == PAD_OF["kick"])
+        if not np.any(m):
+            return 0.0
+        return float(np.max(self.ev_f[m] * np.exp(-9.0 * dt[m])))
+
     def bass_hit(self, t):
         """Enveloppe des coups graves : le fil d'onde s'allume dessus."""
         dt = t - self.ev_t
@@ -888,7 +894,7 @@ class Renderer:
     # -- geometrie ecran ---------------------------------------------------
 
     def to_px(self, P, collapse=1.0, shake=(0.0, 0.0)):
-        s = self.scale
+        s = self.scale * self._zoom
         return (self.W * 0.5 + P[:, 0] * s + shake[0],
                 self.H * 0.5 - P[:, 1] * s * collapse + shake[1])
 
@@ -1273,6 +1279,9 @@ class Renderer:
         tl = self.tl
         beam = Beam(self.H, self.W, self.gain)
         rng = np.random.default_rng(self.seed + int(t * self.fps + 0.5))
+
+        # l'image respire sur chaque grosse caisse pendant que la machine joue
+        self._zoom = 1.0 + 0.020 * self.kick_hit(t)
 
         collapse = 1.0
         u_out = tl.at("out", t)
