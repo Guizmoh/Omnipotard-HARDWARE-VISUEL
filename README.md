@@ -7,25 +7,26 @@ sort, écrit d'un seul trait continu par la courbe audio.
 
 ![affiche](out/omnipotard_poster.png)
 
-## Le déroulé (12,8 s — 4 mesures à 75 BPM, 1920×1080 @ 60 fps)
+## Le déroulé (6 s — 8 temps à 80 BPM, 1920×1080 @ 60 fps)
 
 Tout est calé sur la grille musicale : le balayage se termine **pile sur le
-drop**, et le titre apparaît **pile sur la mesure 4**.
+drop**, et le titre apparaît **pile sur l'impact**.
 
 | temps | séquence | ce qui se passe |
 |---|---|---|
-| 0,0 – 0,9 s | **amorce** | le réticule s'allume, la trace se stabilise sur la ligne de base |
-| 0,9 – 3,2 s | **balayage** | le faisceau balaie l'écran ; l'onde de l'oscillateur s'écrase et laisse derrière elle le tracé de la **MPC Live III** |
-| 3,2 – 8,0 s | **groove dub** | la machine joue : pads, bande de 16 pas, Q-Links, touch strip et écran bougent **sur les évènements réels de la bande-son** |
-| 8,0 – 9,6 s | **dissolution** | break : la machine fond dans la forme d'onde du morceau |
-| 9,6 – 11,2 s | **titre** | impact, puis un front de lecture **balaie de gauche à droite** : l'onde s'efface derrière lui et chaque lettre s'en détache, l'une après l'autre |
-| 11,2 – 12,4 s | **maintien** | le nom reste dans la courbe, vibrant avec la musique |
-| 12,4 – 12,8 s | **extinction** | collapse cathodique : l'image se referme sur une ligne puis un point |
+| 0,0 – 0,3 s | **amorce** | le réticule s'allume, la trace se stabilise sur la ligne de base |
+| 0,3 – 1,5 s | **balayage** | le faisceau balaie l'écran et laisse derrière lui le tracé de la **MPC Live III**, pendant qu'un **riser woosh** monte |
+| 1,5 – 3,0 s | **groove dub** | drop : la machine joue, pads, bande de 16 pas, Q-Links, touch strip et écran bougent **sur les évènements réels de la bande-son** |
+| 3,0 – 3,75 s | **break** | deuxième woosh ; la machine fond dans la forme d'onde du morceau |
+| 3,75 – 5,05 s | **titre** | impact, puis un front de lecture **balaie de gauche à droite** : l'onde s'efface derrière lui et chaque lettre s'en détache, l'une après l'autre, puis **HARDWARE ONLY** passe sous le nom |
+| 5,05 – 5,78 s | **maintien** | le nom reste dans la courbe, vibrant avec la musique |
+| 5,78 – 6,0 s | **extinction** | **rafales de glitch** (déchirures, datamosh, pertes de signal, décalage RVB), woosh de sortie, puis collapse cathodique |
 
 ## L'image est pilotée par le son
 
 La bande-son est synthétisée par le même script (dub ambient : sub, one-drop,
-skank sur les contretemps parti dans un écho à bande, nappe et réverbe). Elle
+skank sur les contretemps parti dans un écho à bande, nappe et réverbe, plus
+les risers woosh d'entrée, de break et de sortie). Elle
 sert ensuite de **source d'animation** — il n'y a aucune synchronisation à
 refaire à la main :
 
@@ -40,10 +41,12 @@ refaire à la main :
 
 ## La machine
 
-La silhouette reprend la **MPC Live III** : bande de 16 boutons de step-séquenceur
-sur l'arête haute, écran tactile 7" à gauche, quatre Q-Links surmontés de leurs
-bandeaux d'affichage, molette encastrée en haut à droite, grille de 16 pads MPCe
-en bas à droite, et le touch strip vertical le long des pads.
+Disposition relevée sur une photo de dessus de la **MPC Live III**, simplifiée :
+potard de volume au coin haut gauche, bande de 16 boutons de step-séquenceur sur
+l'arête haute, touch strip vertical sur l'arête gauche, grille de 16 pads MPCe
+biseautés au centre gauche, écran tactile 7" à droite, colonne de quatre Q-Links
+sur l'arête droite, molette en bas à droite, rangées de touches sous l'écran,
+marquage et grille de haut-parleur en bas.
 
 ## Rendu
 
@@ -54,7 +57,7 @@ python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4
 ```
 
 Le rendu est **déterministe** (tout est graine + temps) : deux exécutions
-donnent le même fichier au bit près. Environ 3 min sur 4 cœurs.
+donnent le même fichier au bit près. Environ 1 min 20 sur 4 cœurs.
 
 ### Options utiles
 
@@ -66,10 +69,10 @@ python3 tools/omnipotard_intro.py -W 3840 -H 2160 -o out/intro_4k.mp4
 python3 tools/omnipotard_intro.py -W 1080 -H 1920 -o out/intro_vertical.mp4
 
 # images clés en PNG, pour vérifier avant d'encoder
-python3 tools/omnipotard_intro.py --stills out/stills --still-times 3.4,4.6,8.6,10.6,11.6
+python3 tools/omnipotard_intro.py --stills out/stills --still-times 1.0,2.4,4.1,5.2,5.85
 
 # variantes
---duration 9.6      # toute la timeline ET le tempo se remettent à l'échelle
+--duration 12       # toute la timeline se remet à l'échelle (le tempo reste a 80 BPM)
 --fps 30            # ou 24, 50…
 --crf 12            # qualité d'encodage (plus bas = plus gros)
 --no-audio          # image seule, mais l'animation reste pilotée par le son
@@ -97,7 +100,10 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 - **la machine** : `build_mpc()` — chaque organe est un `Path` étiqueté
   (`body`, `step0…step15`, `lcd`, `qlink*`, `wheel`, `strip`, `pad0…pad15`) ;
 - **la couleur** : `VERT_FLUO` (#39FF14) et `VERT_HALO` ;
-- **le minutage** : `Timeline.KEYS` ; **les glitchs** : `GLITCHES`.
+- **le sous-titre** : `SUB_TXT`, `SUB_H`, `SUB_TRACK` ;
+- **le minutage** : `Timeline.KEYS` ; **les glitchs** : `GLITCHES` pour les coups
+  ponctuels, `Renderer.glitch_at()` pour les rafales de l'extinction ;
+- **les woosh** : `_whoosh()` (montant ou descendant).
 
 ## Fichiers produits
 
@@ -105,8 +111,6 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 |---|---|
 | `out/omnipotard_intro_1080p60_web.mp4` | version légère — partage, réseaux, prévisualisation |
 | `out/omnipotard_poster.png` | image fixe du titre (vignette) |
-| `out/omnipotard_intro_1080p60_hq.mp4` | qualité montage : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60_hq.mp4 --crf 20` |
-| `out/omnipotard_intro_1080p60.mp4` | master sans compromis : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 16` |
+| `out/omnipotard_intro_1080p60.mp4` | master CRF 16 (~25 Mo) pour le montage — **non versionné** : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 16` |
 
-Les deux masters ne sont **pas versionnés** (poids) : le rendu étant déterministe,
-les commandes ci-dessus les reproduisent à l'identique en ~3 min.
+Le rendu étant déterministe, cette commande reproduit le master à l'identique.

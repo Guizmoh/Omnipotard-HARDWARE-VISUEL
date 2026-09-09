@@ -39,7 +39,7 @@ VERT_FLUO = (0.24, 1.00, 0.16)   # #39FF14
 VERT_HALO = (0.10, 1.00, 0.34)   # halo legerement plus froid
 
 SR = 48000
-DUREE_REF = 12.8                 # 4 mesures a 75 BPM
+DUREE_REF = 6.0                  # format court : 8 temps a 80 BPM
 
 
 # ==========================================================================
@@ -205,6 +205,8 @@ GLYPHS = {
     "E": (0.56, [[(.56, 1), (0, 1), (0, 0), (.56, 0)], [(0, .50), (.44, .50)]]),
     "L": (0.54, [[(0, 1), (0, 0), (.54, 0)]]),
     "V": (0.64, [[(0, 1), (.32, 0), (.64, 1)]]),
+    "H": (0.62, [[(0, 0), (0, 1)], [(.62, 0), (.62, 1)], [(0, .50), (.62, .50)]]),
+    "W": (0.86, [[(0, 1), (.19, 0), (.43, .64), (.67, 0), (.86, 1)]]),
     "S": (0.60, [[(.60, .84), (.44, 1), (.16, 1), (0, .84), (0, .66), (.16, .50), (.44, .50), (.60, .34), (.60, .16), (.44, 0), (.16, 0), (0, .16)]]),
     "U": (0.62, [[(0, 1), (0, .18), (.18, 0), (.44, 0), (.62, .18), (.62, 1)]]),
     "Y": (0.62, [[(0, 1), (.31, .55), (.62, 1)], [(.31, .55), (.31, 0)]]),
@@ -214,25 +216,25 @@ GLYPHS = {
 TRACKING = 0.145
 
 
-def text_width(txt):
-    return sum(GLYPHS[c][0] for c in txt) + TRACKING * max(0, len(txt) - 1)
+def text_width(txt, tracking=TRACKING):
+    return sum(GLYPHS[c][0] for c in txt) + tracking * max(0, len(txt) - 1)
 
 
-def glyph_strokes(txt, height, x0, y0, center=True):
+def glyph_strokes(txt, height, x0, y0, center=True, tracking=TRACKING):
     """Traits du texte, positionnes : liste de (indice_lettre, points)."""
-    x = x0 - text_width(txt) * height * 0.5 if center else x0
+    x = x0 - text_width(txt, tracking) * height * 0.5 if center else x0
     out = []
     for gi, ch in enumerate(txt):
         gw, strokes = GLYPHS[ch]
         for st in strokes:
             out.append((gi, [(x + px * height, y0 + py * height) for px, py in st]))
-        x += (gw + TRACKING) * height
+        x += (gw + tracking) * height
     return out
 
 
-def text_paths(txt, height, x0, y0, step=STEP, center=True, tag="txt"):
+def text_paths(txt, height, x0, y0, step=STEP, center=True, tag="txt", tracking=TRACKING):
     return [Path(pts, tag="%s:%d" % (tag, gi), step=step)
-            for gi, pts in glyph_strokes(txt, height, x0, y0, center)]
+            for gi, pts in glyph_strokes(txt, height, x0, y0, center, tracking)]
 
 
 # ==========================================================================
@@ -242,28 +244,33 @@ def text_paths(txt, height, x0, y0, step=STEP, center=True, tag="txt"):
 #  grille 4x4 en bas a droite, touch strip vertical le long des pads.
 # ==========================================================================
 
-# Disposition (unites = demi-hauteur d'image). La machine occupe presque toute
-# la largeur du cadre : les pads sont gros et biseautes, l'ecran large, la
-# molette franche — c'est ce trio qui fait lire "MPC" au premier coup d'oeil.
-BODY = (-1.253, -0.853, 1.253, 0.853)
-BODY_IN = (-1.188, -0.788, 1.188, 0.788)
-SCREEN = (-1.123, -0.022, -0.130, 0.589)          # dalle tactile 7" (16/10)
-PAD_X0, PAD_Y0, PAD_SZ, PAD_GAP = 0.140, -0.756, 0.2262, 0.0303
-STEP_X0, STEP_Y0, STEP_W, STEP_H, STEP_GAP = -1.123, 0.632, 0.1142, 0.086, 0.028
-QLINK = [(0.108, 0.432), (0.324, 0.432), (0.540, 0.432), (0.756, 0.432)]
-QLINK_R = 0.0626
-QDISP_W, QDISP_Y0, QDISP_Y1 = 0.184, 0.513, 0.589
-WHEEL, WHEEL_R = (1.021, 0.432), 0.135
-STRIP = (-0.022, -0.756, 0.098, 0.236)            # touch strip vertical
-BTN_ROWS = ((-0.173, 5, 0.140), (-0.324, 5, 0.140), (-0.486, 4, 0.189))
-BTN_X0, BTN_SPAN = -1.123, 0.972
+# Disposition relevee sur une photo de dessus de la MPC Live III, simplifiee.
+# Unites = demi-hauteur d'image. De gauche a droite : touch strip sur l'arete,
+# grille 4x4, ecran 7", colonne de 4 Q-Links et molette ; bande de 16 pas et
+# potard de volume en haut, grille de haut-parleur en bas.
+BODY = (-1.445, -0.848, 1.445, 0.848)
+BODY_IN = (-1.410, -0.813, 1.410, 0.813)
+VOLUME, VOLUME_R = (-1.266, 0.669), 0.119
+STEP_X0, STEP_Y0, STEP_W, STEP_H, STEP_GAP = -1.087, 0.627, 0.1183, 0.090, 0.0239
+TOPBTN = ((1.198, 0.627, 1.298, 0.717), (1.318, 0.627, 1.418, 0.717))
+STRIP = (-1.343, -0.269, -1.224, 0.448)
+PAD_X0, PAD_Y0 = -1.116, -0.299
+PAD_W, PAD_H, PAD_GX, PAD_GY = 0.2386, 0.1936, 0.0299, 0.0299
+SCREEN = (0.018, -0.167, 1.086, 0.567)
+QLINK = [(1.266, 0.466), (1.266, 0.257), (1.266, 0.048), (1.266, -0.161)]
+QLINK_R = 0.0836
+WHEEL, WHEEL_R = (1.266, -0.406), 0.155
+BTN_ROWS = (-0.275, -0.382, -0.489)
+BTN_X0, BTN_W, BTN_H, BTN_GAP, BTN_N = 0.018, 0.185, 0.084, 0.030, 5
+GRILLE = (-1.340, -0.800, 1.340, -0.570)
+MIC, MIC_R = (0.0, -0.520), 0.025
 
 
 def pad_rect(i, j):
     """i = ligne (0 = bas), j = colonne (0 = gauche)."""
-    x0 = PAD_X0 + j * (PAD_SZ + PAD_GAP)
-    y0 = PAD_Y0 + i * (PAD_SZ + PAD_GAP)
-    return x0, y0, x0 + PAD_SZ, y0 + PAD_SZ
+    x0 = PAD_X0 + j * (PAD_W + PAD_GX)
+    y0 = PAD_Y0 + i * (PAD_H + PAD_GY)
+    return x0, y0, x0 + PAD_W, y0 + PAD_H
 
 
 def step_rect(k):
@@ -272,66 +279,74 @@ def step_rect(k):
 
 
 def build_mpc(step=STEP):
-    """MPC Live III : bande de 16 pas en haut, ecran 7" a gauche, Q-Links et
-    molette a droite, grille 4x4 biseautee en bas a droite, touch strip."""
     P = []
     add = P.append
 
-    add(Path(rrect_pts(*BODY, r=0.081), closed=True, tag="body", step=step))
-    add(Path(rrect_pts(*BODY_IN, r=0.059), closed=True, tag="body", step=step))
+    add(Path(rrect_pts(*BODY, r=0.072), closed=True, tag="body", step=step))
+    add(Path(rrect_pts(*BODY_IN, r=0.052), closed=True, tag="body", step=step))
 
-    # bande de 16 boutons de step-sequenceur (arete haute)
+    # potard de volume (coin haut gauche)
+    add(Path(circle_pts(*VOLUME, r=VOLUME_R), closed=True, tag="vol", step=step))
+    add(Path(circle_pts(*VOLUME, r=VOLUME_R * 0.34), closed=True, tag="vol", step=step))
+
+    # bande de 16 pas + touches du coin haut droit
     for k in range(16):
         add(Path(rrect_pts(*step_rect(k), r=0.014), closed=True, tag="step%d" % k, step=step))
+    for k, r in enumerate(TOPBTN):
+        add(Path(rrect_pts(*r, r=0.014), closed=True, tag="btnx%d" % k, step=step))
 
-    # ecran + cadre
-    sx0, sy0, sx1, sy1 = SCREEN
-    add(Path(rrect_pts(sx0, sy0, sx1, sy1, 0.020), closed=True, tag="lcd", step=step))
-    add(Path(rrect_pts(sx0 + 0.030, sy0 + 0.030, sx1 - 0.030, sy1 - 0.030, 0.012),
-             closed=True, tag="lcd", step=step))
-    add(Path([(sx0 + 0.030, sy1 - 0.128), (sx1 - 0.030, sy1 - 0.128)], tag="lcd", step=step))
+    # touch strip (arete gauche) + ses reperes
+    add(Path(rrect_pts(*STRIP, r=0.052), closed=True, tag="strip", step=step))
+    for k in range(11):
+        y = STRIP[1] + 0.045 + (STRIP[3] - STRIP[1] - 0.09) * k / 10.0
+        add(Path([(STRIP[0] + 0.022, y), (STRIP[2] - 0.022, y)], tag="strip", step=step))
 
-    # Q-Links et leurs bandeaux
-    for k, (cx, cy) in enumerate(QLINK):
-        add(Path(circle_pts(cx, cy, QLINK_R), closed=True, tag="qlink%d" % k, step=step))
-        add(Path(circle_pts(cx, cy, QLINK_R * 0.30), closed=True, tag="qlink%d" % k, step=step))
-        add(Path(rrect_pts(cx - QDISP_W * 0.5, QDISP_Y0, cx + QDISP_W * 0.5, QDISP_Y1, 0.011),
-                 closed=True, tag="qdisp%d" % k, step=step))
-
-    # molette encastree
-    add(Path(circle_pts(WHEEL[0], WHEEL[1], WHEEL_R), closed=True, tag="wheel", step=step))
-    add(Path(circle_pts(WHEEL[0], WHEEL[1], WHEEL_R * 0.72), closed=True, tag="wheel", step=step))
-    add(Path(circle_pts(WHEEL[0], WHEEL[1], WHEEL_R * 0.30), closed=True, tag="wheel", step=step))
-
-    # touch strip
-    add(Path(rrect_pts(*STRIP, r=0.048), closed=True, tag="strip", step=step))
-
-    # 16 pads : contour + biseau interieur (c'est ce relief qui fait la MPC)
+    # grille 4x4 : contour + biseau interieur
     for i in range(4):
         for j in range(4):
             x0, y0, x1, y1 = pad_rect(i, j)
             k = i * 4 + j
-            add(Path(rrect_pts(x0, y0, x1, y1, 0.034), closed=True, tag="pad%d" % k, step=step))
-            add(Path(rrect_pts(x0 + 0.024, y0 + 0.024, x1 - 0.024, y1 - 0.024, 0.024),
+            add(Path(rrect_pts(x0, y0, x1, y1, 0.030), closed=True, tag="pad%d" % k, step=step))
+            add(Path(rrect_pts(x0 + 0.022, y0 + 0.020, x1 - 0.022, y1 - 0.020, 0.020),
                      closed=True, tag="pad%d" % k, step=step))
 
-    # touches et transport sous l'ecran
-    for row, (yy, nb, w) in enumerate(BTN_ROWS):
-        gap = (BTN_SPAN - nb * w) / (nb - 1.0)
-        for k in range(nb):
-            x0 = BTN_X0 + k * (w + gap)
-            add(Path(rrect_pts(x0, yy, x0 + w, yy + (0.086 if row < 2 else 0.096), 0.016),
-                     closed=True, tag="btn%d" % (row * 5 + k), step=step))
+    # ecran tactile 7"
+    sx0, sy0, sx1, sy1 = SCREEN
+    add(Path(rrect_pts(sx0, sy0, sx1, sy1, 0.020), closed=True, tag="lcd", step=step))
+    add(Path(rrect_pts(sx0 + 0.028, sy0 + 0.028, sx1 - 0.028, sy1 - 0.028, 0.012),
+             closed=True, tag="lcd", step=step))
+    add(Path([(sx0 + 0.028, sy1 - 0.115), (sx1 - 0.028, sy1 - 0.115)], tag="lcd", step=step))
 
-    P += text_paths("MPC LIVE", 0.097, BTN_X0, -0.713, step=step, center=False, tag="logo")
+    # colonne de Q-Links + molette
+    for k, (cx, cy) in enumerate(QLINK):
+        add(Path(circle_pts(cx, cy, QLINK_R), closed=True, tag="qlink%d" % k, step=step))
+        add(Path(circle_pts(cx, cy, QLINK_R * 0.30), closed=True, tag="qlink%d" % k, step=step))
+    add(Path(circle_pts(WHEEL[0], WHEEL[1], WHEEL_R), closed=True, tag="wheel", step=step))
+    add(Path(circle_pts(WHEEL[0], WHEEL[1], WHEEL_R * 0.68), closed=True, tag="wheel", step=step))
+    add(Path(circle_pts(WHEEL[0], WHEEL[1], WHEEL_R * 0.26), closed=True, tag="wheel", step=step))
+
+    # rangees de touches sous l'ecran
+    for row, yy in enumerate(BTN_ROWS):
+        for k in range(BTN_N):
+            x0 = BTN_X0 + k * (BTN_W + BTN_GAP)
+            add(Path(rrect_pts(x0, yy, x0 + BTN_W, yy + BTN_H, 0.016), closed=True,
+                     tag="btn%d" % (row * BTN_N + k), step=step))
+
+    # marquage + grille de haut-parleur
+    P += text_paths("MPC LIVE III", 0.095, -1.070, -0.470, step=step, center=False, tag="logo")
+    add(Path(rrect_pts(*GRILLE, r=0.030), closed=True, tag="grille", step=step))
+    for k in range(5):
+        y = GRILLE[1] + 0.038 + (GRILLE[3] - GRILLE[1] - 0.076) * k / 4.0
+        add(Path([(GRILLE[0] + 0.030, y), (GRILLE[2] - 0.030, y)], tag="grille", step=step))
+    add(Path(circle_pts(*MIC, r=MIC_R), closed=True, tag="mic", step=step))
     return P
 
 
-def pad_fill(k, nlines=8):
+def pad_fill(k, nlines=7):
     x0, y0, x1, y1 = pad_rect(k // 4, k % 4)
-    m = 0.040
+    m = 0.038
     return np.vstack([np.stack([np.linspace(x0 + m, x1 - m, 56), np.full(56, y)], axis=1)
-                      for y in np.linspace(y0 + m, y1 - m, nlines)])
+                      for y in np.linspace(y0 + m * 0.8, y1 - m * 0.8, nlines)])
 
 
 def rect_fill(x0, y0, x1, y1, nlines=4, m=0.008):
@@ -392,13 +407,13 @@ NOTES = {"G1": 49.00, "A1": 55.00, "C2": 65.41, "D2": 73.42, "E2": 82.41,
          "A3": 220.0, "C4": 261.6, "E4": 329.6}
 
 # motif de 16 pas, joue deux fois (dub : one drop, skank sur les contretemps)
-KICKS = (0, 8)
-RIMS = (8,)
-HATS = (4, 12)
-PERCS = (11,)
+KICKS = (0, 4, 8, 12)
+RIMS = (4, 12)
+HATS = (3, 7, 9, 11, 13, 15)
+PERCS = (5, 13)
 SKANKS = (2, 6, 10, 14)
-BASSLINE = (((0, "A1", 3), (6, "A1", 2), (10, "C2", 2), (13, "E2", 3)),
-            ((0, "A1", 3), (6, "G1", 2), (10, "A1", 2), (14, "C2", 2)))
+BASSLINE = (((0, "A1", 3), (5, "C2", 2)),
+            ((0, "A1", 3), (5, "E2", 2), (11, "G1", 2)))
 
 # pad allume par famille d'evenement (grille 4x4, 0 = en bas a gauche)
 PAD_OF = {"kick": 0, "rim": 5, "hat": 10, "perc": 6}
@@ -441,6 +456,26 @@ def _tape_echo(x, delay, sr, fb=0.52, taps=7, damp=9):
     return y
 
 
+def _whoosh(dur, sr, rng, up=True):
+    """Woosh : quatre bandes de bruit dont le centre spectral monte (ou descend),
+    plus une composante tonale. Sert de riser et de sortie."""
+    n = max(16, int(dur * sr))
+    u = np.arange(n) / (n - 1.0)
+    nz = rng.standard_normal(n)
+    bands = [_lowpass(nz, 300), _lowpass(nz, 80), _lowpass(nz, 20), nz - _lowpass(nz, 5)]
+    bands = [b / (b.std() + 1e-9) for b in bands]   # meme niveau pour chaque bande
+    pos = u if up else 1.0 - u
+    out = np.zeros(n)
+    for i, b in enumerate(bands):
+        out += b * np.exp(-((pos - i / 3.0) / 0.30) ** 2)
+    f = 140.0 * (2600.0 / 140.0) ** pos
+    out += np.sin(2 * math.pi * np.cumsum(f) / sr) * 0.55 * pos ** 2
+    env = pos ** 1.7
+    if up:
+        env = env * (1.0 - 0.90 * np.clip((u - 0.94) / 0.06, 0, 1))
+    return out * env * 0.26
+
+
 def _reverb_ir(sr, dur=2.6, decay=1.15, seed=5):
     n = int(dur * sr)
     t = np.arange(n) / sr
@@ -460,8 +495,10 @@ def _fft_conv(x, h):
 
 def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
     """Renvoie {'stereo', 'mono', 'events', 'sr'} — dub ambient en 4 mesures."""
-    bar = duration / 4.0
-    beat = bar / 4.0
+    tl = Timeline(duration)
+    beat = duration / 8.0                 # 8 temps sur toute la piece...
+    while beat > 0.95:
+        beat *= 0.5                       # ...sans jamais descendre sous ~80 BPM
     six = beat / 4.0
     n = int(duration * sr) + 1
     rng = np.random.default_rng(seed)
@@ -542,40 +579,35 @@ def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
         add(dry, _tanh_limit(s * 0.8, 1.6), at, 0.55 * f)
         fire(at, "bass", PAD_BASS[name], 0.75 * f)
 
-    # ------------------------------------------------- mesure 1 : ouverture
+    # ------------------------------------------- nappe grave continue
     t_all = np.arange(n) / sr
     drone = (0.085 * np.sin(2 * math.pi * 55 * t_all)
              + 0.045 * np.sin(2 * math.pi * 110 * t_all + 0.7)
              + 0.020 * np.sin(2 * math.pi * 82.41 * t_all + 1.9))
-    drone *= np.clip(smoothstep(0.0, 1.2, t_all), 0, 1) * (1.0 - smoothstep(duration - 0.9, duration, t_all))
+    drone *= np.clip(smoothstep(0.0, beat * 0.9, t_all), 0, 1)
+    drone *= 1.0 - smoothstep(tl.start("out"), duration, t_all)
     dry += drone
 
-    # souffle du balayage : montee filtree qui se resout sur le drop
-    sw = seg(bar - 0.15)
-    us = sw / sw[-1]
-    fr = 90.0 * (1900.0 / 90.0) ** (us ** 1.5)
-    swp = np.sin(2 * math.pi * np.cumsum(fr) / sr) * 0.11 * us ** 1.2
-    swp += _highpass(rng.standard_normal(len(sw)), 40) * 0.05 * us ** 2.4
-    swp *= 1.0 - 0.7 * np.clip((us - 0.9) / 0.1, 0, 1)
-    add(dry, swp, 0.15)
-    add(rev, swp * 0.5, 0.15)
+    # ------------------------------------------- 1. riser woosh d'ouverture
+    g0, g1 = tl.start("groove"), tl.end("groove")
+    add(dry, _whoosh(g0 - 0.02, sr, rng, up=True), 0.02, 1.15)
+    add(rev, _whoosh(g0 - 0.02, sr, rng, up=True), 0.02, 0.45)
 
-    # ------------------------------------------- mesures 2-3 : groove dub
-    g0 = bar                       # le drop tombe pile a la fin du balayage
-    n_steps = 24                   # 6 temps de groove
+    # ------------------------------------------------- 2. groove dub
+    n_steps = max(4, int(round((g1 - g0) / six)))
     sk = 0
     for s_i in range(n_steps):
         at = g0 + s_i * six
         k = s_i % 16
         b = (s_i // 16) % 2
         if k in KICKS:
-            kick(at, 1.0 if k == 0 else 0.85)
+            kick(at, 1.0 if k % 8 == 0 else 0.82)
         if k in RIMS:
             rim(at, 0.95)
         if k in HATS:
-            hat(at, 0.6)
-        if k in PERCS or (b == 1 and k == 3):
-            perc(at, 0.55)
+            hat(at, 0.55)
+        if k in PERCS:
+            perc(at, 0.5)
         if k in SKANKS:
             skank(at, sk, 0.9 if k in (2, 10) else 0.7)
             sk += 1
@@ -583,52 +615,44 @@ def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
             if st == k:
                 bass(at, name, dur * six * 0.95)
 
-    # ------------------------------------------------ mesure 3.5 : break
-    b0 = g0 + n_steps * six        # tout se retire, il ne reste que les echos
-    tb = seg(2.0 * beat)
-    ub = tb / tb[-1]
-    ris = np.sin(2 * math.pi * np.cumsum(150 * (2400 / 150.0) ** ub) / sr) * 0.10 * ub ** 1.8
-    ris += _highpass(rng.standard_normal(len(tb)), 25) * 0.14 * ub ** 2.4
-    ris *= 1.0 - 0.75 * np.clip((ub - 0.9) / 0.1, 0, 1)
-    add(dry, ris, b0)
-    add(rev, ris * 0.6, b0)
-    skank(b0, sk, 0.8)             # dernier skank, jete dans l'echo
-    rim(b0 + 2 * six, 0.7)
+    # --------------------------------- 3. break : deuxieme woosh vers le titre
+    b0, t0 = tl.start("melt"), tl.start("title")
+    add(dry, _whoosh(t0 - b0, sr, rng, up=True), b0, 1.25)
+    add(rev, _whoosh(t0 - b0, sr, rng, up=True), b0, 0.55)
+    skank(b0, sk, 0.8)                      # dernier skank jete dans l'echo
 
-    # -------------------------------------- mesure 4 : impact puis ambient
-    t0 = 3.0 * bar                 # debut de la mesure 4 = apparition du titre
-    ti = seg(3.0)
+    # ------------------------------------------ 4. impact puis nappe ambient
+    ti = seg(min(2.4, duration - t0))
     fi = 34 + 130 * np.exp(-ti * 11)
-    imp = np.sin(2 * math.pi * np.cumsum(fi) / sr) * np.exp(-ti * 2.2) * 0.85
+    imp = np.sin(2 * math.pi * np.cumsum(fi) / sr) * np.exp(-ti * 2.4) * 0.85
     imp += _lowpass(rng.standard_normal(len(ti)), 10) * np.exp(-ti * 4.5) * 0.25
     add(dry, imp, t0)
     add(rev, imp * 0.35, t0)
 
-    tp = seg(max(0.5, duration - t0))
-    envp = np.clip(smoothstep(0.0, 0.9, tp), 0, 1) * np.exp(-tp * 0.30)
-    envp *= 1.0 - smoothstep(duration - t0 - 0.55, duration - t0, tp)
+    tp = seg(max(0.4, duration - t0))
+    envp = np.clip(smoothstep(0.0, 0.45, tp), 0, 1) * np.exp(-tp * 0.45)
     chord = np.zeros(len(tp))
     for name, g in (("A2", 1.0), ("C3", 0.75), ("E3", 0.62), ("G3", 0.45), ("B3", 0.30)):
         f0 = NOTES[name]
         chord += g * (np.sin(2 * math.pi * f0 * tp + f0)
                       + 0.25 * np.sin(2 * math.pi * f0 * 2 * tp))
-    chord *= envp * 0.055 * (1.0 + 0.12 * np.sin(2 * math.pi * 0.35 * tp))
+    chord *= envp * 0.055 * (1.0 + 0.12 * np.sin(2 * math.pi * 0.8 * tp))
     add(dry, chord, t0, 0.9)
     add(rev, chord, t0, 1.1)
     add(dry, np.sin(2 * math.pi * 55 * tp) * envp * 0.10, t0)
+    for k in range(2):
+        skank(t0 + (3 + 4 * k) * six, sk + 1 + k, 0.26 - 0.06 * k)
 
-    # echos residuels du skank pendant l'ambient
-    for k in range(3):
-        skank(t0 + (2 + 3 * k) * six, sk + k, 0.30 - 0.07 * k)
-
-    # extinction
-    to = seg(0.6)
-    off = np.sin(2 * math.pi * (760 * np.exp(-to * 10) + 55) * to) * np.exp(-to * 11) * 0.30
-    off += _lowpass(rng.standard_normal(len(to)), 9) * np.exp(-to * 15) * 0.22
-    add(dry, off, duration - 0.42)
+    # ------------------------------------------------- 5. sortie : woosh + coupe
+    o0 = tl.start("out")
+    add(dry, _whoosh(0.30, sr, rng, up=True), o0 - 0.24, 1.1)
+    add(dry, _whoosh(max(0.12, duration - o0), sr, rng, up=False), o0, 1.2)
+    tq = seg(min(0.35, duration - o0))
+    fq = 90 * np.exp(-tq * 14) + 26
+    add(dry, np.sin(2 * math.pi * np.cumsum(fq) / sr) * np.exp(-tq * 7) * 0.55, o0)
 
     # ------------------------------------------------------------- mixage
-    mix = dry + _tape_echo(ech, beat * 0.75, sr, fb=0.54, taps=8) * 0.55
+    mix = dry + _tape_echo(ech, beat * 0.75, sr, fb=0.50, taps=7) * 0.55
     mix += _fft_conv(rev, _reverb_ir(sr)) * 0.42
     mix = _tanh_limit(mix * 0.95, 1.4)
     fade = np.clip(np.arange(n) / (0.04 * sr), 0, 1) * np.clip((n - np.arange(n)) / (0.10 * sr), 0, 1)
@@ -657,14 +681,14 @@ def write_wav(path, data, sr=SR):
 
 class Timeline:
     REF = DUREE_REF
-    KEYS = [
-        ("boot", 0.00, 0.90),
-        ("sweep", 0.90, 3.20),     # se termine sur le drop (mesure 2)
-        ("groove", 3.20, 8.00),
-        ("melt", 8.00, 9.60),
-        ("title", 9.60, 11.20),    # l'impact tombe sur la mesure 4
-        ("hold", 11.20, 12.40),
-        ("out", 12.40, 12.80),
+    KEYS = [                       # cales sur les temps (0,75 s a 80 BPM)
+        ("boot", 0.00, 0.30),
+        ("sweep", 0.30, 1.50),     # se termine sur le drop (temps 2)
+        ("groove", 1.50, 3.00),
+        ("melt", 3.00, 3.75),      # break : woosh vers l'impact
+        ("title", 3.75, 5.05),     # l'impact tombe sur le temps 5
+        ("hold", 5.05, 5.78),
+        ("out", 5.78, 6.00),
     ]
 
     def __init__(self, duration):
@@ -683,7 +707,8 @@ class Timeline:
         return self.seg[name][1]
 
 
-GLITCHES = [(3.18, .10), (5.60, .06), (7.98, .12), (9.58, .11), (11.22, .06)]
+GLITCHES = [(1.47, .07), (2.24, .05), (2.98, .08), (3.72, .09),
+            (5.02, .05), (5.40, .05), (5.62, .06)]
 
 
 # ==========================================================================
@@ -693,6 +718,8 @@ GLITCHES = [(3.18, .10), (5.60, .06), (7.98, .12), (9.58, .11), (11.22, .06)]
 TITLE_H = 0.27
 CURVE_AMP = 0.28
 CURVE_WIN = 0.070          # fenetre d'analyse affichee (s) — "base de temps"
+SUB_TXT = "HARDWARE ONLY"
+SUB_H, SUB_Y, SUB_TRACK = 0.065, -0.300, 0.55
 MOD_OF = {ONDE: 1.0, TRAIT: 0.055, TRANSIT: 0.30}
 WEIGHT_OF = {ONDE: 0.80, TRAIT: 1.15, TRANSIT: 0.07}
 THICK_OF = {ONDE: 0.0028, TRAIT: 0.0052, TRANSIT: 0.0}
@@ -744,6 +771,14 @@ class Renderer:
         self.mpc = build_mpc()
         (self.tP, self.tN, self.tkind,
          self.ts, self.tlen) = build_title_curve("OMNIPOTARD", TITLE_H, -TITLE_H * 0.5)
+        sub = text_paths(SUB_TXT, SUB_H, 0.0, SUB_Y, tag="sub", tracking=SUB_TRACK)
+        self.subP = np.vstack([q.P for q in sub])
+        subN = []
+        for q in sub:
+            tan = np.gradient(q.P, axis=0)
+            tan /= (np.linalg.norm(tan, axis=1, keepdims=True) + 1e-12)
+            subN.append(np.stack([-tan[:, 1], tan[:, 0]], axis=1))
+        self.subN = np.vstack(subN)
         self.tmod = np.array([MOD_OF[int(k)] for k in self.tkind])
         self.tw = np.array([WEIGHT_OF[int(k)] for k in self.tkind])
         self.tth = np.array([THICK_OF[int(k)] for k in self.tkind])
@@ -752,6 +787,21 @@ class Renderer:
             self._build_warp()
 
     # -- son ---------------------------------------------------------------
+
+    def glitch_at(self, t):
+        """Quantite de glitch a l'instant t : coups ponctuels, puis rafales
+        continues pendant l'extinction."""
+        f = self.dur / Timeline.REF
+        g = 0.0
+        for gt, gd in GLITCHES:
+            gt, gd = gt * f, gd * f
+            if 0.0 <= t - gt < gd:
+                g = max(g, 1.0 - (t - gt) / gd)
+        u = self.tl.at("out", t)
+        if 0.0 <= u < 0.80:
+            burst = 0.62 + 0.38 * math.sin(u * 31.0) ** 2
+            g = max(g, burst * (1.0 - 0.55 * smoothstep(0.42, 0.80, u)))
+        return g
 
     def env_at(self, arr, t):
         i = int(np.clip(t * self.eh, 0, len(arr) - 1))
@@ -956,10 +1006,6 @@ class Renderer:
                                 (cx + QLINK_R * 0.86 * math.cos(a),
                                  cy + QLINK_R * 0.86 * math.sin(a))])
             self._dyn(beam, P, 1.15, collapse, melt, t)
-            bx0 = cx - QDISP_W * 0.5 + 0.008
-            self._dyn(beam, rect_fill(bx0, QDISP_Y0 + 0.008,
-                                      bx0 + (QDISP_W - 0.016) * v, QDISP_Y1 - 0.008, 3),
-                      0.75, collapse, melt, t)
 
         # touch strip : curseur lumineux
         if STRIP[0] <= sweep_x:
@@ -998,7 +1044,7 @@ class Renderer:
         u = np.clip(self.tl.at("title", t), 0.0, 1.0)
         return float(np.interp(u, (0.0, 0.19, 0.81, 1.0), (-1.95, -1.12, 1.12, 1.95)))
 
-    def _draw_title(self, beam, t, collapse, u_out):
+    def _draw_title(self, beam, t, collapse, u_out, dx=0.0):
         """Le mot nait de la frequence : le front passe, l'onde s'efface
         derriere lui et chaque lettre se detache de la courbe."""
         xf = self.title_front(t)
@@ -1010,6 +1056,7 @@ class Renderer:
 
         P = self.tP.copy()
         P[:, 1] = wy * (1.0 - k) + (self.tP[:, 1] + self.tmod * wy) * k
+        P[:, 0] = P[:, 0] + dx
 
         w = self.tw * (0.12 + 0.88 * k)
         w = w + 2.4 * np.exp(-((k - 0.62) / 0.26) ** 2) * (xf < 1.9)   # eclat de detachement
@@ -1036,6 +1083,28 @@ class Renderer:
             px, py = self.to_px(dot, collapse)
             beam.add(px, py, 2.2)
 
+    def _draw_sub(self, beam, t, collapse, u_out, dx=0.0):
+        """HARDWARE ONLY : volet lumineux qui passe juste apres le mot."""
+        tl = self.tl
+        span = tl.end("title") - tl.start("title")
+        t0 = tl.start("title") + 0.74 * span
+        u = float(np.clip((t - t0) / (0.36 * span), 0.0, 1.0))
+        if u <= 0.0:
+            return
+        xw = -0.60 + 1.28 * ease_out(u, 2.2)
+        k = np.clip((xw - self.subP[:, 0] + 0.03) / 0.10, 0.0, 1.0)
+        k = k * k * (3.0 - 2.0 * k)
+        P = self.subP.copy()
+        P[:, 1] = P[:, 1] + 0.030 * self.wave_y(P[:, 0], t)
+        P[:, 0] = P[:, 0] + dx
+        w = 0.78 * k + 1.30 * np.exp(-((k - 0.60) / 0.30) ** 2) * (u < 1.0)
+        if u_out > 0:
+            w = w * max(0.0, 1.0 - u_out * 1.35)
+        th = (0.0032 * k)[:, None]
+        for off, ow in ((0.0, 1.0), (1.0, 0.55), (-1.0, 0.55)):
+            px, py = self.to_px(P + self.subN * (off * th), collapse)
+            beam.add(px, py, w * ow)
+
     # -- image -------------------------------------------------------------
 
     def intensity(self, t):
@@ -1045,14 +1114,11 @@ class Renderer:
 
         collapse = 1.0
         u_out = tl.at("out", t)
-        if u_out > 0:
-            collapse = max(0.006, (1.0 - ease_in_out(min(1.0, u_out / 0.62))) ** 1.6)
+        if u_out > 0.30:
+            collapse = max(0.006,
+                           (1.0 - ease_in_out(min(1.0, (u_out - 0.30) / 0.42))) ** 1.6)
 
-        shake = 0.0
-        for gt, gd in GLITCHES:
-            gt *= self.dur / Timeline.REF
-            if 0 <= t - gt < gd:
-                shake = max(shake, 1.0 - (t - gt) / gd)
+        shake = self.glitch_at(t)
 
         grid_a = smoothstep(0.05, 0.55, t) * (1.0 - 0.55 * smoothstep(tl.start("melt"),
                                                                      tl.end("title"), t))
@@ -1075,7 +1141,7 @@ class Renderer:
 
         # ---- 2. balayage de l'oscillateur
         u_sweep = tl.at("sweep", t)
-        sweep_x = -1.95 + 3.95 * ease_in_out(np.clip(u_sweep, 0, 1)) if u_sweep > 0 else -1.95
+        sweep_x = -2.10 + 4.25 * ease_in_out(np.clip(u_sweep, 0, 1)) if u_sweep > 0 else -2.10
 
         if tl.start("boot") < t < tl.start("groove"):
             amp = 0.50 * (1.0 - ease_out(np.clip(u_sweep, 0, 1), 1.5)) + 0.02
@@ -1125,7 +1191,9 @@ class Renderer:
 
         # ---- 5. le titre, ecrit par la courbe
         if t >= tl.start("title") and u_out < 0.95:
-            self._draw_title(beam, t, collapse, max(0.0, u_out))
+            dx = shake * float(rng.uniform(-0.055, 0.055)) if u_out > 0 else 0.0
+            self._draw_title(beam, t, collapse, max(0.0, u_out), dx)
+            self._draw_sub(beam, t, collapse, max(0.0, u_out), dx)
 
         return beam.render(), collapse, shake, rng
 
@@ -1159,18 +1227,28 @@ class Renderer:
         img += upsample(rng.standard_normal((H // 4, W // 4)).astype(np.float32),
                         4, (H, W))[..., None] * 0.011
 
-        gl = 0.0
-        for gt, gd in GLITCHES:
-            gt *= self.dur / Timeline.REF
-            if 0 <= t - gt < gd:
-                gl = max(gl, 1.0 - (t - gt) / gd)
+        gl = self.glitch_at(t)
         if gl > 0.02:
-            for _ in range(int(3 + 9 * gl)):
+            # tranches decalees
+            for _ in range(int(3 + 18 * gl)):
                 y0 = int(rng.integers(0, H - 4))
-                y1 = min(H, y0 + int(rng.integers(3, max(6, int(H * 0.06)))))
-                off = int(rng.integers(-int(W * 0.05 * gl) - 2, int(W * 0.05 * gl) + 3))
+                y1 = min(H, y0 + int(rng.integers(3, max(6, int(H * 0.10 * gl) + 5))))
+                off = int(rng.integers(-int(W * 0.10 * gl) - 2, int(W * 0.10 * gl) + 3))
                 img[y0:y1] = np.roll(img[y0:y1], off, axis=1)
-            sh = max(1, int(6 * gl))
+            # tranches recopiees ailleurs (datamosh)
+            if gl > 0.55:
+                for _ in range(int(5 * gl)):
+                    h = int(rng.integers(4, max(8, int(H * 0.09))))
+                    y0 = int(rng.integers(0, H - h))
+                    ys = int(rng.integers(0, H - h))
+                    img[y0:y0 + h] = img[ys:ys + h]
+            # pertes de signal
+            if gl > 0.45:
+                for _ in range(int(4 * gl)):
+                    h = int(rng.integers(2, max(5, int(H * 0.05))))
+                    y0 = int(rng.integers(0, H - h))
+                    img[y0:y0 + h] *= float(rng.uniform(0.0, 0.30))
+            sh = max(1, int(14 * gl))
             img[:, :, 0] = np.roll(img[:, :, 0], sh, axis=1)
             img[:, :, 2] = np.roll(img[:, :, 2], -sh, axis=1)
 
@@ -1179,9 +1257,9 @@ class Renderer:
 
         u_out = self.tl.at("out", t)
         if u_out > 0:
-            f = 1.0 if u_out <= 0.62 else max(0.0, 1.0 - (u_out - 0.62) / 0.26)
+            f = 1.0 if u_out <= 0.72 else max(0.0, 1.0 - (u_out - 0.72) / 0.20)
             img *= f
-            if 0.55 < u_out < 0.72:
+            if 0.66 < u_out < 0.80:
                 cy, cx = H // 2, W // 2
                 r = max(2, int(H * 0.006))
                 img[cy - r:cy + r, cx - int(r * 2.5):cx + int(r * 2.5)] += 1.4
@@ -1219,7 +1297,7 @@ def main():
     ap.add_argument("--no-curve", action="store_true", help="desactive la courbure CRT")
     ap.add_argument("--no-audio", action="store_true", help="video muette (l'image reste pilotee par le son)")
     ap.add_argument("--stills", default="", help="dossier ou exporter des images cles PNG")
-    ap.add_argument("--still-times", default="0.4,2.2,3.4,4.6,6.2,8.6,9.9,10.6,11.6,12.6")
+    ap.add_argument("--still-times", default="0.2,1.0,1.6,2.4,3.4,4.1,4.6,5.2,5.6,5.85,5.93")
     args = ap.parse_args()
 
     audio = synth_audio(args.duration, seed=args.seed)
