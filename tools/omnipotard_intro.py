@@ -45,7 +45,7 @@ PALETTES = {
 }
 
 SR = 48000
-DUREE_REF = 9.916                # 14 temps a 84,7 BPM (le tempo du morceau)
+DUREE_REF = 10.5                 # 15 temps a 85,2 BPM (le tempo du morceau)
 MUSIC_PATH = "assets/hint.mp3"   # morceau utilise ; --music pour en changer
 MUSIC_START = 0.0                # tout debut du morceau
 # 19.8209 : l'autre point d'accroche essaye — musique, break d'une seconde,
@@ -738,14 +738,14 @@ def write_wav(path, data, sr=SR):
 
 class Timeline:
     REF = DUREE_REF
-    KEYS = [                        # cales sur les temps du morceau (0,7082 s)
-        ("boot", 0.0000, 1.0623),   # la piste s'enregistre, sur la musique
-        ("sweep", 1.0623, 3.1870),  # la mue se joue pendant le break du morceau
-        ("groove", 2.8329, 5.6658),  # le drop du morceau, une mesure pleine
-        ("zoom", 5.6658, 6.3740),   # la camera entre dans l'ecran de la machine
-        ("title", 6.3740, 8.4987),
-        ("hold", 8.4987, 9.5610),
-        ("out", 9.5610, 9.9160),
+    KEYS = [                        # cales sur les temps du morceau (0,704 s)
+        ("boot", 0.000, 1.056),     # la piste s'enregistre, sur la musique
+        ("sweep", 1.056, 3.168),    # la mue, qui deborde d'un demi-temps sur
+        ("groove", 2.816, 5.632),   # le drop — une mesure pleine de groove
+        ("zoom", 5.632, 6.336),     # la camera entre dans l'ecran de la machine
+        ("title", 6.336, 9.152),    # quatre temps : le balayage prend son temps
+        ("hold", 9.152, 10.208),
+        ("out", 10.208, 10.500),
     ]
 
     def __init__(self, duration):
@@ -764,8 +764,8 @@ class Timeline:
         return self.seg[name][1]
 
 
-GLITCHES = [(2.82, .09), (3.90, .05), (5.64, .10), (6.36, .11),
-            (8.49, .06), (9.00, .05), (9.35, .06)]
+GLITCHES = [(2.79, .09), (4.22, .05), (5.61, .10), (6.31, .11),
+            (9.13, .06), (9.70, .05), (10.05, .06)]
 
 
 # ==========================================================================
