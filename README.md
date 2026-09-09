@@ -14,8 +14,8 @@ drop**, et le titre apparaît **pile sur l'impact**.
 
 | temps | séquence | ce qui se passe |
 |---|---|---|
-| 0,0 – 1,38 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit de gauche à droite derrière la tête d'enregistrement |
-| 1,38 – 2,75 s | **transformation** | le clip **se déplie en MPC Live III** : chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place, de gauche à droite, pendant que le clip s'efface d'autant |
+| 0,0 – 1,03 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit de gauche à droite derrière la tête d'enregistrement |
+| 1,03 – 2,75 s | **transformation** | le clip **se déplie en MPC Live III** : chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place, de gauche à droite, pendant que le clip s'efface d'autant. La zone de mue est large — à chaque instant une bonne partie de la machine est en train de s'ouvrir — et un liseré annonce les organes avant qu'ils ne se déploient |
 | 2,75 – 5,5 s | **groove dub** | drop : la machine joue, pads, bande de 16 pas, Q-Links, touch strip et écran bougent **sur les évènements réels de la bande-son** |
 | 5,5 – 6,88 s | **break** | souffle ; la machine fond dans la forme d'onde du morceau |
 | 6,88 – 9,63 s | **titre** | impact, puis un front de lecture **balaie lentement de gauche à droite** : les lettres se détachent du fil d'onde une par une (une par double-croche), puis **HARDWARE ONLY** passe sous le nom |
@@ -93,7 +93,7 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
   dictionnaire `GLYPHS` (ajouter une lettre = ajouter ses traits) ; chaque glyphe
   doit toucher `y = 0` pour rester accroché au fil ;
 - **l'amortissement de l'onde sous le mot** : `Renderer.wave_mod()` ;
-- **la mue du clip en machine** : `Renderer.morph_at()` et `clip_env()` ;
+- **la mue du clip en machine** : `Renderer.morph_at()` (élargir le dénominateur ralentit l'ouverture de chaque organe) et `clip_env()` ;
 - **la place du mot dans la courbe** : `TITLE_H`, `CURVE_AMP` (amplitude de
   l'onde), `CURVE_WIN` (base de temps affichée), `MOD_OF` (à quel point chaque
   partie du tracé ondule avec la musique) ;

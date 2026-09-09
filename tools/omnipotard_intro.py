@@ -689,8 +689,8 @@ def write_wav(path, data, sr=SR):
 class Timeline:
     REF = DUREE_REF
     KEYS = [                       # cales sur les temps (0,6875 s)
-        ("boot", 0.000, 1.375),    # la piste s'enregistre
-        ("sweep", 1.375, 2.750),   # le clip se transforme en machine
+        ("boot", 0.000, 1.031),    # la piste s'enregistre
+        ("sweep", 1.031, 2.750),   # le clip se transforme en machine (2,5 temps)
         ("groove", 2.750, 5.500),  # une mesure pleine de groove
         ("melt", 5.500, 6.875),    # break : souffle vers l'impact
         ("title", 6.875, 9.625),   # le fil ecrit le logo, lettre par lettre
@@ -839,8 +839,13 @@ class Renderer:
         return WAVE_YMAX * np.interp(x, self.daw_x, self.daw)
 
     def morph_at(self, x, sweep_x):
-        """0 = encore dans le clip, 1 = deploye en machine."""
-        m = np.clip((sweep_x - np.asarray(x) + 0.20) / 0.42, 0.0, 1.0)
+        """0 = encore ecrase dans le clip, 1 = deploye en machine.
+
+        La zone de transition est large : a un instant donne, une bonne partie
+        de la machine est en train de s'ouvrir, ce qui donne une materialisation
+        progressive plutot qu'un volet net.
+        """
+        m = np.clip((sweep_x - np.asarray(x) + 0.10) / 0.85, 0.0, 1.0)
         return m * m * (3.0 - 2.0 * m)
 
     def wave_y(self, x, t, amp=CURVE_AMP, win=CURVE_WIN, agc=True):
@@ -1069,6 +1074,7 @@ class Renderer:
         step = self.step_index(t) if live else -1
         pulse = 1.0 + 0.28 * e_low
         jx = shake * rng.uniform(-9, 9)
+        ghost = 1.0 - smoothstep(tl.start("groove") - 0.25, tl.start("groove"), t)
 
         half = BODY[3]
         for p in self.mpc:
@@ -1080,8 +1086,8 @@ class Renderer:
             # la machine se deplie hors de la forme d'onde enregistree.
             src = self.clip_env(P[:, 0]) * (P[:, 1] / half)
             P[:, 1] = src * (1.0 - mo) + p.P[:, 1] * mo
-            w = 0.50 * pulse * mo
-            w += 1.5 * np.exp(-((mo - 0.55) / 0.26) ** 2)            # front de mue
+            w = 0.50 * pulse * mo + 0.055 * ghost * (1.0 - mo)   # liseré d'annonce
+            w += 1.2 * np.exp(-((mo - 0.55) / 0.30) ** 2)            # front de mue
             tag = p.tag
             if tag.startswith("pad"):
                 k = int(tag[3:])
@@ -1256,7 +1262,8 @@ class Renderer:
 
         # ---- 1 et 2. le clip qui s'enregistre, puis le balayage
         u_sweep = tl.at("sweep", t)
-        sweep_x = -2.10 + 4.25 * ease_in_out(np.clip(u_sweep, 0, 1)) if u_sweep > 0 else -2.10
+        us = np.clip(u_sweep, 0, 1)
+        sweep_x = -1.85 + 4.35 * (0.55 * us + 0.45 * ease_in_out(us)) if u_sweep > 0 else -1.85
         if t < tl.start("groove"):
             self._daw_clip(beam, t, collapse, sweep_x, rng)
 
@@ -1268,17 +1275,13 @@ class Renderer:
         # tete de balayage
         if 0.0 < u_sweep < 1.02:
             n = 900
-            ys = np.linspace(-0.97, 0.97, n)
-            for k in range(5):
+            ys = np.linspace(-0.95, 0.95, n)
+            taper = np.exp(-(ys / 0.72) ** 4)      # bords fondus : une tete de
+            for k in range(4):                     # lecture, pas un volet net
                 jit = 0.004 * np.sin(ys * 60 + t * 40) if k == 0 else 0.0
                 P = np.stack([np.full(n, sweep_x - k * 0.030) + jit, ys], axis=1)
                 px, py = self.to_px(P, collapse)
-                beam.add(px, py, (1.35 if k == 0 else 0.42) * (0.62 ** k))
-            for gx, gw in ((sweep_x - 0.55, 0.16), (sweep_x - 1.05, 0.07)):
-                if gx > -1.9:
-                    P = np.stack([np.full(400, gx), np.linspace(-0.95, 0.95, 400)], axis=1)
-                    px, py = self.to_px(P, collapse)
-                    beam.add(px, py, gw)
+                beam.add(px, py, taper * (0.85 if k == 0 else 0.28) * (0.62 ** k))
 
         # ---- 4. la forme d'onde du morceau
         a_wave = 0.0
