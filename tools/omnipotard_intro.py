@@ -39,7 +39,7 @@ VERT_FLUO = (0.24, 1.00, 0.16)   # #39FF14
 VERT_HALO = (0.10, 1.00, 0.34)   # halo legerement plus froid
 
 SR = 48000
-DUREE_REF = 11.0                 # 16 temps a ~87 BPM
+DUREE_REF = 9.625                # 14 temps a 87 BPM
 
 
 # ==========================================================================
@@ -503,9 +503,7 @@ def _fft_conv(x, h):
 def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
     """Renvoie {'stereo', 'mono', 'events', 'sr'} — dub ambient en 4 mesures."""
     tl = Timeline(duration)
-    beat = duration / 8.0                 # 8 temps sur toute la piece...
-    while beat > 0.95:
-        beat *= 0.5                       # ...sans jamais descendre sous ~80 BPM
+    beat = duration / 14.0                # 14 temps sur toute la piece (87 BPM)
     six = beat / 4.0
     n = int(duration * sr) + 1
     rng = np.random.default_rng(seed)
@@ -688,14 +686,14 @@ def write_wav(path, data, sr=SR):
 
 class Timeline:
     REF = DUREE_REF
-    KEYS = [                       # cales sur les temps (0,6875 s)
-        ("boot", 0.000, 1.031),    # la piste s'enregistre
-        ("sweep", 1.031, 2.750),   # le clip se transforme en machine (2,5 temps)
-        ("groove", 2.750, 5.500),  # une mesure pleine de groove
-        ("melt", 5.500, 6.875),    # break : souffle vers l'impact
-        ("title", 6.875, 9.625),   # le fil ecrit le logo, lettre par lettre
-        ("hold", 9.625, 10.650),
-        ("out", 10.650, 11.000),
+    KEYS = [                        # cales sur les temps (0,6875 s)
+        ("boot", 0.0000, 1.0313),   # la piste s'enregistre
+        ("sweep", 1.0313, 3.4375),  # le clip se transforme en machine
+        ("groove", 2.7500, 4.8125),  # le drop tombe avant la fin de la mue : la
+        ("melt", 4.8125, 5.5000),   # machine joue deja pendant qu'elle se
+        ("title", 5.5000, 8.2500),  # termine, ce qui resserre le montage
+        ("hold", 8.2500, 9.3500),
+        ("out", 9.3500, 9.6250),
     ]
 
     def __init__(self, duration):
@@ -714,8 +712,8 @@ class Timeline:
         return self.seg[name][1]
 
 
-GLITCHES = [(2.72, .09), (4.12, .05), (5.48, .10), (6.85, .11),
-            (9.60, .06), (10.10, .05), (10.40, .06)]
+GLITCHES = [(2.73, .09), (3.78, .05), (4.79, .10), (5.47, .11),
+            (8.23, .06), (8.80, .05), (9.10, .06)]
 
 
 # ==========================================================================
@@ -785,6 +783,7 @@ class Renderer:
         self.ev_pad = np.array([e[1] for e in ev], dtype=np.int32)
         self.ev_f = np.array([e[2] for e in ev], dtype=np.float64)
         self.ev_d = np.array([e[3] for e in ev], dtype=np.float64)
+        self.ev_bass = self.ev_pad <= 3          # grosse caisse et notes de basse
 
         # ---- geometrie
         self.mpc = build_mpc()
@@ -875,6 +874,14 @@ class Renderer:
                 out[int(pad)] = max(out.get(int(pad), 0.0), float(val))
         return out
 
+    def bass_hit(self, t):
+        """Enveloppe des coups graves : le fil d'onde s'allume dessus."""
+        dt = t - self.ev_t
+        m = (dt >= 0.0) & (dt < 1.0) & self.ev_bass
+        if not np.any(m):
+            return 0.0
+        return float(np.max(self.ev_f[m] * np.exp(-self.ev_d[m] * 1.15 * dt[m])))
+
     def step_index(self, t):
         return int((t - self.tl.start("groove")) / self.six) % 16
 
@@ -961,21 +968,37 @@ class Renderer:
         out[:, 0] = P[:, 0] + 0.05 * k * np.sin(P[:, 1] * 9.0 + t * 3.0)
         return out
 
-    def _wave_line(self, beam, t, collapse, alpha, xf=None, thick=True):
-        """La courbe du morceau. Passe le front `xf` : elle s'efface derriere."""
+    def body_mask(self, x, sweep_x, melt):
+        """1 la ou le chassis de la machine masque le fil d'onde."""
+        inside = (smoothstep(BODY[0] - 0.05, BODY[0] + 0.03, x)
+                  * (1.0 - smoothstep(BODY[2] - 0.03, BODY[2] + 0.05, x)))
+        return inside * self.morph_at(x, sweep_x) * (1.0 - melt)
+
+    def _wave_line(self, beam, t, collapse, alpha, xf=None, sweep_x=None,
+                   melt=0.0, thick=True):
+        """Le fil du morceau : il entre par la gauche, disparait derriere la
+        machine et ressort a droite — la MPC est un morceau de la bande."""
         if alpha <= 0.01:
             return
         xs = np.linspace(-1.88, 1.88, 2600)
         a = np.full(len(xs), float(alpha))
         if xf is not None:
             a *= smoothstep(xf - 0.16, xf + 0.02, xs)
+        if sweep_x is not None:
+            a *= 1.0 - self.body_mask(xs, sweep_x, melt)
+            a *= self.morph_at(xs, sweep_x)      # nait a mesure que le clip fond
+        hit = self.bass_hit(t)
         P = np.stack([xs, self.wave_y(xs, t)], axis=1)
         px, py = self.to_px(P, collapse)
-        beam.add(px, py, 0.85 * a)
+        beam.add(px, py, 0.85 * a * (1.0 + 0.85 * hit))
         if thick:
             for dy in (0.0035, -0.0035):
                 px, py = self.to_px(P + np.array([0.0, dy]), collapse)
-                beam.add(px, py, 0.35 * a)
+                beam.add(px, py, 0.35 * a * (1.0 + 0.7 * hit))
+        if hit > 0.15:                            # halo sur les coups graves
+            for dy in (0.012, -0.012, 0.022, -0.022):
+                px, py = self.to_px(P + np.array([0.0, dy]), collapse)
+                beam.add(px, py, 0.30 * a * hit)
 
     def _daw_clip(self, beam, t, collapse, sweep_x, rng):
         """Ouverture : une piste qui s'enregistre, facon station de travail.
@@ -1089,22 +1112,24 @@ class Renderer:
             w = 0.50 * pulse * mo + 0.055 * ghost * (1.0 - mo)   # liseré d'annonce
             w += 1.2 * np.exp(-((mo - 0.55) / 0.30) ** 2)            # front de mue
             tag = p.tag
+            boost = 0.0
             if tag.startswith("pad"):
                 k = int(tag[3:])
                 if k in flashes:
-                    w += 1.7 * flashes[k]
+                    boost = 1.7 * flashes[k]
             elif tag.startswith("step"):
                 k = int(tag[4:])
                 if k == step:
-                    w += 1.9
+                    boost = 1.9
                 elif k in STEP_LIT:
-                    w += 0.30
+                    boost = 0.30
             elif tag == "strip":
-                w += 0.8 * e_high
+                boost = 0.8 * e_high
             elif tag.startswith("qlink"):
-                w += 0.45 * e_low
+                boost = 0.45 * e_low
             elif tag == "wheel":
-                w += 0.30 * e_full
+                boost = 0.30 * e_full
+            w = w + boost * mo
             if melt > 0:
                 w *= (1.0 - melt) ** 0.7
                 P = self._melt(P, melt, t)
@@ -1118,18 +1143,20 @@ class Renderer:
         # pads allumes : remplissage
         for k, v in flashes.items():
             x0, _, _, _ = pad_rect(k // 4, k % 4)
-            if x0 <= sweep_x and v > 0.05:
-                self._dyn(beam, pad_fill(k), 1.05 * v, collapse, melt, t)
+            mk = float(self.morph_at(x0, sweep_x))
+            if mk > 0.4 and v > 0.05:
+                self._dyn(beam, pad_fill(k), 1.05 * v * mk, collapse, melt, t)
 
         # bande de 16 pas : le pas courant s'allume
         if live and 0 <= step < 16:
             x0, y0, x1, y1 = step_rect(step)
-            if x0 <= sweep_x:
-                self._dyn(beam, rect_fill(x0, y0, x1, y1, 4), 0.95, collapse, melt, t)
+            mk = float(self.morph_at(x0, sweep_x))
+            if mk > 0.4:
+                self._dyn(beam, rect_fill(x0, y0, x1, y1, 4), 0.95 * mk, collapse, melt, t)
 
         # Q-Links : index qui tourne + bandeau qui se remplit
         for k, (cx, cy) in enumerate(QLINK):
-            if cx > sweep_x:
+            if self.morph_at(cx, sweep_x) < 0.5:
                 continue
             v = np.clip(0.18 + 0.62 * (e_low if k % 2 == 0 else e_high)
                         + 0.20 * math.sin(t * 1.7 + k), 0.0, 1.0)
@@ -1141,7 +1168,7 @@ class Renderer:
             self._dyn(beam, P, 1.15, collapse, melt, t)
 
         # touch strip : curseur lumineux
-        if STRIP[0] <= sweep_x:
+        if self.morph_at(STRIP[0], sweep_x) > 0.5:
             sy = STRIP[1] + (STRIP[3] - STRIP[1]) * np.clip(0.12 + 0.8 * e_high, 0, 1)
             self._dyn(beam, rect_fill(STRIP[0] + 0.014, sy - 0.026,
                                       STRIP[2] - 0.014, sy + 0.026, 4),
@@ -1149,9 +1176,10 @@ class Renderer:
 
         # ecran : forme d'onde du morceau + niveaux
         sx0, sy0, sx1, sy1 = SCREEN
-        if sx0 <= sweep_x:
+        if self.morph_at(sx0, sweep_x) > 0.5:
             m = 0.05
-            x_lo, x_hi = sx0 + m, min(sx1 - m, sweep_x)
+            x_hi = sx1 - m if self.morph_at(sx1, sweep_x) > 0.5 else min(sx1 - m, sweep_x)
+            x_lo = sx0 + m
             if x_hi - x_lo > 0.05:
                 xs = np.linspace(x_lo, x_hi, 320)
                 u = (xs - (sx0 + m)) / ((sx1 - m) - (sx0 + m)) * 2.0 - 1.0
@@ -1163,7 +1191,7 @@ class Renderer:
                     v = (e_low, e_full, e_high)[k % 3] * (0.5 + 0.5 * math.sin(k * 1.7 + t * 5.0))
                     v = max(0.06, v)
                     bx = sx0 + m + (k + 0.5) * ((sx1 - m - sx0 - m) / 8.0)
-                    if bx > sweep_x:
+                    if bx > x_hi:
                         continue
                     P, _, _ = resample([(bx, base), (bx, base + 0.16 * v)])
                     self._dyn(beam, P, 0.8, collapse, melt, t)
@@ -1194,7 +1222,8 @@ class Renderer:
         w = self.tw * (0.12 + 0.88 * k)
         w = w + 2.4 * np.exp(-((k - 0.62) / 0.26) ** 2) * (xf < 1.9)   # eclat de detachement
         if xf >= 1.9:
-            w = self.tw * (1.0 + 0.10 * self.env_at(self.e_low, t))
+            w = self.tw * (1.0 + 0.10 * self.env_at(self.e_low, t)
+                           + 0.45 * self.bass_hit(t))
         if u_out > 0:
             w = w * max(0.0, 1.0 - u_out * 1.35)
 
@@ -1263,8 +1292,8 @@ class Renderer:
         # ---- 1 et 2. le clip qui s'enregistre, puis le balayage
         u_sweep = tl.at("sweep", t)
         us = np.clip(u_sweep, 0, 1)
-        sweep_x = -1.85 + 4.35 * (0.55 * us + 0.45 * ease_in_out(us)) if u_sweep > 0 else -1.85
-        if t < tl.start("groove"):
+        sweep_x = -1.85 + 4.55 * (0.55 * us + 0.45 * ease_in_out(us)) if u_sweep > 0 else -1.85
+        if t < tl.end("sweep"):
             self._daw_clip(beam, t, collapse, sweep_x, rng)
 
         # ---- 3. la machine
@@ -1286,13 +1315,13 @@ class Renderer:
         # ---- 4. la forme d'onde du morceau
         a_wave = 0.0
         if t >= tl.start("groove"):
-            a_wave = 0.24 * smoothstep(tl.start("groove"), tl.start("groove") + 0.5, t)
+            a_wave = 0.48 * smoothstep(tl.start("groove"), tl.start("groove") + 0.4, t)
         if t >= tl.start("melt"):
-            a_wave = 0.24 + 0.76 * smoothstep(tl.start("melt"), tl.start("melt") + 0.55, t)
+            a_wave = 0.48 + 0.52 * smoothstep(tl.start("melt"), tl.start("melt") + 0.45, t)
         xf = self.title_front(t) if t >= tl.start("title") else None
         if u_out > 0:
             a_wave *= max(0.0, 1.0 - u_out * 1.6)
-        self._wave_line(beam, t, collapse, a_wave, xf)
+        self._wave_line(beam, t, collapse, a_wave, xf, sweep_x, melt)
 
         # ---- 5. le titre, ecrit par la courbe
         if t >= tl.start("title") and u_out < 0.95:

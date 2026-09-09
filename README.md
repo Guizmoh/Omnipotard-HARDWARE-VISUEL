@@ -7,7 +7,7 @@ sort, écrit d'un seul trait continu par la courbe audio.
 
 ![affiche](out/omnipotard_poster.png)
 
-## Le déroulé (11 s — 16 temps à ~87 BPM, 1920×1080 @ 60 fps)
+## Le déroulé (9,6 s — 14 temps à 87 BPM, 1920×1080 @ 60 fps)
 
 Tout est calé sur la grille musicale : le balayage se termine **pile sur le
 drop**, et le titre apparaît **pile sur l'impact**.
@@ -15,12 +15,12 @@ drop**, et le titre apparaît **pile sur l'impact**.
 | temps | séquence | ce qui se passe |
 |---|---|---|
 | 0,0 – 1,03 s | **enregistrement** | une piste s'enregistre comme dans une station de travail : cadre de clip, bandeau « AUDIO 01 », règle temporelle, témoin REC, et la **forme d'onde du morceau** qui se remplit de gauche à droite derrière la tête d'enregistrement |
-| 1,03 – 2,75 s | **transformation** | le clip **se déplie en MPC Live III** : chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place, de gauche à droite, pendant que le clip s'efface d'autant. La zone de mue est large — à chaque instant une bonne partie de la machine est en train de s'ouvrir — et un liseré annonce les organes avant qu'ils ne se déploient |
-| 2,75 – 5,5 s | **groove dub** | drop : la machine joue, pads, bande de 16 pas, Q-Links, touch strip et écran bougent **sur les évènements réels de la bande-son** |
-| 5,5 – 6,88 s | **break** | souffle ; la machine fond dans la forme d'onde du morceau |
-| 6,88 – 9,63 s | **titre** | impact, puis un front de lecture **balaie lentement de gauche à droite** : les lettres se détachent du fil d'onde une par une (une par double-croche), puis **HARDWARE ONLY** passe sous le nom |
-| 9,63 – 10,65 s | **maintien** | le logo repose sur le fil, qui continue de vibrer avec la musique |
-| 10,65 – 11,0 s | **extinction** | **rafales de glitch** (déchirures, datamosh, pertes de signal, décalage RVB), souffle de sortie, puis collapse cathodique |
+| 1,03 – 3,44 s | **transformation** | le clip **se déplie en MPC Live III** : chaque point de la machine part écrasé dans l'enveloppe de la forme d'onde et s'ouvre à sa place, de gauche à droite. La zone de mue est large — à chaque instant une bonne partie de la machine est en train de s'ouvrir |
+| 2,75 – 4,81 s | **groove dub** | le drop tombe **avant la fin de la mue** : la machine joue déjà (pads, bande de 16 pas, écran) pendant que son flanc droit finit de se déployer |
+| 4,81 – 5,5 s | **break** | souffle ; la machine fond dans la forme d'onde du morceau |
+| 5,5 – 8,25 s | **titre** | impact, puis un front de lecture **balaie lentement de gauche à droite** : les lettres se détachent du fil d'onde une par une, puis **HARDWARE ONLY** passe sous le nom |
+| 8,25 – 9,35 s | **maintien** | le logo repose sur le fil, qui continue de vibrer avec la musique |
+| 9,35 – 9,63 s | **extinction** | **rafales de glitch** (déchirures, datamosh, pertes de signal, décalage RVB), souffle de sortie, puis collapse cathodique |
 
 ## L'image est pilotée par le son
 
@@ -39,6 +39,11 @@ refaire à la main :
 - chaque pad s'allume sur l'évènement qui le déclenche : grosse caisse, rimshot,
   charley, notes de basse, accords ;
 - la bande de 16 pas suit le pas courant du séquenceur ;
+- le fil d'onde **s'allume légèrement à chaque coup grave** (grosse caisse et
+  notes de basse), avec un halo qui s'ajoute au trait ;
+- pendant le groove, le fil **passe derrière la machine** : il entre par le bord
+  gauche, disparaît sous le châssis et ressort à droite — la MPC est un morceau
+  de la bande ;
 - les Q-Links, les bandeaux, le touch strip et les vu-mètres de l'écran suivent
   les enveloppes grave / medium / aigu.
 
@@ -60,7 +65,7 @@ python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4
 ```
 
 Le rendu est **déterministe** (tout est graine + temps) : deux exécutions
-donnent le même fichier au bit près. Environ 2 min 15 sur 4 cœurs.
+donnent le même fichier au bit près. Environ 1 min 55 sur 4 cœurs.
 
 ### Options utiles
 
@@ -72,7 +77,7 @@ python3 tools/omnipotard_intro.py -W 3840 -H 2160 -o out/intro_4k.mp4
 python3 tools/omnipotard_intro.py -W 1080 -H 1920 -o out/intro_vertical.mp4
 
 # images clés en PNG, pour vérifier avant d'encoder
-python3 tools/omnipotard_intro.py --stills out/stills --still-times 0.9,2.1,4.2,8.4,10.0
+python3 tools/omnipotard_intro.py --stills out/stills --still-times 0.6,1.9,2.85,4.3,8.9
 
 # variantes
 --duration 8        # toute la timeline se remet à l'échelle (le tempo reste dans les 80-90 BPM)
@@ -93,7 +98,12 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
   dictionnaire `GLYPHS` (ajouter une lettre = ajouter ses traits) ; chaque glyphe
   doit toucher `y = 0` pour rester accroché au fil ;
 - **l'amortissement de l'onde sous le mot** : `Renderer.wave_mod()` ;
-- **la mue du clip en machine** : `Renderer.morph_at()` (élargir le dénominateur ralentit l'ouverture de chaque organe) et `clip_env()` ;
+- **la mue du clip en machine** : `Renderer.morph_at()` (élargir le dénominateur
+  ralentit l'ouverture de chaque organe) et `clip_env()` ;
+- **le fil masqué par la machine** : `Renderer.body_mask()` ;
+- **le halo sur les graves** : `Renderer.bass_hit()` ;
+- **le recouvrement groove / mue** : les bornes `sweep` et `groove` de
+  `Timeline.KEYS` se chevauchent volontairement ;
 - **la place du mot dans la courbe** : `TITLE_H`, `CURVE_AMP` (amplitude de
   l'onde), `CURVE_WIN` (base de temps affichée), `MOD_OF` (à quel point chaque
   partie du tracé ondule avec la musique) ;
@@ -120,6 +130,6 @@ Tout est dans `tools/omnipotard_intro.py`, en unités « demi-hauteur d'image »
 |---|---|
 | `out/omnipotard_intro_1080p60_web.mp4` | version légère — partage, réseaux, prévisualisation |
 | `out/omnipotard_poster.png` | image fixe du titre (vignette) |
-| `out/omnipotard_intro_1080p60.mp4` | master CRF 19 (~25 Mo) pour le montage — **non versionné** : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 19` |
+| `out/omnipotard_intro_1080p60.mp4` | master CRF 19 (~22 Mo) pour le montage — **non versionné** : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 19` |
 
 Le rendu étant déterministe, cette commande reproduit le master à l'identique.
