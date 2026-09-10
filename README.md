@@ -186,3 +186,33 @@ Les options se combinent : `--palette orange --subtitle "DAWLESS MUSIC"`.
 | `out/omnipotard_intro_1080p60.mp4` | master CRF 19 (~22 Mo) pour le montage — **non versionné** : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 19` |
 
 Le rendu étant déterministe, cette commande reproduit le master à l'identique.
+
+## MPC PERFORMANCE — la machine joue le morceau en entier
+
+`tools/mpc_performance.py` reutilise le meme moteur (geometrie, detection de
+batterie, rendu du faisceau) pour un usage different de l'intro : donner un
+morceau — n'importe lequel, n'importe quelle duree — et obtenir une video ou
+la MPC Live III le joue du debut a la fin. Pas de scenario (pas de clip qui
+s'enregistre, pas de titre, pas de zoom) : la machine est deployee des la
+premiere image, un simple fondu ouvre et ferme la video.
+
+```bash
+python3 tools/mpc_performance.py assets/hint.mp3 -o out/mpc_performance.mp4
+
+# apercu rapide avant de lancer le morceau entier
+python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out/preview.mp4
+```
+
+- Le tempo et la phase de la bande de 16 pas sont recales sur les vraies
+  grosses caisses du morceau (`detect_beat`, `estimate_phase`).
+- Les pads s'allument sur les coups reels (`detect_hits`, deja utilise dans
+  l'intro) : grave -> grosse caisse, medium -> caisse claire/percu, aigu ->
+  charley.
+- `--palette` (vert/orange/bleu/bleu-fond), `--fps`, `-W/-H` fonctionnent
+  comme dans l'intro. Par defaut 30 fps (un morceau entier est long a
+  rendre ; 60 fps double le temps de calcul pour un gain surtout sensible
+  sur les mouvements rapides de l'intro).
+- Rendu non temps reel : c'est un pipeline hors-ligne (image par image, puis
+  encodage), pas un instrument qui reagirait en direct a un micro ou une
+  entree ligne — ce dernier est un projet different (capture audio et
+  affichage en direct sur votre machine), que ce script ne couvre pas.
