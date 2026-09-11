@@ -27,6 +27,7 @@ Pour un apercu rapide avant de lancer le morceau entier :
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,8 +37,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
-    SR, PALETTES, Renderer, Beam, _decode, _lowpass, detect_beat, detect_hits,
-    write_wav, PAD_OF,
+    SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
+    detect_hits, hex_to_rgb, write_wav, PAD_OF,
 )
 
 
@@ -130,9 +131,12 @@ def load_full_track(path, start, duration, sr=SR):
     return audio, estimate_phase(events, beat / 4.0), drops
 
 
+
+
 def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True,
-                               seed=7, palette="vert"):
-    r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed, palette=palette)
+                              seed=7, palette="vert", **bgkw):
+    r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
+                 palette=palette, **bgkw)
     # La machine est deja entierement deployee et joue en continu : on
     # neutralise tout ce qui, dans le moteur de l'intro, appartient au
     # scenario (reveal, pre-lueur, ecran qui se cache au zoom, extinction
@@ -168,12 +172,146 @@ def frame_performance(r, t, duration):
     return img
 
 
+# ==========================================================================
+#  API : analyser, previsualiser, rendre
+#
+#  Ces trois fonctions sont ce qu'appellent la ligne de commande (plus bas)
+#  et le studio (tools/studio.py). Elles ne dependent d'aucune interface.
+# ==========================================================================
+
 _R = None
 _DUR = 0.0
 
 
 def _worker(i):
     return frame_performance(_R, i / _R.fps, _DUR).tobytes()
+
+
+def clamp_span(music, start, duration):
+    """Ramene (depart, duree) a ce que le morceau contient reellement."""
+    total = probe_duration(music)
+    start = max(0.0, min(float(start), max(0.0, total - 0.5)))
+    avail = max(0.0, total - start)
+    dur = min(float(duration), avail) if duration else avail
+    return total, start, dur
+
+
+def analyze(music, start=0.0, duration=None):
+    """Tempo, coups de batterie et paroxysmes, sans rien rendre."""
+    total, start, dur = clamp_span(music, start, duration)
+    if dur <= 0.5:
+        raise ValueError("rien a traiter : depart (%.2fs) au-dela du morceau "
+                         "(%.2fs)" % (start, total))
+    audio, phi, drops = load_full_track(music, start, dur)
+    return {"total": total, "start": start, "duration": dur,
+            "beat": audio["beat"], "bpm": 60.0 / audio["beat"],
+            "hits": len(audio["events"]), "drops": drops,
+            "_audio": audio, "_phi": phi}
+
+
+def _renderer(info, width, height, fps, seed, curve, palette, bgkw):
+    return make_performance_renderer(
+        width, height, fps, info["duration"], info["_audio"], info["_phi"],
+        info["drops"], curve=curve, seed=seed, palette=palette, **bgkw)
+
+
+def render_still(music, t, width=960, height=540, fps=30, start=0.0,
+                 duration=None, seed=7, curve=True, palette="vert",
+                 info=None, **bgkw):
+    """Une seule image, pour juger d'une couleur ou d'un fond sans attendre
+    un rendu complet."""
+    info = info or analyze(music, start, duration)
+    r = _renderer(info, width, height, fps, seed, curve, palette, bgkw)
+    t = max(0.0, min(float(t), info["duration"] - 1.0 / fps))
+    return frame_performance(r, t, info["duration"])
+
+
+def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
+                 fps=30, crf=20, jobs=None, seed=7, curve=True, palette="vert",
+                 info=None, progress=None, **bgkw):
+    """Rend la video complete et y remet le son.
+
+    `progress(done, total, elapsed)` est appele au fil de l'eau ; renvoie le
+    dictionnaire d'analyse.
+    """
+    global _R, _DUR
+    info = info or analyze(music, start, duration)
+    dur = info["duration"]
+    jobs = jobs or os.cpu_count() or 2
+
+    _DUR = dur
+    _R = _renderer(info, width, height, fps, seed, curve, palette, bgkw)
+
+    nframes = int(round(dur * fps))
+    tmpdir = tempfile.mkdtemp(prefix="mpcperf_")
+    wav = os.path.join(tmpdir, "track.wav")
+    write_wav(wav, info["_audio"]["stereo"], info["_audio"]["sr"])
+
+    outdir = os.path.dirname(os.path.abspath(out))
+    if outdir:
+        os.makedirs(outdir, exist_ok=True)
+
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+           "-f", "rawvideo", "-pix_fmt", "rgb24",
+           "-s", "%dx%d" % (width, height), "-r", str(fps), "-i", "-",
+           "-i", wav,
+           "-c:v", "libx264", "-preset", "slow", "-crf", str(crf),
+           "-pix_fmt", "yuv420p", "-profile:v", "high", "-movflags", "+faststart",
+           "-x264-params", "keyint=%d" % (fps * 2),
+           "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-shortest", out]
+
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    t0 = time.time()
+    try:
+        if jobs > 1:
+            import multiprocessing as mp
+            chunk = max(jobs, 24)
+            with mp.get_context("fork").Pool(jobs) as pool:
+                for s0 in range(0, nframes, chunk):
+                    idx = range(s0, min(nframes, s0 + chunk))
+                    for buf in pool.map(_worker, idx, chunksize=1):
+                        proc.stdin.write(buf)
+                    if progress:
+                        progress(min(nframes, s0 + chunk), nframes, time.time() - t0)
+        else:
+            for i in range(nframes):
+                proc.stdin.write(_worker(i))
+                if progress and i % 12 == 0:
+                    progress(i + 1, nframes, time.time() - t0)
+    finally:
+        proc.stdin.close()
+        proc.wait()
+    if proc.returncode:
+        raise RuntimeError("ffmpeg a echoue (code %d)" % proc.returncode)
+    if progress:
+        progress(nframes, nframes, time.time() - t0)
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    return info
+
+
+# ==========================================================================
+#  Ligne de commande
+# ==========================================================================
+
+def add_look_args(ap):
+    """Options de rendu partagees avec le studio."""
+    ap.add_argument("--palette", default="vert", choices=sorted(PALETTES),
+                    help="teinte du trait")
+    ap.add_argument("--bg", default=None, choices=BACKGROUNDS,
+                    help="fond de dalle (defaut : celui de la palette)")
+    ap.add_argument("--bg-color", default=None,
+                    help="couleur du fond en hexa, ex. #101828")
+    ap.add_argument("--bg-strength", type=float, default=1.0,
+                    help="intensite du fond (0 = noir)")
+    ap.add_argument("--bg-clear", type=float, default=0.55,
+                    help="0 a 1 : creuse le fond derriere la machine")
+
+
+def look_kwargs(args):
+    return {"bg": args.bg,
+            "bg_color": hex_to_rgb(args.bg_color) if args.bg_color else None,
+            "bg_strength": args.bg_strength,
+            "bg_clear": args.bg_clear}
 
 
 def main():
@@ -191,81 +329,48 @@ def main():
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--no-curve", action="store_true")
-    ap.add_argument("--palette", default="vert", choices=sorted(PALETTES))
     ap.add_argument("--stills", default="")
     ap.add_argument("--still-times", default="")
+    add_look_args(ap)
     args = ap.parse_args()
 
-    total = probe_duration(args.music)
-    avail = max(0.0, total - args.start)
-    duration = min(args.duration, avail) if args.duration else avail
-    if duration <= 0.5:
-        sys.exit("rien a traiter : depart (%.2fs) au-dela du morceau (%.2fs)"
-                 % (args.start, total))
+    try:
+        info = analyze(args.music, args.start, args.duration)
+    except ValueError as e:
+        sys.exit(str(e))
 
-    t0 = time.time()
-    audio, phi, drops = load_full_track(args.music, args.start, duration)
     print("morceau %s  [%.2f -> %.2f s / %.2f s]  battement %.4f s (%.1f BPM)"
-          "  %d coups  phase %.3f s  %d paroxysmes  (analyse en %.1fs)"
-          % (args.music, args.start, args.start + duration, total, audio["beat"],
-             60.0 / audio["beat"], len(audio["events"]), phi, len(drops),
-             time.time() - t0), flush=True)
-    if drops:
-        print("  glitchs a : %s" % ", ".join("%.1fs" % d for d in drops), flush=True)
+          "  %d coups  phase %.3f s  %d paroxysmes"
+          % (args.music, info["start"], info["start"] + info["duration"],
+             info["total"], info["beat"], info["bpm"], info["hits"],
+             info["_phi"], len(info["drops"])), flush=True)
+    if info["drops"]:
+        print("  glitchs a : %s"
+              % ", ".join("%.1fs" % d for d in info["drops"]), flush=True)
 
-    global _R, _DUR
-    _DUR = duration
-    _R = make_performance_renderer(args.width, args.height, args.fps, duration,
-                                   audio, phi, drops, curve=not args.no_curve,
-                                   seed=args.seed, palette=args.palette)
+    look = look_kwargs(args)
+    common = dict(width=args.width, height=args.height, fps=args.fps,
+                  seed=args.seed, curve=not args.no_curve,
+                  palette=args.palette, info=info, **look)
 
     if args.stills:
         from PIL import Image
         os.makedirs(args.stills, exist_ok=True)
         for ts in [float(x) for x in args.still_times.split(",") if x.strip()]:
-            Image.fromarray(frame_performance(_R, ts, duration)).save(
+            Image.fromarray(render_still(args.music, ts, **common)).save(
                 os.path.join(args.stills, "t%06.2f.png" % ts))
             print("still %.2fs" % ts, flush=True)
         return
 
-    nframes = int(round(duration * args.fps))
-    tmpdir = tempfile.mkdtemp(prefix="mpcperf_")
-    wav = os.path.join(tmpdir, "track.wav")
-    write_wav(wav, audio["stereo"], audio["sr"])
+    def show(done, total, el):
+        print("\r  %d/%d frames  %.0fs  (eta %.0fs)"
+              % (done, total, el, el / max(done, 1) * (total - done)),
+              end="", flush=True)
 
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-           "-f", "rawvideo", "-pix_fmt", "rgb24",
-           "-s", "%dx%d" % (args.width, args.height), "-r", str(args.fps), "-i", "-",
-           "-i", wav,
-           "-c:v", "libx264", "-preset", "slow", "-crf", str(args.crf),
-           "-pix_fmt", "yuv420p", "-profile:v", "high", "-movflags", "+faststart",
-           "-x264-params", "keyint=%d" % (args.fps * 2),
-           "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-shortest", args.out]
-
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    t0 = time.time()
-    try:
-        if args.jobs > 1:
-            import multiprocessing as mp
-            chunk = max(args.jobs, 24)
-            with mp.get_context("fork").Pool(args.jobs) as pool:
-                for start in range(0, nframes, chunk):
-                    idx = range(start, min(nframes, start + chunk))
-                    for buf in pool.map(_worker, idx, chunksize=1):
-                        proc.stdin.write(buf)
-                    done = min(nframes, start + chunk)
-                    el = time.time() - t0
-                    print("\r  %d/%d frames  %.0fs  (eta %.0fs)"
-                          % (done, nframes, el, el / done * (nframes - done)),
-                          end="", flush=True)
-        else:
-            for i in range(nframes):
-                proc.stdin.write(_worker(i))
-    finally:
-        proc.stdin.close()
-        proc.wait()
+    render_video(args.music, args.out, crf=args.crf, jobs=args.jobs,
+                 progress=show, **common)
     print("\n%s  (%.1f s, %dx%d @ %dfps)"
-          % (args.out, duration, args.width, args.height, args.fps))
+          % (args.out, info["duration"], args.width, args.height, args.fps))
 
 
 if __name__ == "__main__":

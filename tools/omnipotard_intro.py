@@ -44,6 +44,96 @@ PALETTES = {
                   (0.022, 0.066, 0.168)),
 }
 
+# Fonds de dalle. Le faisceau est additif : un fond clair mange le contraste
+# du trait. Toutes ces textures restent donc sombres, et se creusent derriere
+# la machine (voir `clear`) pour qu'elle garde son relief.
+BACKGROUNDS = ("noir", "uni", "grille", "points", "scan", "degrade", "bruit")
+
+
+def hex_to_rgb(x):
+    """#rrggbb (ou rrggbb, ou #rgb) -> (r, g, b) en 0..1."""
+    x = str(x).strip().lstrip("#")
+    if len(x) == 3:
+        x = "".join(c * 2 for c in x)
+    if len(x) != 6:
+        raise ValueError("couleur invalide : %s" % x)
+    return tuple(int(x[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+
+
+def rgb_to_hex(c):
+    return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(v * 255)))) for v in c)
+
+
+def make_background(w, h, kind="noir", color=(0.0, 0.0, 0.0), strength=1.0,
+                    clear=0.55, scale=None, seed=11):
+    """Construit le fond, une fois pour toutes.
+
+    Renvoie soit une couleur diffusable (1,1,3), soit une vraie image (h,w,3)
+    que `colorize` additionne telle quelle sous les scanlines, le vignettage
+    et le grain — la texture est donc travaillee comme le reste de la dalle.
+
+    `clear` (0 a 1) creuse la texture derriere la machine : c'est ce qui lui
+    permet de ressortir meme sur un fond colore.
+    """
+    col = np.float32(color) * float(strength)
+    if kind in ("noir", "none") or strength <= 0.0 or not np.any(col > 0):
+        return np.float32((0.0, 0.0, 0.0)).reshape(1, 1, 3)
+    if kind == "uni" and clear <= 0.0:
+        return col.reshape(1, 1, 3)
+
+    yy = np.arange(h, dtype=np.float32)[:, None]
+    xx = np.arange(w, dtype=np.float32)[None, :]
+    pitch = max(6.0, h / 24.0)                  # maille ~24 cases sur la hauteur
+
+    if kind == "uni":
+        pat = np.ones((h, w), dtype=np.float32)
+    elif kind == "grille":
+        # papier millimetre d'oscilloscope : trait fin, et un trait fort
+        # toutes les cinq cases.
+        def lines(u, period, width):
+            d = np.abs((np.mod(u + period * 0.5, period) - period * 0.5))
+            return np.clip(1.0 - d / width, 0.0, 1.0)
+        fine = np.maximum(lines(xx, pitch, 1.1), lines(yy, pitch, 1.1))
+        fort = np.maximum(lines(xx, pitch * 5, 1.5), lines(yy, pitch * 5, 1.5))
+        pat = 0.22 + 0.55 * fine + 0.85 * fort
+    elif kind == "points":
+        def dots(u, period):
+            d = np.abs(np.mod(u + period * 0.5, period) - period * 0.5)
+            return np.clip(1.0 - d / 1.6, 0.0, 1.0)
+        pat = 0.16 + 1.05 * (dots(xx, pitch) * dots(yy, pitch))
+    elif kind == "scan":
+        # lignes de tube serrees, dans l'axe des scanlines de la dalle
+        pat = 0.30 + 0.80 * (0.5 + 0.5 * np.cos(yy * (2.0 * math.pi / max(3.0, pitch * 0.25)))) ** 2
+        pat = pat + np.zeros((1, w), dtype=np.float32)
+    elif kind == "degrade":
+        # sombre au centre, colore vers les bords : le regard va au milieu
+        ny = (yy / h - 0.5) * 2.0
+        nx = (xx / w - 0.5) * 2.0
+        r = np.sqrt(nx * nx * 0.62 + ny * ny)
+        pat = np.clip(r, 0.0, 1.0) ** 1.6
+        pat = 0.10 + 1.15 * pat
+    elif kind == "bruit":
+        # grain fixe : une matiere, pas un scintillement (il ne bouge pas
+        # d'une image a l'autre, sinon il rivaliserait avec le grain anime)
+        rng = np.random.default_rng(seed)
+        n = rng.standard_normal((max(2, h // 3), max(2, w // 3))).astype(np.float32)
+        n = upsample(gauss(n, 0.8), 3, (h, w))
+        pat = np.clip(0.55 + 0.75 * n, 0.0, 2.0)
+    else:
+        raise ValueError("fond inconnu : %s" % kind)
+
+    if clear > 0.0:
+        # creuse une ellipse douce la ou se tient la machine
+        sc = scale if scale else min(h * 0.5, w * 0.5 / 1.30)
+        nx = (xx - w * 0.5) / (1.52 * sc)
+        ny = (yy - h * 0.5) / (1.08 * sc)
+        r = np.sqrt(nx * nx + ny * ny)
+        k = np.clip((r - 0.82) / 0.55, 0.0, 1.0)
+        pat = pat * (1.0 - float(clear) * (1.0 - k * k * (3.0 - 2.0 * k)))
+
+    return (pat[..., None] * col.reshape(1, 1, 3)).astype(np.float32)
+
+
 SR = 48000
 DUREE_REF = 11.5                 # 15 temps + 1s de maintien sur le logo
 MUSIC_PATH = "assets/hint.mp3"   # morceau utilise ; --music pour en changer
@@ -792,7 +882,8 @@ STEP_LIT = frozenset(KICKS + RIMS + HATS + PERCS + SKANKS)
 
 class Renderer:
     def __init__(self, w, h, fps, duration, audio, curve=True, seed=7,
-                 palette="vert", subtitle=SUB_TXT):
+                 palette="vert", subtitle=SUB_TXT, bg=None, bg_color=None,
+                 bg_strength=1.0, bg_clear=0.55):
         self.W, self.H = w, h
         self.fps = fps
         self.dur = duration
@@ -804,10 +895,7 @@ class Renderer:
 
         # la machine reste cadree quel que soit le format (16/9, carre, vertical)
         self.scale = min(h * 0.5, w * 0.5 / 1.30)
-        fluo, halo, hotc, bg = PALETTES[palette]
-        self.c_fluo, self.c_halo = fluo, halo
-        self.c_hot = np.float32(hotc)
-        self.c_bg = np.float32(bg)
+        self.set_look(palette, bg, bg_color, bg_strength, bg_clear)
         self._zoom = 1.0                     # respiration de l'image sur les kicks
         self._cam = (0.0, 0.0)               # camera : centre, puis dans l'ecran
         self._cam_z = 1.0
@@ -1434,6 +1522,28 @@ class Renderer:
 
         return beam.render(), collapse, shake, rng
 
+    def set_look(self, palette="vert", bg=None, bg_color=None,
+                 bg_strength=1.0, bg_clear=0.55):
+        """Change la couleur et le fond sans rien recalculer d'autre.
+
+        Rien de tout cela ne depend du son : on peut donc changer d'allure
+        sur un moteur deja construit, ce dont le studio se sert pour
+        reafficher une image instantanement quand on bouge un curseur.
+
+        `palette` : un nom du catalogue, ou directement les quatre couleurs
+        (coeur, halo, coeur sur-expose, fond) pour une teinte sur mesure.
+        """
+        fluo, halo, hotc, pbg = (PALETTES[palette] if isinstance(palette, str)
+                                 else tuple(palette))
+        self.c_fluo, self.c_halo = tuple(fluo), tuple(halo)
+        self.c_hot = np.float32(hotc)
+        # le fond de la palette reste la valeur par defaut ; `bg` le remplace
+        self.c_bg = make_background(
+            self.W, self.H, kind=bg or "uni",
+            color=pbg if bg_color is None else bg_color,
+            strength=bg_strength, clear=bg_clear if bg else 0.0,
+            scale=self.scale, seed=self.seed)
+
     def colorize(self, field, t, collapse, shake, rng):
         W, H = self.W, self.H
         core = gauss(field, self.sigma)
@@ -1542,6 +1652,13 @@ def main():
     ap.add_argument("--palette", default="vert", choices=sorted(PALETTES),
                     help="couleur du trace (et fond de dalle pour bleu-fond)")
     ap.add_argument("--subtitle", default=SUB_TXT, help="ligne sous le logo")
+    ap.add_argument("--bg", default=None, choices=BACKGROUNDS,
+                    help="fond de dalle (defaut : celui de la palette)")
+    ap.add_argument("--bg-color", default=None, help="couleur du fond, ex. #101828")
+    ap.add_argument("--bg-strength", type=float, default=1.0,
+                    help="intensite du fond (0 = noir)")
+    ap.add_argument("--bg-clear", type=float, default=0.55,
+                    help="0 a 1 : creuse le fond derriere la machine")
     ap.add_argument("--no-curve", action="store_true", help="desactive la courbure CRT")
     ap.add_argument("--no-audio", action="store_true", help="video muette (l'image reste pilotee par le son)")
     ap.add_argument("--stills", default="", help="dossier ou exporter des images cles PNG")
@@ -1561,7 +1678,10 @@ def main():
     global _R
     _R = Renderer(args.width, args.height, args.fps, args.duration, audio,
                   curve=not args.no_curve, seed=args.seed,
-                  palette=args.palette, subtitle=args.subtitle.upper())
+                  palette=args.palette, subtitle=args.subtitle.upper(),
+                  bg=args.bg, bg_strength=args.bg_strength,
+                  bg_clear=args.bg_clear,
+                  bg_color=hex_to_rgb(args.bg_color) if args.bg_color else None)
 
     if args.stills:
         from PIL import Image

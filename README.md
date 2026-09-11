@@ -226,3 +226,60 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
   encodage), pas un instrument qui reagirait en direct a un micro ou une
   entree ligne — ce dernier est un projet different (capture audio et
   affichage en direct sur votre machine), que ce script ne couvre pas.
+
+## STUDIO — l'atelier local
+
+`tools/studio.py` est la version « on charge son morceau et on voit » des deux
+scripts ci-dessus : pas de ligne de commande, une page dans le navigateur.
+
+```bash
+python3 tools/studio.py
+# le navigateur s'ouvre sur http://127.0.0.1:8765
+```
+
+On y dépose un morceau (mp3, wav, flac, m4a…), on choisit la couleur du trait
+et le fond, et **l'aperçu se recalcule à chaque réglage** — c'est une vraie
+image du rendu, pas une simulation : ce qu'on voit est ce qu'on obtient. Le
+bouton *aller au prochain paroxysme* saute là où tomberont les glitchs, pour
+les juger avant de lancer quoi que ce soit.
+
+Le rendu se lance depuis la même page, avec une barre de progression et un
+bouton de téléchargement. Tout ce que le studio fabrique (morceaux déposés et
+vidéos) reste dans `out/studio/`.
+
+Rien ne sort de la machine : le serveur n'écoute que sur `127.0.0.1`, il n'y a
+ni bibliothèque web ni CDN — la page est servie telle quelle, et les seules
+dépendances sont celles du reste du projet (numpy et ffmpeg).
+
+### Couleur
+
+Les quatre palettes du catalogue sont là, plus un mode **couleur libre** : on
+choisit une teinte, et le moteur en dérive les trois couleurs dont il a besoin
+— le cœur du trait, son halo, et sa version sur-exposée. C'est ce triplet qui
+donne au trait son allure de phosphore plutôt que de ligne peinte.
+
+### Fond
+
+Le faisceau est **additif** : un fond clair mange le contraste du trait. Les
+six textures restent donc sombres, et surtout elles se **creusent derrière la
+machine** — c'est le curseur *dégagement*, qui va de 0 (texture uniforme) à 1
+(plus rien derrière la machine). C'est ce qui permet de mettre un fond coloré
+sans que la machine s'y noie.
+
+| fond | ce que c'est |
+| --- | --- |
+| `noir` | rien, comme avant |
+| `uni` | une couleur pleine |
+| `grille` | papier millimétré d'oscilloscope, trait fort toutes les 5 cases |
+| `points` | trame de points aux intersections |
+| `scan` | lignes de tube serrées |
+| `degrade` | sombre au centre, coloré vers les bords — le regard va au milieu |
+| `bruit` | un grain fixe, une matière |
+
+Les mêmes réglages existent en ligne de commande sur les deux autres scripts :
+`--bg`, `--bg-color`, `--bg-strength`, `--bg-clear`.
+
+```bash
+python3 tools/omnipotard_intro.py --palette bleu --bg grille --bg-color '#123a5c'
+python3 tools/mpc_performance.py assets/hint.mp3 --bg degrade --bg-color '#2a0d3f'
+```
