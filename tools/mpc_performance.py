@@ -36,7 +36,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
-    SR, PALETTES, Renderer, Beam, _decode, detect_beat, detect_hits,
+    SR, PALETTES, Renderer, Beam, _decode, _lowpass, detect_beat, detect_hits,
     write_wav, PAD_OF,
 )
 
@@ -66,6 +66,51 @@ def estimate_phase(events, six):
     return best_phi
 
 
+def detect_drops(mono, sr, min_gap=7.0, thresh=0.60, rise=0.16):
+    """Reperage des paroxysmes : les instants ou le morceau repart en force
+    apres une respiration. C'est la, et seulement la, que les glitchs tombent.
+
+    On compare l'energie a celle d'une seconde et demie plus tot : il ne
+    suffit pas d'etre fort, il faut arriver fort.
+    """
+    w = max(1, int(sr * 0.04))                 # enveloppe a 25 Hz
+    n = len(mono) // w
+    if n < 8:
+        return []
+    e = np.abs(mono[:n * w].reshape(n, w)).max(axis=1)
+    e = _lowpass(e, 12)                        # lisse sur ~0,5 s
+    top = e.max()
+    if top <= 0:
+        return []
+    e = e / top
+    fps_e = sr / w
+    back = max(1, int(1.5 * fps_e))
+    out, last = [], -1e9
+    for i in range(back, n):
+        if e[i] > thresh and (e[i] - e[i - back]) > rise:
+            t = i / fps_e
+            if t - last >= min_gap:
+                out.append(t)
+                last = t
+    return out
+
+
+def make_glitch_fn(drops, dur=0.22):
+    """Meme langage visuel que l'intro : une rafale courte qui retombe."""
+    d = np.asarray(drops, dtype=np.float64)
+
+    def glitch_at(t):
+        if len(d) == 0:
+            return 0.0
+        dt = t - d
+        m = (dt >= 0.0) & (dt < dur)
+        if not np.any(m):
+            return 0.0
+        return float(np.max(1.0 - dt[m] / dur))
+
+    return glitch_at
+
+
 def load_full_track(path, start, duration, sr=SR):
     """Decode le morceau tel quel (pas de montage, pas de FX synthetises) et
     en extrait le tempo et les coups de batterie."""
@@ -77,12 +122,15 @@ def load_full_track(path, start, duration, sr=SR):
     mono = mix.mean(axis=1)
     beat = detect_beat(mono, sr)
     events = detect_hits(mono, sr)
+    # les paroxysmes se lisent sur le signal brut : le fondu d'ouverture
+    # ressemblerait sinon a une montee en puissance et ferait un faux glitch.
+    drops = detect_drops(st.mean(axis=1), sr)
     audio = {"stereo": (mix * 32767).astype("<i2"), "mono": mono.astype(np.float32),
              "events": events, "sr": sr, "beat": beat}
-    return audio, estimate_phase(events, beat / 4.0)
+    return audio, estimate_phase(events, beat / 4.0), drops
 
 
-def make_performance_renderer(w, h, fps, duration, audio, phi, curve=True,
+def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True,
                                seed=7, palette="vert"):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed, palette=palette)
     # La machine est deja entierement deployee et joue en continu : on
@@ -95,21 +143,24 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, curve=True,
     r.tl.seg["zoom"] = far             # l'ecran de la machine reste visible
     r.tl.seg["out"] = far              # pas d'extinction automatique
     r.step_index = lambda t: int((t - phi) / r.six) % 16   # phase reelle
-    r.glitch_at = lambda t: 0.0        # pas de glitchs d'intro etires
+    r.glitch_at = make_glitch_fn(drops)   # glitchs sur les paroxysmes du morceau
     return r
 
 
 def frame_performance(r, t, duration):
     rng = np.random.default_rng(r.seed + int(t * r.fps + 0.5))
-    r._zoom = 1.0 + 0.020 * r.kick_hit(t)     # respire sur chaque kick
+    r._zoom = 1.0 + 0.032 * r.kick_hit(t)     # respire sur chaque kick
     r._cam, r._cam_z = (0.0, 0.0), 1.0        # jamais de zoom dans l'ecran
+    shake = r.glitch_at(t)
 
     beam = Beam(r.H, r.W, r.gain)
     r._grid(beam, t, 0.55, 1.0)
     r._hud(beam, t, 1.0, 0.65)
-    r._machine(beam, t, 1.0, 999.0, 0.0, rng, 0.0)   # sweep_x enorme = deployee
+    # le fil du morceau passe derriere la machine et s'allume sur les graves
+    r._wave_line(beam, t, 1.0, 0.48, None, 999.0, 0.0)
+    r._machine(beam, t, 1.0, 999.0, 0.0, rng, shake)   # sweep_x enorme = deployee
     field = beam.render()
-    img = r.colorize(field, t, 1.0, 0.0, rng)
+    img = r.colorize(field, t, 1.0, shake, rng)
 
     fade = min(1.0, t / 0.5) * min(1.0, (duration - t) / 0.6)
     if fade < 0.999:
@@ -153,17 +204,19 @@ def main():
                  % (args.start, total))
 
     t0 = time.time()
-    audio, phi = load_full_track(args.music, args.start, duration)
+    audio, phi, drops = load_full_track(args.music, args.start, duration)
     print("morceau %s  [%.2f -> %.2f s / %.2f s]  battement %.4f s (%.1f BPM)"
-          "  %d coups  phase %.3f s  (analyse en %.1fs)"
+          "  %d coups  phase %.3f s  %d paroxysmes  (analyse en %.1fs)"
           % (args.music, args.start, args.start + duration, total, audio["beat"],
-             60.0 / audio["beat"], len(audio["events"]), phi, time.time() - t0),
-          flush=True)
+             60.0 / audio["beat"], len(audio["events"]), phi, len(drops),
+             time.time() - t0), flush=True)
+    if drops:
+        print("  glitchs a : %s" % ", ".join("%.1fs" % d for d in drops), flush=True)
 
     global _R, _DUR
     _DUR = duration
     _R = make_performance_renderer(args.width, args.height, args.fps, duration,
-                                   audio, phi, curve=not args.no_curve,
+                                   audio, phi, drops, curve=not args.no_curve,
                                    seed=args.seed, palette=args.palette)
 
     if args.stills:

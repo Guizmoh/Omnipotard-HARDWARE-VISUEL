@@ -208,6 +208,16 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
 - Les pads s'allument sur les coups reels (`detect_hits`, deja utilise dans
   l'intro) : grave -> grosse caisse, medium -> caisse claire/percu, aigu ->
   charley.
+- L'image respire a chaque grosse caisse (zoom +3,2 %) et le fil d'onde
+  passe derriere la machine, accroche de chaque cote, avec son halo sur les
+  graves — exactement comme dans l'intro.
+- Les glitchs ne tombent pas au hasard : `detect_drops` repere les
+  paroxysmes du morceau — les instants ou il repart en force apres une
+  respiration — en comparant l'energie a celle d'une seconde et demie plus
+  tot. Il ne suffit pas d'etre fort, il faut arriver fort. Sur *Hint*, cela
+  donne une vingtaine de rafales sur 4 minutes. Les seuils se reglent dans
+  `detect_drops` (`thresh`, `rise`, `min_gap`) ; les instants retenus sont
+  affiches au lancement.
 - `--palette` (vert/orange/bleu/bleu-fond), `--fps`, `-W/-H` fonctionnent
   comme dans l'intro. Par defaut 30 fps (un morceau entier est long a
   rendre ; 60 fps double le temps de calcul pour un gain surtout sensible
