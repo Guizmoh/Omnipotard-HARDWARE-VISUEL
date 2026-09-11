@@ -1039,6 +1039,22 @@ class Renderer:
             return 0.0
         return float(np.max(self.ev_f[m] * np.exp(-self.ev_d[m] * 1.15 * dt[m])))
 
+    def sub_hit(self, t, thresh=0.55):
+        """Enveloppe des plus gros coups graves — c'est elle qui declenche
+        l'irisation.
+
+        Contrairement a `bass_hit`, qui suit tous les graves, celle-ci ignore
+        tout ce qui est sous le seuil et repart de zero juste au-dessus : seuls
+        les coups vraiment appuyes irisent le trait, sinon l'effet serait
+        permanent et ne voudrait plus rien dire.
+        """
+        dt = t - self.ev_t
+        m = (dt >= 0.0) & (dt < 0.75) & self.ev_bass & (self.ev_f >= thresh)
+        if not np.any(m):
+            return 0.0
+        f = np.clip((self.ev_f[m] - thresh) / (1.0 - thresh), 0.0, 1.0)
+        return float(np.max(f * np.exp(-4.2 * dt[m])))
+
     def step_index(self, t):
         return int((t - self.tl.start("groove")) / self.six) % 16
 
@@ -1278,9 +1294,12 @@ class Renderer:
             # le trait n'est jamais parfaitement stable : c'est un faisceau,
             # pas un dessin. Il ondule doucement le long de son parcours, un
             # peu plus fort quand le grave pousse.
-            wob = (0.0021 * np.sin(p.s * 8.5 + t * 2.4 + p.ph)
-                   + 0.0013 * np.sin(p.s * 39.0 - t * 6.8 + p.ph * 2.3)) * trem
-            P = p.P + p.N * wob[:, None]
+            if self.wobble > 0.0:
+                wob = (0.0021 * np.sin(p.s * 8.5 + t * 2.4 + p.ph)
+                       + 0.0013 * np.sin(p.s * 39.0 - t * 6.8 + p.ph * 2.3))
+                P = p.P + p.N * (wob * trem * self.wobble)[:, None]
+            else:
+                P = p.P.copy()
             # au repos, chaque point est ecrase dans l'enveloppe du clip :
             # la machine se deplie hors de la forme d'onde enregistree.
             src = self.clip_env(P[:, 0]) * (P[:, 1] / half)
@@ -1522,6 +1541,9 @@ class Renderer:
 
         return beam.render(), collapse, shake, rng
 
+    wobble = 0.0      # ondulation du trace de la machine (0 = trait net)
+    iris = 1.0        # irisation sur les plus gros coups de sub
+
     def set_look(self, palette="vert", bg=None, bg_color=None,
                  bg_strength=1.0, bg_clear=0.55):
         """Change la couleur et le fond sans rien recalculer d'autre.
@@ -1544,6 +1566,28 @@ class Renderer:
             strength=bg_strength, clear=bg_clear if bg else 0.0,
             scale=self.scale, seed=self.seed)
 
+    def _iridesce(self, img, lum, amount, t):
+        """Irisation : sur un gros coup de sub, le trait se decompose comme
+        une pellicule d'huile.
+
+        La teinte suit la distance au centre et retombe avec le coup, si bien
+        que les anneaux de couleur s'ecartent de la machine pendant que le sub
+        s'eteint — une onde, pas un clignotement. Seul ce qui est allume est
+        irise : la teinte est posee proportionnellement a la luminance, le
+        fond noir reste noir.
+        """
+        H, W = self.H, self.W
+        if getattr(self, "_ir_r", None) is None or self._ir_r.shape != (H, W):
+            yy = (np.arange(H, dtype=np.float32)[:, None] / H - 0.5) * 2.0
+            xx = (np.arange(W, dtype=np.float32)[None, :] / W - 0.5) * 2.0
+            self._ir_r = np.sqrt(xx * xx * 0.5 + yy * yy).astype(np.float32)
+        ph = 7.5 * self._ir_r + 11.0 * amount + t * 2.4
+        rb = np.stack([0.5 + 0.5 * np.sin(ph),
+                       0.5 + 0.5 * np.sin(ph + 2.0944),
+                       0.5 + 0.5 * np.sin(ph + 4.1888)], axis=-1).astype(np.float32)
+        a = amount * 0.72
+        return img * (1.0 - a) + (lum[..., None] * rb) * (a * 1.24)
+
     def colorize(self, field, t, collapse, shake, rng):
         W, H = self.W, self.H
         core = gauss(field, self.sigma)
@@ -1560,6 +1604,9 @@ class Renderer:
         for c in range(3):
             img[:, :, c] = self.c_fluo[c] * base + self.c_halo[c] * np.clip(glow, 0, 3.0) * 0.55
         img += (np.clip(hot * 1.25, 0, 1.0) ** 1.25)[..., None] * self.c_hot
+        ir = self.iris * self.sub_hit(t)
+        if ir > 0.01:
+            img = self._iridesce(img, base + np.clip(glow, 0, 3.0) * 0.55, ir, t)
         # le fond passe sous les textures : scanlines, vignettage et grain
         # le travaillent comme le reste de la dalle.
         img += self.c_bg
@@ -1659,6 +1706,10 @@ def main():
                     help="intensite du fond (0 = noir)")
     ap.add_argument("--bg-clear", type=float, default=0.55,
                     help="0 a 1 : creuse le fond derriere la machine")
+    ap.add_argument("--wobble", type=float, default=0.0,
+                    help="ondulation du trace de la machine (0 = trait net)")
+    ap.add_argument("--iris", type=float, default=1.0,
+                    help="irisation sur les plus gros coups de sub (0 = aucune)")
     ap.add_argument("--no-curve", action="store_true", help="desactive la courbure CRT")
     ap.add_argument("--no-audio", action="store_true", help="video muette (l'image reste pilotee par le son)")
     ap.add_argument("--stills", default="", help="dossier ou exporter des images cles PNG")
@@ -1682,6 +1733,7 @@ def main():
                   bg=args.bg, bg_strength=args.bg_strength,
                   bg_clear=args.bg_clear,
                   bg_color=hex_to_rgb(args.bg_color) if args.bg_color else None)
+    _R.wobble, _R.iris = args.wobble, args.iris
 
     if args.stills:
         from PIL import Image

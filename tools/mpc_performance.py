@@ -134,9 +134,10 @@ def load_full_track(path, start, duration, sr=SR):
 
 
 def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True,
-                              seed=7, palette="vert", **bgkw):
+                              seed=7, palette="vert", wobble=0.0, iris=1.0, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
+    r.wobble, r.iris = float(wobble), float(iris)
     # La machine est deja entierement deployee et joue en continu : on
     # neutralise tout ce qui, dans le moteur de l'intro, appartient au
     # scenario (reveal, pre-lueur, ecran qui se cache au zoom, extinction
@@ -305,13 +306,18 @@ def add_look_args(ap):
                     help="intensite du fond (0 = noir)")
     ap.add_argument("--bg-clear", type=float, default=0.55,
                     help="0 a 1 : creuse le fond derriere la machine")
+    ap.add_argument("--wobble", type=float, default=0.0,
+                    help="ondulation du trace de la machine (0 = trait net)")
+    ap.add_argument("--iris", type=float, default=1.0,
+                    help="irisation sur les plus gros coups de sub (0 = aucune)")
 
 
 def look_kwargs(args):
     return {"bg": args.bg,
             "bg_color": hex_to_rgb(args.bg_color) if args.bg_color else None,
             "bg_strength": args.bg_strength,
-            "bg_clear": args.bg_clear}
+            "bg_clear": args.bg_clear,
+            "wobble": args.wobble, "iris": args.iris}
 
 
 def main():

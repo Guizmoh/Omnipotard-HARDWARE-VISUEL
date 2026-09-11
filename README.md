@@ -216,6 +216,17 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
 - L'image respire a chaque grosse caisse (zoom +3,2 %) et le fil d'onde
   passe derriere la machine, accroche de chaque cote, avec son halo sur les
   graves — exactement comme dans l'intro.
+- **Irisation** (`--iris`, 1 par defaut) : sur les coups graves vraiment
+  appuyes — et seulement ceux-la — le trait se decompose comme une pellicule
+  d'huile. La teinte suit la distance au centre et retombe avec le coup, si
+  bien que les anneaux de couleur s'ecartent de la machine pendant que le sub
+  s'eteint. `sub_hit()` ignore tout ce qui est sous 0,55 de force et repart de
+  zero juste au-dessus, sinon l'effet serait permanent et ne voudrait plus
+  rien dire. `--iris 0` le retire.
+- **Ondulation du trace** (`--wobble`, 0 par defaut) : le leger tremblement
+  des contours de la machine. Il est desormais desactive ; `--wobble 1` le
+  retablit. A ne pas confondre avec la bombe de la dalle, qui est
+  `--no-curve`.
 - Les glitchs ne tombent pas au hasard : `detect_drops` repere les
   paroxysmes du morceau — les instants ou il repart en force apres une
   respiration — en comparant l'energie a celle d'une seconde et demie plus

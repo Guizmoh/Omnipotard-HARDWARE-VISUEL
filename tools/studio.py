@@ -97,6 +97,8 @@ def look_from(q):
         "bg_color": hex_to_rgb(q.get("bgColor") or "#000000"),
         "bg_strength": float(q.get("bgStrength", 1.0)),
         "bg_clear": float(q.get("bgClear", 0.55)),
+        "wobble": float(q.get("wobble", 0.0)),
+        "iris": float(q.get("iris", 1.0)),
     }
 
 
@@ -156,7 +158,11 @@ class Studio:
                 if len(self.renderers) > 4:        # ne pas garder tout l'historique
                     self.renderers.pop(next(iter(self.renderers)))
                 self.renderers[key] = r
-        r.set_look(palette, **kw)
+        # set_look ne connait que la couleur et le fond ; les deux autres
+        # reglages se posent directement sur l'instance
+        r.set_look(palette, **{k: v for k, v in kw.items()
+                               if k not in ("wobble", "iris")})
+        r.wobble, r.iris = kw["wobble"], kw["iris"]
         dur = tr["info"]["duration"]
         # l'apercu montre le morceau tel qu'il joue, sans les fondus des bords
         t = max(0.6, min(float(t), dur - 0.8))
@@ -437,6 +443,17 @@ PAGE = r"""<!doctype html>
   </div>
 
   <div class="card">
+    <h2>Trait</h2>
+    <label for="iris">irisation sur les gros subs &mdash; <span id="v-iris">1.00</span></label>
+    <input type="range" id="iris" min="0" max="1.5" step="0.05" value="1">
+    <label for="wobble">ondulation du trace &mdash; <span id="v-wob">0.00</span></label>
+    <input type="range" id="wobble" min="0" max="1.5" step="0.05" value="0">
+    <p class="hint">L'irisation ne se declenche que sur les coups graves
+      vraiment appuyes : le trait s'y decompose comme une pellicule d'huile, et
+      les anneaux s'ecartent pendant que le sub s'eteint.</p>
+  </div>
+
+  <div class="card">
     <h2>Rendu</h2>
     <div class="row">
       <div><label for="start">depart (s)</label><input type="number" id="start" value="0" min="0" step="0.1"></div>
@@ -534,6 +551,7 @@ function params() {
     palette: $('#palette').value, trait: $('#trait').value,
     bg: $('#bg').value, bgColor: $('#bgColor').value,
     bgStrength: $('#bgStrength').value, bgClear: $('#bgClear').value,
+    iris: $('#iris').value, wobble: $('#wobble').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
   return p;
@@ -557,6 +575,8 @@ $('#palette').onchange = e => {
 };
 $('#bg').onchange = e => { $('#bgopts').hidden = e.target.value === 'noir'; shot(); };
 for (const id of ['#trait','#bgColor','#curve']) $(id).oninput = shot;
+$('#iris').oninput   = e => { $('#v-iris').textContent = (+e.target.value).toFixed(2); shot(); };
+$('#wobble').oninput = e => { $('#v-wob').textContent  = (+e.target.value).toFixed(2); shot(); };
 $('#bgStrength').oninput = e => { $('#v-str').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#bgClear').oninput   = e => { $('#v-clr').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#scrub').oninput     = e => { $('#v-t').textContent = (+e.target.value).toFixed(1) + ' s'; shot(); };
@@ -586,6 +606,7 @@ $('#go').onclick = async () => {
     palette: $('#palette').value, trait: $('#trait').value,
     bg: $('#bg').value, bgColor: $('#bgColor').value,
     bgStrength: +$('#bgStrength').value, bgClear: +$('#bgClear').value,
+    iris: +$('#iris').value, wobble: +$('#wobble').value,
     curve: $('#curve').checked,
   };
   $('#go').disabled = true; $('#done').hidden = true; $('#prog').hidden = false;
