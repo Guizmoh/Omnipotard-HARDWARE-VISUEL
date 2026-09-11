@@ -1,0 +1,1379 @@
+<title>Studio Omnipotard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+/* Un instrument, pas un site : la dalle est sombre par nature, le theme est
+   donc assume comme unique — mais chaque couleur est peinte explicitement,
+   pour que la page tienne sur n'importe quel fond hote. */
+:root{
+  --bg:#06080a;          /* noir legerement bleu-vert, pas un noir pur */
+  --panel:#0d1114;
+  --panel-2:#11171b;
+  --line:#1c2630;
+  --ink:#d4e0da;
+  --dim:#76867f;
+  --acc:#3dff72;         /* le phosphore du projet */
+  --acc-dim:#1c7a3a;
+  --warn:#ffb454;
+  --bad:#ff6b5e;
+  --label:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:var(--mono);font-size:13px;line-height:1.55;
+  padding-inline:16px;padding-block:0;
+}
+h1,h2,h3,.lbl,button,.tab{font-family:var(--label)}
+
+/* ---- entete : la plaque signaletique de l'appareil ---- */
+header{
+  display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+  padding-block:18px 16px;border-bottom:1px solid var(--line);
+}
+h1{
+  margin:0;font-size:15px;font-weight:700;letter-spacing:.22em;
+  text-transform:uppercase;color:var(--acc);
+}
+header .sub{color:var(--dim);font-size:12px;letter-spacing:.04em}
+header .state{margin-left:auto;color:var(--dim);font-size:11px;
+  letter-spacing:.1em;text-transform:uppercase}
+header .state.bad{color:var(--bad)}
+header .state b{color:var(--acc);font-weight:500}
+
+main{
+  display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:22px;
+  padding-block:22px 40px;align-items:start;max-width:1400px;margin-inline:auto;
+}
+@media (max-width:900px){
+  main{grid-template-columns:1fr}
+  .rail{order:2}
+  .stage{order:1}
+}
+
+/* ---- la dalle ---- */
+.stage{display:flex;flex-direction:column;gap:14px}
+.screen{
+  position:relative;border:1px solid var(--line);border-radius:10px;
+  background:#000;overflow:hidden;
+}
+canvas{display:block;width:100%;max-width:100%;height:auto;aspect-ratio:16/9}
+.screen .corner{
+  position:absolute;top:10px;right:12px;font-size:10px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--acc);opacity:.5;pointer-events:none;
+  font-family:var(--label);
+}
+.screen .rec{
+  position:absolute;top:10px;left:12px;display:none;align-items:center;gap:7px;
+  font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--warn);
+  font-family:var(--label);
+}
+.screen .rec.on{display:flex}
+.screen .rec i{width:8px;height:8px;border-radius:50%;background:var(--warn);
+  animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:.15}}
+@media (prefers-reduced-motion:reduce){.screen .rec i{animation:none}}
+
+/* ---- transport ---- */
+.transport{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.transport .time{font-variant-numeric:tabular-nums;color:var(--dim);font-size:12px;
+  min-width:92px}
+#seek{flex:1;min-width:140px}
+.play{
+  width:46px;height:46px;flex:none;border-radius:50%;border:1px solid var(--acc-dim);
+  background:var(--panel-2);color:var(--acc);cursor:pointer;font-size:15px;
+  display:grid;place-items:center;padding:0;
+}
+.play:hover{background:#16241b}
+
+/* ---- rail de commandes ---- */
+.rail{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:14px 14px 16px}
+.card h2{
+  margin:0 0 12px;font-size:10px;font-weight:600;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--dim);
+}
+.lbl{display:block;margin:11px 0 4px;font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--dim)}
+.lbl:first-child{margin-top:0}
+input,select,button{font-family:var(--mono);font-size:12px;color:var(--ink);
+  background:var(--panel-2);border:1px solid var(--line);border-radius:6px;
+  padding:7px 9px;width:100%}
+select{cursor:pointer}
+input[type=color]{padding:2px;height:34px;cursor:pointer}
+input[type=range]{padding:0;border:none;background:none;accent-color:var(--acc);
+  cursor:pointer}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button{cursor:pointer;font-family:var(--label);font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;padding:11px}
+.primary{background:var(--acc);color:#04180c;border:none}
+.primary:hover{background:#5cff88}
+.primary:disabled{background:#1e2a23;color:var(--dim);cursor:default}
+.ghost{background:var(--panel-2)}
+.ghost:hover{border-color:var(--acc-dim);color:var(--acc)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+/* ---- depot du morceau ---- */
+.drop{
+  border:1px dashed #2a3843;border-radius:8px;padding:18px 12px;text-align:center;
+  color:var(--dim);cursor:pointer;transition:border-color .15s,color .15s;
+  font-size:12px;
+}
+.drop:hover,.drop.over{border-color:var(--acc);color:var(--ink)}
+.drop b{display:block;color:var(--acc);font-weight:500;margin-bottom:3px;
+  letter-spacing:.04em;overflow-wrap:anywhere}
+
+/* ---- releve d'analyse ---- */
+.readout{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;margin-top:12px;
+  font-size:11px}
+.readout div{display:flex;justify-content:space-between;gap:8px;
+  border-bottom:1px dotted #1a242c;padding:3px 0}
+.readout span{color:var(--dim);letter-spacing:.06em}
+.readout b{font-weight:500;font-variant-numeric:tabular-nums}
+
+.hint{color:var(--dim);font-size:11px;margin:10px 0 0;line-height:1.5}
+.hint code{color:var(--ink);font-size:11px}
+.bar{height:4px;background:var(--panel-2);border-radius:2px;overflow:hidden;
+  margin:10px 0 6px}
+.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .25s}
+.err{color:var(--bad)}
+footer{border-top:1px solid var(--line);padding-block:16px 28px;color:var(--dim);
+  font-size:11px;max-width:1400px;margin-inline:auto}
+footer a{color:var(--acc)}
+</style>
+
+<header>
+  <h1>Studio Omnipotard</h1>
+  <span class="sub">visualiseur oscilloscope &mdash; MPC Live III</span>
+  <span class="state" id="state">boucle de demonstration</span>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="screen">
+      <canvas id="cv" width="640" height="360"></canvas>
+      <span class="corner" id="corner">OSC &mdash; DEMO</span>
+      <span class="rec" id="rec"><i></i>enregistrement</span>
+    </div>
+
+    <div class="transport">
+      <button class="play" id="play" aria-label="Lecture / pause">&#9654;</button>
+      <span class="time" id="time">0:00 / 0:06</span>
+      <input type="range" id="seek" min="0" max="1000" value="0" step="1"
+             aria-label="Position dans le morceau">
+      <span class="time" id="fps" style="min-width:64px;text-align:right"></span>
+    </div>
+
+    <div class="card">
+      <h2>Ce que la machine entend</h2>
+      <div class="readout">
+        <div><span>tempo</span><b id="r-bpm">&mdash;</b></div>
+        <div><span>coups</span><b id="r-hits">&mdash;</b></div>
+        <div><span>duree</span><b id="r-dur">&mdash;</b></div>
+        <div><span>paroxysmes</span><b id="r-drops">&mdash;</b></div>
+      </div>
+      <p class="hint">Les pads s'allument sur les vrais coups : grave &rarr;
+        grosse caisse, medium &rarr; caisse claire, aigu &rarr; charley. La bande
+        de 16 pas se cale sur le tempo detecte, l'image respire a chaque kick, et
+        les glitchs ne tombent que sur les paroxysmes &mdash; les instants ou le
+        morceau repart en force apres une respiration.</p>
+    </div>
+  </section>
+
+  <aside class="rail">
+    <div class="card">
+      <h2>Morceau</h2>
+      <div class="drop" id="drop">
+        <b id="dropname">Deposer un fichier</b>
+        mp3, wav, flac, m4a&hellip; ou cliquer
+      </div>
+      <input type="file" id="file" accept="audio/*" hidden>
+      <p class="hint">Votre morceau ne quitte pas le navigateur : tout est
+        decode, analyse et dessine sur cette machine.</p>
+    </div>
+
+    <div class="card">
+      <h2>Couleur du trait</h2>
+      <label class="lbl" for="palette">palette</label>
+      <select id="palette">
+        <option value="vert">vert</option>
+        <option value="orange">orange</option>
+        <option value="bleu">bleu</option>
+        <option value="bleu-fond">bleu sur fond bleu</option>
+        <option value="perso">couleur libre&hellip;</option>
+      </select>
+      <div id="traitwrap" hidden>
+        <label class="lbl" for="trait">teinte</label>
+        <input type="color" id="trait" value="#ff2ad4">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Fond</h2>
+      <label class="lbl" for="bg">texture</label>
+      <select id="bg">
+        <option value="noir">noir (aucun)</option>
+        <option value="uni">couleur unie</option>
+        <option value="grille">grille d'oscilloscope</option>
+        <option value="points">trame de points</option>
+        <option value="scan">lignes de tube</option>
+        <option value="degrade">degrade (sombre au centre)</option>
+        <option value="bruit">grain</option>
+      </select>
+      <div id="bgopts" hidden>
+        <label class="lbl" for="bgColor">couleur du fond</label>
+        <input type="color" id="bgColor" value="#143a2a">
+        <label class="lbl" for="bgStrength">intensite &mdash; <span id="v-str">1.00</span></label>
+        <input type="range" id="bgStrength" min="0" max="2" step="0.05" value="1">
+        <label class="lbl" for="bgClear">degagement derriere la machine &mdash; <span id="v-clr">0.55</span></label>
+        <input type="range" id="bgClear" min="0" max="1" step="0.05" value="0.55">
+        <p class="hint">Le trait est additif : un fond clair mange son
+          contraste. Le degagement creuse la texture derriere la machine pour
+          qu'elle ressorte quand meme.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Enregistrer une video</h2>
+      <label class="lbl" for="size">definition</label>
+      <select id="size">
+        <option value="640x360">360p &mdash; fluide partout</option>
+        <option value="960x540" selected>540p &mdash; recommande</option>
+        <option value="1280x720">720p &mdash; machine rapide</option>
+      </select>
+      <button class="primary" id="go" style="margin-top:12px">Enregistrer</button>
+      <div id="prog" hidden>
+        <div class="bar"><i id="pbar"></i></div>
+        <div class="hint" id="ptext"></div>
+      </div>
+      <p class="hint" id="recnote">L'enregistrement se fait en temps reel : il
+        dure aussi longtemps que le morceau, et joue le son pendant ce temps-la.
+        Surveillez le compteur d'images par seconde pendant la lecture : s'il
+        tombe sous 25, descendez d'un cran de definition.</p>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  Le trace de la machine est exporte du moteur Python du projet, pas redessine :
+  c'est le meme dessin que les rendus hors-ligne. Pour les rendus longs, en 4K,
+  ou en lot, <code>tools/studio.py</code> fait le meme travail sans limite de
+  duree.
+</footer>
+
+<script>
+/* ==========================================================================
+   Geometrie exportee de tools/omnipotard_intro.py (voir export_geometry.py).
+   Points quantifies en entiers 16 bits, echelle GEO.scale.
+   ========================================================================== */
+const GEO = /*__GEO__*/null/*__GEO__*/;
+
+const unpack = (b64, scale) => {
+  const bin = atob(b64), n = bin.length >> 1, out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let v = bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8);
+    if (v > 32767) v -= 65536;
+    out[i] = v / scale;
+  }
+  return out;                                   // [x0,y0,x1,y1,...]
+};
+
+/* Chemins de la machine : points, normales (recalculees comme np.gradient),
+   abscisse curviligne (graduation reguliere) et phase de tremblement. */
+const MPC = GEO.paths.map(p => {
+  const P = unpack(p.xy, GEO.scale), n = P.length >> 1;
+  const N = new Float32Array(n * 2), s = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1);
+    const d = (b - a) || 1;
+    let tx = (P[b * 2] - P[a * 2]) / d, ty = (P[b * 2 + 1] - P[a * 2 + 1]) / d;
+    const L = Math.hypot(tx, ty) + 1e-12;
+    N[i * 2] = -ty / L; N[i * 2 + 1] = tx / L;
+    s[i] = n > 1 ? p.len * i / (n - 1) : 0;
+  }
+  return {P, N, s, n, ph: p.ph, tag: p.tag, len1: n > 1 ? p.len / (n - 1) : 0};
+});
+const FILL_PAD = GEO.fills.pad.map(b => unpack(b, GEO.scale));
+const FILL_STEP = GEO.fills.step.map(b => unpack(b, GEO.scale));
+const HUD = {OSC: GEO.hud.OSC.map(b => unpack(b, GEO.scale)),
+             SYNC: GEO.hud.SYNC.map(b => unpack(b, GEO.scale))};
+const K = GEO.const;
+const STEP_LIT = new Set(K.STEP_LIT);
+const PAD_OF = K.PAD_OF, DECAY_OF = K.DECAY_OF;
+
+/* ==========================================================================
+   Analyse du son — port fidele de omnipotard_intro.py
+   ========================================================================== */
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t;
+                 t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    const h = len >> 1;
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let j = 0; j < h; j++) {
+        const ur = re[i + j], ui = im[i + j];
+        const xr = re[i + j + h], xi = im[i + j + h];
+        const vr = xr * cr - xi * ci, vi = xr * ci + xi * cr;
+        re[i + j] = ur + vr; im[i + j] = ui + vi;
+        re[i + j + h] = ur - vr; im[i + j + h] = ui - vi;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+}
+
+const lowpass = (x, width) => {              // moyenne glissante, comme _lowpass
+  const k = Math.max(1, Math.floor(width));
+  if (k <= 1) return x;
+  const n = x.length, c = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) c[i + 1] = c[i] + x[i];
+  const m = n - k + 1, y = new Float64Array(n);
+  for (let i = 0; i < m; i++) y[i] = (c[i + k] - c[i]) / k;
+  for (let i = m; i < n; i++) y[i] = m > 0 ? y[m - 1] : 0;
+  return y;
+};
+const std = a => {
+  let m = 0; for (const v of a) m += v; m /= a.length || 1;
+  let s = 0; for (const v of a) s += (v - m) * (v - m);
+  return Math.sqrt(s / (a.length || 1));
+};
+
+/* STFT : hop 256, fenetre 1024 de Hann — les memes que le moteur. */
+async function frames(x, sr, onProgress) {
+  const hop = 256, win = 1024, nb = Math.max(1, Math.floor((x.length - win) / hop));
+  const half = win / 2 + 1;
+  const S = new Float32Array(nb * half);
+  const w = new Float32Array(win);
+  for (let i = 0; i < win; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (win - 1));
+  const re = new Float64Array(win), im = new Float64Array(win);
+  for (let f = 0; f < nb; f++) {
+    const o = f * hop;
+    for (let i = 0; i < win; i++) { re[i] = x[o + i] * w[i]; im[i] = 0; }
+    fft(re, im);
+    for (let k = 0; k < half; k++) S[f * half + k] = Math.hypot(re[k], im[k]);
+    if ((f & 1023) === 0) {                   // rendre la main a l'interface
+      if (onProgress) onProgress(f / nb);
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  return {S, half, nb, freqs: sr / win, fps: sr / hop};
+}
+
+function bandFlux(F, lo, hi) {
+  const {S, half, nb, freqs} = F;
+  const k0 = Math.max(0, Math.ceil(lo / freqs)), k1 = Math.min(half, Math.ceil(hi / freqs));
+  const e = new Float64Array(nb);
+  for (let f = 0; f < nb; f++) {
+    let s = 0;
+    for (let k = k0; k < k1; k++) s += S[f * half + k];
+    e[f] = s;
+  }
+  const d = new Float64Array(nb);
+  for (let f = 1; f < nb; f++) d[f] = Math.max(e[f] - e[f - 1], 0);
+  return d;
+}
+
+function pick(flux, fps, thresh, gap) {
+  const sd = std(flux) + 1e-9, norm = new Float64Array(flux.length);
+  for (let i = 0; i < flux.length; i++) norm[i] = flux[i] / sd;
+  const f = lowpass(norm, 3), out = [];
+  let last = -9;
+  for (let i = 1; i < f.length - 1; i++) {
+    if (f[i] > thresh && f[i] >= f[i - 1] && f[i] >= f[i + 1]) {
+      const t = i / fps;
+      if (t - last >= gap) { out.push([t, Math.min(1, f[i] / (thresh * 2.6))]); last = t; }
+    }
+  }
+  return out;
+}
+
+/* Periode du battement : autocorrelation de la courbe d'attaque, ponderee par
+   un a priori de tempo plausible (sans quoi un extrait court fait ressortir la
+   demi-periode), puis remontee d'octave. */
+function detectBeat(F) {
+  const BANDS = [[30, 140], [160, 1200], [4000, 10000]];
+  const nb = F.nb, onset = new Float64Array(nb);
+  for (const [lo, hi] of BANDS) {
+    const b = bandFlux(F, lo, hi), sd = std(b) + 1e-9;
+    for (let i = 0; i < nb; i++) onset[i] += b[i] / sd;
+  }
+  let mean = 0; for (const v of onset) mean += v; mean /= nb || 1;
+  const o = new Float64Array(nb);
+  for (let i = 0; i < nb; i++) o[i] = onset[i] - mean;
+  const maxLag = Math.min(nb - 1, Math.ceil(1.10 * F.fps) + 2);
+  const ac = new Float64Array(maxLag + 1);
+  for (let L = 0; L <= maxLag; L++) {
+    let s = 0;
+    for (let i = 0; i + L < nb; i++) s += o[i] * o[i + L];
+    ac[L] = s;
+  }
+  let best = 0, bestV = -Infinity;
+  for (let L = 0; L <= maxLag; L++) {
+    const lag = L / F.fps;
+    if (lag <= 0.30 || lag >= 1.10) continue;
+    const pref = Math.exp(-0.5 * Math.pow(Math.log(lag / 0.62) / 0.55, 2));
+    if (ac[L] * pref > bestV) { bestV = ac[L] * pref; best = L; }
+  }
+  for (let r = 0; r < 2; r++) {
+    const d = best * 2;
+    if (d <= maxLag && d / F.fps < 1.10 && ac[d] > 0.62 * ac[best]) best = d;
+  }
+  return best / F.fps || 0.7;
+}
+
+function detectHits(F) {
+  const lag = 0.025, ev = [];
+  const cfg = [[[30, 140], 'kick', 2.1, 0.14], [[160, 1200], 'rim', 2.3, 0.10],
+               [[4000, 10000], 'hat', 2.0, 0.055]];
+  for (const [[lo, hi], kind, thresh, gap] of cfg) {
+    pick(bandFlux(F, lo, hi), F.fps, thresh, gap).forEach(([t, f], i) => {
+      let pads;
+      if (kind === 'kick') pads = [f > 0.45 ? PAD_OF.kick : 1];
+      else if (kind === 'rim') pads = [f > 0.55 ? PAD_OF.rim : PAD_OF.perc];
+      else pads = [[10, 11][i % 2]];
+      for (const pad of pads) ev.push([t + lag, pad, Math.max(0.30, f), DECAY_OF[kind]]);
+    });
+  }
+  ev.sort((a, b) => a[0] - b[0]);
+  return ev;
+}
+
+/* Paroxysmes : il ne suffit pas d'etre fort, il faut arriver fort. */
+function detectDrops(mono, sr, minGap = 7.0, thresh = 0.60, rise = 0.16) {
+  const w = Math.max(1, Math.round(sr * 0.04)), n = Math.floor(mono.length / w);
+  if (n < 8) return [];
+  const e = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let m = 0;
+    for (let j = i * w; j < (i + 1) * w; j++) m = Math.max(m, Math.abs(mono[j]));
+    e[i] = m;
+  }
+  const sm = lowpass(e, 12);
+  let top = 0; for (const v of sm) top = Math.max(top, v);
+  if (top <= 0) return [];
+  const fpsE = sr / w, back = Math.max(1, Math.round(1.5 * fpsE));
+  const out = []; let last = -1e9;
+  for (let i = back; i < n; i++) {
+    if (sm[i] / top > thresh && (sm[i] - sm[i - back]) / top > rise) {
+      const t = i / fpsE;
+      if (t - last >= minGap) { out.push(t); last = t; }
+    }
+  }
+  return out;
+}
+
+/* Cale la grille de 16 pas sur les vraies grosses caisses. */
+function estimatePhase(ev, six) {
+  const kicks = ev.filter(e => e[1] === PAD_OF.kick).map(e => e[0]);
+  if (!kicks.length) return 0;
+  let bestPhi = 0, bestErr = Infinity;
+  for (let c = 0; c < 48; c++) {
+    const phi = six * c / 48;
+    let err = 0;
+    for (const t of kicks) {
+      const r = ((t - phi) % six + six) % six, d = Math.min(r, six - r);
+      err += d * d;
+    }
+    if (err < bestErr) { bestErr = err; bestPhi = phi; }
+  }
+  return bestPhi;
+}
+
+/* Enveloppes lissees, echantillonnees a 240 Hz comme dans le moteur. */
+function envelope(mono, sr, width, eh) {
+  const stepi = Math.max(1, Math.round(sr / eh));
+  const abs = new Float64Array(mono.length);
+  for (let i = 0; i < mono.length; i++) abs[i] = Math.abs(mono[i]);
+  const sm = lowpass(abs, Math.round(sr * width));
+  const n = Math.ceil(mono.length / stepi), out = new Float32Array(n);
+  let mx = 0;
+  for (let i = 0; i < n; i++) { out[i] = sm[i * stepi]; mx = Math.max(mx, out[i]); }
+  if (mx > 0) for (let i = 0; i < n; i++) out[i] /= mx;
+  return out;
+}
+
+async function analyse(mono, sr, onProgress) {
+  const F = await frames(mono, sr, onProgress);
+  const beat = detectBeat(F);
+  const ev = detectHits(F);
+  const drops = detectDrops(mono, sr);
+  const eh = 240;
+  const wave = lowpass(mono, 56);
+  let mx = 0; for (const v of wave) mx = Math.max(mx, Math.abs(v));
+  const W = new Float32Array(wave.length);
+  if (mx > 0) for (let i = 0; i < wave.length; i++) W[i] = wave[i] / mx;
+  return {
+    sr, beat, six: beat / 4, ev, drops, eh, wave: W, nw: W.length,
+    phi: estimatePhase(ev, beat / 4),
+    dur: mono.length / sr,
+    eLow: envelope(lowpass(mono, 26), sr, 0.10, eh),
+    eHigh: envelope(mono, sr, 0.04, eh),
+    eFull: envelope(mono, sr, 0.22, eh),
+    evT: Float64Array.from(ev, e => e[0]),
+    evPad: Int32Array.from(ev, e => e[1]),
+    evF: Float64Array.from(ev, e => e[2]),
+    evD: Float64Array.from(ev, e => e[3]),
+  };
+}
+
+/* ==========================================================================
+   Rendu — port fidele du faisceau, du bloom et de la colorisation
+   ========================================================================== */
+const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
+const smoothstep = (a, b, x) => { const k = clamp((x - a) / (b - a || 1e-9), 0, 1);
+                                  return k * k * (3 - 2 * k); };
+
+/* Deux puissances tombaient sur chaque pixel de chaque image — le gamma de
+   sortie et la courbe du coeur sur-expose. Tabulees une fois, elles ne coutent
+   plus qu'une lecture : c'est le gros du temps de rendu. */
+const GAMMA = new Float32Array(4097);
+for (let i = 0; i <= 4096; i++) GAMMA[i] = Math.pow(i / 4096, 1 / 1.06) * 255;
+const HOTC = new Float32Array(1025);
+for (let i = 0; i <= 1024; i++) HOTC[i] = Math.pow(i / 1024, 1.25);
+
+const _gpool = new Map();
+const pool = (key, n) => {
+  let a = _gpool.get(key);
+  if (!a || a.length !== n) { a = new Float32Array(n); _gpool.set(key, a); }
+  return a;
+};
+
+function gauss(src, w, h, sigma, tag) {
+  if (sigma <= 0.05) return src;
+  const r = Math.max(1, Math.floor(sigma * 2.5)), k = new Float32Array(2 * r + 1);
+  let s = 0;
+  for (let i = -r; i <= r; i++) { k[i + r] = Math.exp(-0.5 * (i / sigma) ** 2); s += k[i + r]; }
+  for (let i = 0; i < k.length; i++) k[i] /= s;
+  const tmp = pool('gt' + tag, w * h), out = pool('go' + tag, w * h);
+  for (let y = 0; y < h; y++) {
+    const o = y * w;
+    for (let x = 0; x < w; x++) {
+      let a = 0;
+      for (let i = -r; i <= r; i++) a += k[i + r] * src[o + clamp(x + i, 0, w - 1)];
+      tmp[o + x] = a;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let a = 0;
+      for (let i = -r; i <= r; i++) a += k[i + r] * tmp[clamp(y + i, 0, h - 1) * w + x];
+      out[y * w + x] = a;
+    }
+  }
+  return out;
+}
+
+function downs(src, w, h, f) {
+  const w2 = Math.floor(w / f), h2 = Math.floor(h / f), out = pool('d' + f, w2 * h2);
+  const inv = 1 / (f * f);
+  for (let y = 0; y < h2; y++)
+    for (let x = 0; x < w2; x++) {
+      let a = 0;
+      for (let j = 0; j < f; j++) {
+        const o = (y * f + j) * w + x * f;
+        for (let i = 0; i < f; i++) a += src[o + i];
+      }
+      out[y * w2 + x] = a * inv;
+    }
+  return {d: out, w: w2, h: h2};
+}
+
+class Beam {
+  constructor(w, h, gain, buf) {
+    this.w = w; this.h = h; this.gain = gain;
+    this.buf = buf || new Float32Array(w * h);
+    if (buf) buf.fill(0);
+  }
+  /* xy : [x0,y0,x1,y1,...] deja en pixels, n points. wt : nombre ou tableau.
+     n est obligatoire : le tampon de projection est partage entre les
+     chemins, sa longueur ne dit rien de celle du trace. */
+  add(xy, n, wt) {
+    const {w, h, buf} = this, g = this.gain, arr = typeof wt !== 'number';
+    for (let i = 0; i < n; i++) {
+      const x = xy[i * 2], y = xy[i * 2 + 1];
+      if (!(x >= 1 && x < w - 2 && y >= 1 && y < h - 2)) continue;
+      const ww = (arr ? wt[i] : wt) * g;
+      if (ww === 0) continue;
+      const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, b = y0 * w + x0;
+      buf[b] += ww * (1 - fx) * (1 - fy);
+      buf[b + 1] += ww * fx * (1 - fy);
+      buf[b + w] += ww * (1 - fx) * fy;
+      buf[b + w + 1] += ww * fx * fy;
+    }
+  }
+}
+
+/* ---- fonds : memes textures que make_background() cote Python ---- */
+function makeBackground(w, h, kind, col, strength, clear, scale) {
+  const c = [col[0] * strength, col[1] * strength, col[2] * strength];
+  if (kind === 'noir' || strength <= 0 || Math.max(c[0], c[1], c[2]) <= 0) return null;
+  const pitch = Math.max(6, h / 24), out = new Float32Array(w * h * 3);
+  const lines = (u, period, width) => {
+    const d = Math.abs(((u + period * 0.5) % period + period) % period - period * 0.5);
+    return clamp(1 - d / width, 0, 1);
+  };
+  let noise = null;
+  if (kind === 'bruit') {
+    const nw = Math.max(2, w / 3 | 0), nh = Math.max(2, h / 3 | 0);
+    const raw = new Float32Array(nw * nh);
+    let seed = 11;
+    for (let i = 0; i < raw.length; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      raw[i] = (seed / 0x7fffffff) * 2 - 1;
+    }
+    noise = {d: gauss(raw, nw, nh, 0.8, 'bg'), w: nw, h: nh};
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let p;
+      if (kind === 'uni') p = 1;
+      else if (kind === 'grille') {
+        p = 0.22 + 0.55 * Math.max(lines(x, pitch, 1.1), lines(y, pitch, 1.1))
+              + 0.85 * Math.max(lines(x, pitch * 5, 1.5), lines(y, pitch * 5, 1.5));
+      } else if (kind === 'points') {
+        const dots = (u, per) => {
+          const d = Math.abs(((u + per * 0.5) % per + per) % per - per * 0.5);
+          return clamp(1 - d / 1.6, 0, 1);
+        };
+        p = 0.16 + 1.05 * dots(x, pitch) * dots(y, pitch);
+      } else if (kind === 'scan') {
+        p = 0.30 + 0.80 * Math.pow(0.5 + 0.5 * Math.cos(y * (2 * Math.PI /
+              Math.max(3, pitch * 0.25))), 2);
+      } else if (kind === 'degrade') {
+        const nx = (x / w - 0.5) * 2, ny = (y / h - 0.5) * 2;
+        p = 0.10 + 1.15 * Math.pow(clamp(Math.sqrt(nx * nx * 0.62 + ny * ny), 0, 1), 1.6);
+      } else {                                   // bruit
+        const sx = Math.min(noise.w - 1, x / 3 | 0), sy = Math.min(noise.h - 1, y / 3 | 0);
+        p = clamp(0.55 + 0.75 * noise.d[sy * noise.w + sx], 0, 2);
+      }
+      if (clear > 0) {                           // creuse derriere la machine
+        const nx = (x - w * 0.5) / (1.52 * scale), ny = (y - h * 0.5) / (1.08 * scale);
+        const r = Math.sqrt(nx * nx + ny * ny), k = clamp((r - 0.82) / 0.55, 0, 1);
+        p *= 1 - clear * (1 - k * k * (3 - 2 * k));
+      }
+      const o = (y * w + x) * 3;
+      out[o] = p * c[0]; out[o + 1] = p * c[1]; out[o + 2] = p * c[2];
+    }
+  }
+  return out;
+}
+
+class Renderer {
+  constructor(w, h, audio) {
+    this.resize(w, h);
+    this.audio = audio;
+    this.look = {palette: 'vert', bg: 'noir', bgColor: [0, 0, 0],
+                 bgStrength: 1, bgClear: 0.55};
+    this.setLook(this.look);
+  }
+  resize(w, h) {
+    this.W = w; this.H = h;
+    this.scale = Math.min(h * 0.5, w * 0.5 / 1.30);
+    this.sigma = Math.max(0.60, h / 1080 * 0.95);
+    this.gain = (this.scale * this.sigma) / (360 * 0.6333);
+    this.img = new Float32Array(w * h * 3);
+    this.out = new Uint8ClampedArray(w * h * 4);
+    this.field = new Float32Array(w * h);
+    // assez large pour le plus long chemin, la bande d'onde et les remplissages
+    this.pxbuf = new Float32Array(Math.max(2600, ...MPC.map(p => p.n)) * 2);
+    this.geo = new Float32Array(this.pxbuf.length);
+    this.wrow = new Float32Array(w * 2);
+    this.buildWarp();
+    if (this.look) this.setLook(this.look);
+  }
+  /* Deux champs qui ne dependent que de la definition, donc calcules une
+     fois : la bombe de la dalle (indices + quatre poids bilineaires) et le
+     produit scanlines x vignettage, qui coutait sinon une puissance et un
+     cosinus sur chaque pixel de chaque image. */
+  buildWarp() {
+    const {W, H} = this;
+    this.wi = new Int32Array(W * H);
+    this.w00 = new Float32Array(W * H); this.w01 = new Float32Array(W * H);
+    this.w10 = new Float32Array(W * H); this.w11 = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const nx = (x / (W - 1)) * 2 - 1, ny = (y / (H - 1)) * 2 - 1;
+      const f = 1 + 0.055 * (nx * nx + ny * ny);
+      let sx = (nx * f * 0.5 + 0.5) * (W - 1), sy = (ny * f * 0.5 + 0.5) * (H - 1);
+      const inside = sx >= 0 && sx <= W - 1.001 && sy >= 0 && sy <= H - 1.001;
+      sx = clamp(sx, 0, W - 1.001); sy = clamp(sy, 0, H - 1.001);
+      const x0 = sx | 0, y0 = sy | 0, i = y * W + x, fx = sx - x0, fy = sy - y0;
+      const m = inside ? 1 : 0;
+      this.wi[i] = y0 * W + x0;
+      this.w00[i] = (1 - fx) * (1 - fy) * m; this.w01[i] = fx * (1 - fy) * m;
+      this.w10[i] = (1 - fx) * fy * m;       this.w11[i] = fx * fy * m;
+    }
+    const period = Math.max(2, H / 360);
+    this.slY = new Float32Array(H);
+    this.dalle = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) {
+      this.slY[y] = 0.82 + 0.18 * (0.5 + 0.5 * Math.cos(y * (2 * Math.PI / period)));
+      const ny = (y / H - 0.5) * 2;
+      for (let x = 0; x < W; x++) {
+        const nx = (x / W - 0.5) * 2;
+        this.dalle[y * W + x] = this.slY[y]
+          * Math.pow(clamp(1.06 - 0.42 * (nx * nx * 0.55 + ny * ny), 0, 1), 1.15);
+      }
+    }
+    // grain : tire en quart de definition puis etale, comme dans le moteur
+    this.gw = Math.max(1, W >> 2); this.gh = Math.max(1, H >> 2);
+    this.grain = new Float32Array(this.gw * this.gh);
+  }
+  setLook(look) {
+    this.look = look;
+    const p = look.palette === 'perso' ? derivePalette(look.trait)
+                                       : K.PALETTES[look.palette];
+    this.cFluo = p[0]; this.cHalo = p[1]; this.cHot = p[2];
+    this.bgField = makeBackground(this.W, this.H, look.bg,
+      look.bg === 'noir' ? p[3] : look.bgColor,
+      look.bgStrength, look.bg === 'noir' ? 0 : look.bgClear, this.scale);
+    this.bgFlat = look.bg === 'noir' ? p[3] : null;
+  }
+
+  /* ---- lectures du son ---- */
+  envAt(a, t) { return a[clamp(Math.floor(t * this.audio.eh), 0, a.length - 1)] || 0; }
+  waveY(x, t, amp) {
+    const A = this.audio;
+    amp = (amp === undefined ? 0.28 : amp)
+        * clamp(0.55 / (0.20 + this.envAt(A.eFull, t)), 0.80, 1.60);
+    const tt = t + (x / 1.88) * (K.CURVE_WIN * 0.5), i = tt * A.sr;
+    let i0 = Math.floor(i); const f = i - i0;
+    i0 = clamp(i0, 0, A.nw - 2);
+    return amp * (A.wave[i0] * (1 - f) + A.wave[i0 + 1] * f);
+  }
+  padFlashes(t) {
+    const A = this.audio, out = {};
+    for (let i = 0; i < A.evT.length; i++) {
+      const dt = t - A.evT[i];
+      if (dt < 0) break;
+      if (dt >= 1.6) continue;
+      const v = A.evF[i] * Math.exp(-A.evD[i] * dt);
+      if (v > 0.02) out[A.evPad[i]] = Math.max(out[A.evPad[i]] || 0, v);
+    }
+    return out;
+  }
+  hitEnv(t, win, decay, filter) {
+    const A = this.audio; let m = 0;
+    for (let i = 0; i < A.evT.length; i++) {
+      const dt = t - A.evT[i];
+      if (dt < 0) break;
+      if (dt >= win || !filter(A.evPad[i])) continue;
+      m = Math.max(m, A.evF[i] * Math.exp(-(decay < 0 ? A.evD[i] * 1.15 : decay) * dt));
+    }
+    return m;
+  }
+  kickHit(t) { return this.hitEnv(t, 0.45, 9.0, p => p === PAD_OF.kick); }
+  bassHit(t) { return this.hitEnv(t, 1.0, -1, p => p <= 3); }
+  stepIndex(t) {
+    const A = this.audio;
+    return ((Math.floor((t - A.phi) / A.six) % 16) + 16) % 16;
+  }
+  glitchAt(t) {
+    let g = 0;
+    for (const d of this.audio.drops) {
+      const dt = t - d;
+      if (dt >= 0 && dt < 0.22) g = Math.max(g, 1 - dt / 0.22);
+    }
+    return g;
+  }
+
+  /* ---- projection ---- */
+  toPx(P, n, zoom, shakeX) {
+    const s = this.scale * zoom, out = this.pxbuf;
+    const cx = this.W * 0.5 + (shakeX || 0), cy = this.H * 0.5;
+    for (let i = 0; i < n; i++) {
+      out[i * 2] = cx + P[i * 2] * s;
+      out[i * 2 + 1] = cy - P[i * 2 + 1] * s;
+    }
+    return out;
+  }
+
+  frame(t, zoom, shake, rnd) {
+    const A = this.audio, beam = new Beam(this.W, this.H, this.gain, this.field);
+    const jx = shake * (rnd() * 18 - 9);
+    const eLow = this.envAt(A.eLow, t), eHigh = this.envAt(A.eHigh, t);
+    const eFull = this.envAt(A.eFull, t);
+    const flashes = this.padFlashes(t), step = this.stepIndex(t);
+    const pulse = 1 + 0.28 * eLow;
+    const trem = (1 + 0.6 * eLow + 0.5 * this.bassHit(t));
+
+    this.grid(beam, zoom, jx);
+    this.hud(beam, t, zoom, jx);
+    this.waveLine(beam, t, zoom, jx);
+
+    /* ---- chassis : chaque chemin ondule doucement, plus fort sur le grave */
+    const scratch = this.geo;
+    for (const p of MPC) {
+      const n = p.n;
+      /* Le trait n'est jamais parfaitement stable : c'est un faisceau, pas un
+         dessin. L'abscisse curviligne etant reguliere, les deux angles sont
+         lineaires en i — on fait donc tourner deux vecteurs unite plutot que
+         d'appeler un sinus par point (il y en aurait 116 000 par image). */
+      const ds = n > 1 ? p.len1 : 0;
+      let a1 = t * 2.4 + p.ph, a2 = -t * 6.8 + p.ph * 2.3;
+      let s1 = Math.sin(a1), c1 = Math.cos(a1), s2 = Math.sin(a2), c2 = Math.cos(a2);
+      const d1 = ds * 8.5, d2 = ds * 39.0;
+      const sd1 = Math.sin(d1), cd1 = Math.cos(d1);
+      const sd2 = Math.sin(d2), cd2 = Math.cos(d2);
+      const A1 = 0.0021 * trem, A2 = 0.0013 * trem;
+      for (let i = 0; i < n; i++) {
+        const wob = A1 * s1 + A2 * s2;
+        scratch[i * 2] = p.P[i * 2] + p.N[i * 2] * wob;
+        scratch[i * 2 + 1] = p.P[i * 2 + 1] + p.N[i * 2 + 1] * wob;
+        const n1 = s1 * cd1 + c1 * sd1; c1 = c1 * cd1 - s1 * sd1; s1 = n1;
+        const n2 = s2 * cd2 + c2 * sd2; c2 = c2 * cd2 - s2 * sd2; s2 = n2;
+      }
+      let w = 0.50 * pulse + 0.12655;          // 1.2*exp(-((1-0.55)/0.30)^2)
+      const tag = p.tag;
+      if (tag.startsWith('pad')) {
+        const v = flashes[+tag.slice(3)];
+        if (v) w += 1.7 * v;
+      } else if (tag.startsWith('step')) {
+        const k = +tag.slice(4);
+        if (k === step) w += 1.9; else if (STEP_LIT.has(k)) w += 0.30;
+      } else if (tag === 'strip') w += 0.8 * eHigh;
+      else if (tag.startsWith('qlink')) w += 0.45 * eLow;
+      else if (tag === 'wheel') w += 0.30 * eFull;
+      beam.add(this.toPx(scratch, n, zoom, jx), n, w);
+    }
+
+    /* ---- organes animes ---- */
+    for (const k in flashes) {
+      const v = flashes[k];
+      if (v > 0.05) {
+        const f = FILL_PAD[k];
+        beam.add(this.toPx(f, f.length >> 1, zoom, jx), f.length >> 1, 1.05 * v);
+      }
+    }
+    if (step >= 0 && step < 16) {
+      const f = FILL_STEP[step];
+      beam.add(this.toPx(f, f.length >> 1, zoom, jx), f.length >> 1, 0.95);
+    }
+    K.QLINK.forEach(([cx, cy], k) => {          // index qui tourne
+      const v = clamp(0.18 + 0.62 * (k % 2 === 0 ? eLow : eHigh)
+                      + 0.20 * Math.sin(t * 1.7 + k), 0, 1);
+      const a = (225 - 270 * v) * Math.PI / 180, R = K.QLINK_R;
+      beam.add(this.toPx(this.seg(cx + R * 0.36 * Math.cos(a), cy + R * 0.36 * Math.sin(a),
+                                  cx + R * 0.86 * Math.cos(a), cy + R * 0.86 * Math.sin(a)),
+                         24, zoom, jx), 24, 1.15);
+    });
+    const S = K.STRIP;                          // curseur du touch strip
+    const sy = S[1] + (S[3] - S[1]) * clamp(0.12 + 0.8 * eHigh, 0, 1);
+    beam.add(this.toPx(this.rectFill(S[0] + 0.014, sy - 0.026, S[2] - 0.014, sy + 0.026),
+                       96, zoom, jx), 96, 0.85);
+
+    /* ---- ecran : forme d'onde et niveaux ---- */
+    const [sx0, sy0, sx1, sy1] = K.SCREEN, m = 0.05;
+    const xlo = sx0 + m, xhi = sx1 - m, yc = (sy0 + sy1) * 0.5 - 0.03;
+    const wv = new Float32Array(320 * 2);
+    for (let i = 0; i < 320; i++) {
+      const x = xlo + (xhi - xlo) * i / 319;
+      const u = ((x - xlo) / (xhi - xlo)) * 2 - 1;
+      wv[i * 2] = x; wv[i * 2 + 1] = yc + 0.125 * this.waveY(u * 1.88, t, 1.0);
+    }
+    beam.add(this.toPx(wv, 320, zoom, jx), 320, 1.0);
+    const base = sy0 + 0.055;
+    for (let k = 0; k < 8; k++) {
+      let v = [eLow, eFull, eHigh][k % 3] * (0.5 + 0.5 * Math.sin(k * 1.7 + t * 5.0));
+      v = Math.max(0.06, v);
+      const bx = xlo + (k + 0.5) * ((xhi - xlo) / 8);
+      beam.add(this.toPx(this.seg(bx, base, bx, base + 0.16 * v), 24, zoom, jx), 24, 0.8);
+    }
+    return this.colorize(beam.buf, t, shake, rnd);
+  }
+
+  seg(x0, y0, x1, y1, n = 24) {
+    const out = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1);
+      out[i * 2] = x0 + (x1 - x0) * u; out[i * 2 + 1] = y0 + (y1 - y0) * u;
+    }
+    return out;
+  }
+  rectFill(x0, y0, x1, y1, nlines = 4, m = 0.008) {
+    const out = new Float32Array(nlines * 24 * 2);
+    for (let l = 0; l < nlines; l++) {
+      const y = y0 + m + (y1 - m - y0 - m) * (nlines > 1 ? l / (nlines - 1) : 0);
+      for (let i = 0; i < 24; i++) {
+        const o = (l * 24 + i) * 2;
+        out[o] = x0 + m + (x1 - m - x0 - m) * i / 23; out[o + 1] = y;
+      }
+    }
+    return out;
+  }
+
+  grid(beam, zoom, jx) {
+    for (let i = 0; i < 9; i++) {
+      const x = -1.6 + 3.2 * i / 8, P = new Float32Array(320 * 2);
+      for (let j = 0; j < 320; j++) { P[j * 2] = x; P[j * 2 + 1] = -0.92 + 1.84 * j / 319; }
+      beam.add(this.toPx(P, 320, zoom, jx), 320, 0.075 * 0.55);
+    }
+    for (let i = 0; i < 7; i++) {
+      const y = -0.9 + 1.8 * i / 6, P = new Float32Array(380 * 2);
+      for (let j = 0; j < 380; j++) { P[j * 2] = -1.66 + 3.32 * j / 379; P[j * 2 + 1] = y; }
+      beam.add(this.toPx(P, 380, zoom, jx), 380, 0.080 * 0.55);
+    }
+  }
+  hud(beam, t, zoom, jx) {
+    const blink = 0.45 + 0.55 * (Math.sin(t * 9.0) > 0 ? 1 : 0);
+    for (const p of HUD.OSC) beam.add(this.toPx(p, p.length >> 1, zoom, jx),
+                                       p.length >> 1, 0.55 * 0.65);
+    for (const p of HUD.SYNC) beam.add(this.toPx(p, p.length >> 1, zoom, jx),
+                                       p.length >> 1, 0.55 * 0.65 * blink);
+  }
+  /* Le fil du morceau : il entre par la gauche, passe derriere la machine et
+     ressort a droite — la MPC est un morceau de la bande. */
+  waveLine(beam, t, zoom, jx) {
+    const N = 2600, alpha = 0.48, hit = this.bassHit(t);
+    const P = new Float32Array(N * 2), a = new Float32Array(N);
+    const B = K.BODY;
+    for (let i = 0; i < N; i++) {
+      const x = -1.88 + 3.76 * i / (N - 1);
+      P[i * 2] = x; P[i * 2 + 1] = this.waveY(x, t);
+      const inside = smoothstep(B[0] - 0.05, B[0] + 0.03, x)
+                   * (1 - smoothstep(B[2] - 0.03, B[2] + 0.05, x));
+      a[i] = alpha * (1 - inside);
+    }
+    const w1 = new Float32Array(N), w2 = new Float32Array(N), w3 = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      w1[i] = 0.85 * a[i] * (1 + 0.85 * hit);
+      w2[i] = 0.35 * a[i] * (1 + 0.7 * hit);
+      w3[i] = 0.30 * a[i] * hit;
+    }
+    beam.add(this.toPx(P, N, zoom, jx), N, w1);
+    for (const dy of [0.0035, -0.0035]) beam.add(this.offset(P, N, dy, zoom, jx), N, w2);
+    if (hit > 0.15)
+      for (const dy of [0.012, -0.012, 0.022, -0.022])
+        beam.add(this.offset(P, N, dy, zoom, jx), N, w3);
+  }
+  offset(P, n, dy, zoom, jx) {
+    const Q = this.geo;
+    for (let i = 0; i < n; i++) { Q[i * 2] = P[i * 2]; Q[i * 2 + 1] = P[i * 2 + 1] + dy; }
+    return this.toPx(Q, n, zoom, jx);
+  }
+
+  /* ---- colorisation : bloom a deux echelles, phosphore, dalle ---- */
+  colorize(field, t, shake, rnd) {
+    const {W, H} = this, core = gauss(field, W, H, this.sigma, 'f');
+    const d4 = downs(core, W, H, 4), d8 = downs(core, W, H, 8);
+    const g4 = gauss(d4.d, d4.w, d4.h, 2.6, '4'), g8 = gauss(d8.d, d8.w, d8.h, 4.5, '8');
+    const img = this.img, F = this.cFluo, Ha = this.cHalo, Ho = this.cHot;
+    const bgF = this.bgField, bgC = this.bgFlat || [0, 0, 0];
+    const b0 = bgC[0], b1 = bgC[1], b2 = bgC[2];
+    const f0 = F[0], f1 = F[1], f2 = F[2], h0 = Ha[0], h1 = Ha[1], h2 = Ha[2];
+    const o0 = Ho[0], o1 = Ho[1], o2 = Ho[2], dalle = this.dalle;
+
+    const grain = this.grain, gw = this.gw;     // quart de definition, comme le moteur
+    for (let i = 0; i < grain.length; i++) grain[i] = (rnd() - 0.5) * 0.022;
+
+    for (let y = 0; y < H; y++) {
+      const roll = 1 + 0.05 * Math.cos((y / H + t * 0.16) * 2 * Math.PI);
+      const y4 = Math.min(d4.h - 1, y >> 2), y8 = Math.min(d8.h - 1, y >> 3);
+      const r4 = y4 * d4.w, r8 = y8 * d8.w, gr0 = Math.min(this.gh - 1, y >> 2) * gw;
+      const mx4 = d4.w - 1, mx8 = d8.w - 1;
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        const x4 = x >> 2, x8 = x >> 3;
+        const glow = g4[r4 + (x4 > mx4 ? mx4 : x4)] * 2.6
+                   + g8[r8 + (x8 > mx8 ? mx8 : x8)] * 3.4;
+        const inten = core[i] * 1.15;
+        const base = inten > 1.6 ? 1.6 : inten;
+        const gl = (glow > 3 ? 3 : glow) * 0.55;
+        const hv = (inten - 0.72) * 1.25;
+        const hot = hv <= 0 ? 0 : HOTC[(hv >= 1 ? 1 : hv) * 1024 | 0];
+        const k = dalle[i] * roll, o = i * 3;
+        const gr = grain[gr0 + (x4 > gw - 1 ? gw - 1 : x4)];
+        img[o]     = (f0 * base + h0 * gl + hot * o0 + (bgF ? bgF[o] : b0)) * k + gr;
+        img[o + 1] = (f1 * base + h1 * gl + hot * o1 + (bgF ? bgF[o + 1] : b1)) * k + gr;
+        img[o + 2] = (f2 * base + h2 * gl + hot * o2 + (bgF ? bgF[o + 2] : b2)) * k + gr;
+      }
+    }
+    if (shake > 0.02) this.glitch(img, shake, rnd);
+    return this.warpToBytes(img);
+  }
+
+  /* Rafales : tranches decalees, recopies, pertes de signal, aberration. */
+  glitch(img, gl, rnd) {
+    const {W, H} = this, row = W * 3;
+    const slices = (3 + 18 * gl) | 0;
+    for (let s = 0; s < slices; s++) {
+      const y0 = (rnd() * (H - 4)) | 0;
+      const y1 = Math.min(H, y0 + 3 + (rnd() * Math.max(6, H * 0.10 * gl + 5)) | 0);
+      const off = ((rnd() * 2 - 1) * (W * 0.10 * gl + 2)) | 0;
+      if (!off) continue;
+      for (let y = y0; y < y1; y++) {
+        const o = y * row, tmp = img.slice(o, o + row);
+        for (let x = 0; x < W; x++) {
+          const sx = ((x - off) % W + W) % W;
+          img[o + x * 3] = tmp[sx * 3];
+          img[o + x * 3 + 1] = tmp[sx * 3 + 1];
+          img[o + x * 3 + 2] = tmp[sx * 3 + 2];
+        }
+      }
+    }
+    if (gl > 0.55)
+      for (let s = 0; s < (5 * gl) | 0; s++) {
+        const hgt = 4 + (rnd() * Math.max(8, H * 0.09)) | 0;
+        const y0 = (rnd() * (H - hgt)) | 0, ys = (rnd() * (H - hgt)) | 0;
+        img.copyWithin(y0 * row, ys * row, (ys + hgt) * row);
+      }
+    if (gl > 0.45)
+      for (let s = 0; s < (4 * gl) | 0; s++) {
+        const hgt = 2 + (rnd() * Math.max(5, H * 0.05)) | 0;
+        const y0 = (rnd() * (H - hgt)) | 0, f = rnd() * 0.30;
+        for (let i = y0 * row; i < (y0 + hgt) * row; i++) img[i] *= f;
+      }
+    const sh = Math.max(1, (14 * gl) | 0);      // aberration chromatique
+    for (let y = 0; y < H; y++) {
+      const o = y * row, r = [], b = [];
+      for (let x = 0; x < W; x++) { r.push(img[o + x * 3]); b.push(img[o + x * 3 + 2]); }
+      for (let x = 0; x < W; x++) {
+        img[o + x * 3] = r[((x - sh) % W + W) % W];
+        img[o + x * 3 + 2] = b[((x + sh) % W + W) % W];
+      }
+    }
+  }
+
+  /* Bombe de la dalle + passage en octets, en un seul balayage. */
+  warpToBytes(img) {
+    const {W, H, out, wi, w00, w01, w10, w11} = this, row = W * 3, n = W * H;
+    for (let i = 0; i < n; i++) {
+      const b = wi[i] * 3, a = w00[i], c = w01[i], d = w10[i], e = w11[i], o = i * 4;
+      for (let ch = 0; ch < 3; ch++) {
+        const v = img[b + ch] * a + img[b + 3 + ch] * c
+                + img[b + row + ch] * d + img[b + row + 3 + ch] * e;
+        out[o + ch] = GAMMA[v <= 0 ? 0 : (v >= 1 ? 4096 : (v * 4096) | 0)];
+      }
+      out[o + 3] = 255;
+    }
+    return out;
+  }
+}
+
+/* Le moteur a besoin de trois couleurs, pas d'une : le coeur du trait, son
+   halo, et sa version sur-exposee — c'est ce triplet qui lui donne son allure
+   de phosphore plutot que de ligne peinte. */
+function derivePalette(hex) {
+  const c = hexToRgb(hex), m = Math.max(c[0], c[1], c[2]) || 1;
+  const b = c.map(v => v / m);
+  return [b, b.map(v => clamp(Math.pow(v, 2.2), 0, 1)),
+          b.map(v => clamp(0.70 + 0.30 * v, 0, 1)), [0, 0, 0]];
+}
+function hexToRgb(h) {
+  h = String(h).replace('#', '');
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255,
+          parseInt(h.slice(4, 6), 16) / 255];
+}
+/* Bruit reproductible : deux rendus du meme instant donnent la meme image. */
+function mulberry(seed) {
+  return function () {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* ==========================================================================
+   L'application
+   ========================================================================== */
+const $ = s => document.querySelector(s);
+const cv = $('#cv'), ctx = cv.getContext('2d', {alpha: false});
+let R = null, A = null, actx = null, buffer = null, src = null;
+let playing = false, t0 = 0, offset = 0, raf = 0, recording = false;
+let frames_ = 0, fpsT = 0;
+
+const fmt = s => {
+  s = Math.max(0, Math.round(s));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+};
+const setState = (txt, bad) => {
+  const el = $('#state'); el.innerHTML = txt; el.className = 'state' + (bad ? ' bad' : '');
+};
+
+function currentLook() {
+  const bg = $('#bg').value;
+  return {palette: $('#palette').value, trait: $('#trait').value, bg,
+          bgColor: hexToRgb($('#bgColor').value),
+          bgStrength: +$('#bgStrength').value, bgClear: +$('#bgClear').value};
+}
+
+function now() {
+  if (!A) return 0;
+  const t = playing ? offset + (actx.currentTime - t0) : offset;
+  return clamp(t, 0, A.dur);
+}
+
+function draw() {
+  if (!R || !A) return;
+  const t = now();
+  const rnd = mulberry(((t * 30) | 0) + 7);
+  const zoom = 1 + 0.032 * R.kickHit(t);
+  const shake = R.glitchAt(t);
+  const px = R.frame(t, zoom, shake, rnd);
+  ctx.putImageData(new ImageData(px, R.W, R.H), 0, 0);
+
+  $('#time').textContent = fmt(t) + ' / ' + fmt(A.dur);
+  if (!seeking) $('#seek').value = Math.round(t / A.dur * 1000);
+  frames_++;
+  const el = performance.now();
+  if (el - fpsT > 700) {
+    $('#fps').textContent = (frames_ / ((el - fpsT) / 1000)).toFixed(0) + ' i/s';
+    frames_ = 0; fpsT = el;
+  }
+  if (playing && t >= A.dur - 0.02 && !recording) stop();
+  if (playing) raf = requestAnimationFrame(draw);
+}
+
+function play() {
+  if (!A || playing) return;
+  if (actx.state === 'suspended') actx.resume();
+  src = actx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(gainNode);
+  src.start(0, clamp(offset, 0, A.dur));
+  t0 = actx.currentTime;
+  playing = true;
+  $('#play').innerHTML = '&#10074;&#10074;';
+  fpsT = performance.now(); frames_ = 0;
+  raf = requestAnimationFrame(draw);
+}
+function stop() {
+  if (!playing) return;
+  offset = now();
+  try { src.stop(); } catch (e) { /* deja arrete */ }
+  playing = false;
+  $('#play').innerHTML = '&#9654;';
+  cancelAnimationFrame(raf);
+  $('#fps').textContent = '';
+  draw();
+}
+$('#play').onclick = () => playing ? stop() : play();
+
+let seeking = false;
+$('#seek').oninput = () => { seeking = true; };
+$('#seek').onchange = e => {
+  seeking = false;
+  const was = playing;
+  if (playing) stop();
+  offset = (+e.target.value / 1000) * A.dur;
+  if (was) play(); else draw();
+};
+
+/* ---- reglages : la couleur ne depend pas du son, on la repose a chaud ---- */
+function applyLook() {
+  if (!R) return;
+  R.setLook(currentLook());
+  if (!playing) draw();
+}
+$('#palette').onchange = e => { $('#traitwrap').hidden = e.target.value !== 'perso';
+                                applyLook(); };
+$('#bg').onchange = e => { $('#bgopts').hidden = e.target.value === 'noir'; applyLook(); };
+$('#trait').oninput = applyLook;
+$('#bgColor').oninput = applyLook;
+$('#bgStrength').oninput = e => { $('#v-str').textContent = (+e.target.value).toFixed(2);
+                                  applyLook(); };
+$('#bgClear').oninput = e => { $('#v-clr').textContent = (+e.target.value).toFixed(2);
+                               applyLook(); };
+
+/* ---- depot du morceau ---- */
+const drop = $('#drop'), fileIn = $('#file');
+drop.onclick = () => fileIn.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over');
+                     if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); };
+fileIn.onchange = () => fileIn.files[0] && load(fileIn.files[0]);
+
+async function load(file) {
+  if (playing) stop();
+  setState('decodage de ' + file.name + '&hellip;');
+  $('#go').disabled = true;
+  try {
+    const buf = await file.arrayBuffer();
+    buffer = await actx.decodeAudioData(buf);
+    const mono = toMono(buffer);
+    setState('analyse&hellip; <b>0 %</b>');
+    A = await analyse(mono, buffer.sampleRate,
+                      p => setState('analyse&hellip; <b>' + (p * 100 | 0) + ' %</b>'));
+    offset = 0;
+    $('#dropname').textContent = file.name;
+    $('#corner').textContent = 'OSC — ' + file.name.replace(/\.[^.]+$/, '').slice(0, 22);
+    readout();
+    R.audio = A;
+    $('#go').disabled = false;
+    setState('pret &mdash; <b>' + A.drops.length + '</b> paroxysme(s)');
+    draw();
+  } catch (e) {
+    setState('impossible de lire ce fichier : ' + e.message, true);
+    $('#go').disabled = false;
+  }
+}
+function toMono(b) {
+  const n = b.length, out = new Float32Array(n);
+  for (let c = 0; c < b.numberOfChannels; c++) {
+    const d = b.getChannelData(c);
+    for (let i = 0; i < n; i++) out[i] += d[i];
+  }
+  if (b.numberOfChannels > 1)
+    for (let i = 0; i < n; i++) out[i] /= b.numberOfChannels;
+  return out;
+}
+function readout() {
+  $('#r-bpm').textContent = (60 / A.beat).toFixed(1) + ' BPM';
+  $('#r-hits').textContent = A.ev.length;
+  $('#r-dur').textContent = fmt(A.dur);
+  $('#r-drops').textContent = A.drops.length;
+}
+
+/* ---- enregistrement : temps reel, image et son captures ensemble ---- */
+$('#go').onclick = async () => {
+  if (recording || !A) return;
+  const [w, h] = $('#size').value.split('x').map(Number);
+  if (playing) stop();
+  offset = 0;
+  cv.width = w; cv.height = h;
+  R.resize(w, h);
+
+  const stream = cv.captureStream(30);
+  const dest = actx.createMediaStreamDestination();
+  gainNode.connect(dest);
+  dest.stream.getAudioTracks().forEach(tr => stream.addTrack(tr));
+
+  const mime = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/webm;codecs=vp9,opus',
+                'video/webm;codecs=vp8,opus', 'video/webm']
+    .find(m => MediaRecorder.isTypeSupported(m)) || '';
+  const rec = new MediaRecorder(stream, mime ? {mimeType: mime, videoBitsPerSecond: 8e6} : {});
+  const chunks = [];
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+
+  recording = true;
+  $('#rec').classList.add('on');
+  $('#go').disabled = true;
+  $('#prog').hidden = false;
+  $('#ptext').textContent = 'enregistrement en cours&hellip;';
+
+  const tick = setInterval(() => {
+    const p = now() / A.dur;
+    $('#pbar').style.width = (p * 100).toFixed(1) + '%';
+    $('#ptext').textContent = 'enregistrement — ' + fmt(A.dur - now()) + ' restant';
+  }, 400);
+
+  rec.onstop = async () => {
+    clearInterval(tick);
+    recording = false;
+    $('#rec').classList.remove('on');
+    gainNode.disconnect(dest);
+    const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+    const blob = new Blob(chunks, {type: mime || 'video/webm'});
+    $('#pbar').style.width = '100%';
+    $('#ptext').textContent = 'termine — ' + (blob.size / 1048576).toFixed(1) + ' Mo';
+    await offer(blob, 'omnipotard-' + ($('#dropname').textContent
+      .replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '-').toLowerCase() || 'demo')
+      + '.' + ext);
+    $('#go').disabled = false;
+    cv.width = 640; cv.height = 360; R.resize(640, 360); draw();
+  };
+
+  rec.start(1000);
+  play();
+  const watch = setInterval(() => {
+    if (!playing || now() >= A.dur - 0.05) {
+      clearInterval(watch);
+      setTimeout(() => { rec.state !== 'inactive' && rec.stop(); stop(); }, 300);
+    }
+  }, 200);
+};
+
+/* Dans un artifact la page ne telecharge pas elle-meme : on passe par la
+   capacite `downloads`. Ouverte depuis le disque, le lien classique marche. */
+async function offer(blob, filename) {
+  const hosted = !!window.claude;
+  try {
+    const dl = hosted && await window.claude.use('downloads');
+    if (dl) {
+      await dl.save({filename, data: blob});
+      $('#ptext').textContent = 'enregistre : ' + filename;
+      return;
+    }
+    if (hosted) {          // page hebergee sans droit d'enregistrement : le
+      $('#ptext').innerHTML = 'la video est prete mais cette page n\'a pas le ' +
+        'droit d\'enregistrer un fichier. Ouvrez le studio depuis le fichier ' +
+        'HTML telecharge pour la recuperer.';   // lien <a download> inerte ici
+      return;
+    }
+  } catch (e) {
+    $('#ptext').innerHTML = e && e.code === 'declined'
+      ? 'enregistrement annule' : 'echec de l\'enregistrement : ' + (e.message || e.code);
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 20000);
+  $('#ptext').textContent = 'telecharge : ' + filename;
+}
+
+/* ==========================================================================
+   Demarrage : la machine joue une boucle de demonstration tout de suite,
+   pour qu'on voie ce que fait l'outil avant meme d'avoir depose un fichier.
+   ========================================================================== */
+let gainNode = null;
+
+function demoBuffer(ctxA) {
+  const sr = ctxA.sampleRate, beat = 0.704, bars = 2, dur = beat * 4 * bars;
+  const n = Math.floor(sr * dur), b = ctxA.createBuffer(1, n, sr);
+  const d = b.getChannelData(0);
+  const add = (at, fn, len) => {
+    const i0 = Math.floor(at * sr), N = Math.floor(len * sr);
+    for (let i = 0; i < N && i0 + i < n; i++) d[i0 + i] += fn(i / sr);
+  };
+  for (let bar = 0; bar < bars; bar++) {
+    const o = bar * beat * 4;
+    for (const k of [0, 2]) {                    // grosse caisse : 1 et 3
+      add(o + k * beat, u => Math.sin(2 * Math.PI * 52 * u) * Math.exp(-u * 11)
+                            + Math.sin(2 * Math.PI * 900 * u) * Math.exp(-u * 180) * 0.5, 0.5);
+    }
+    add(o + 2 * beat, u => (Math.random() * 2 - 1) * Math.exp(-u * 34)
+                          + Math.sin(2 * Math.PI * 330 * u) * Math.exp(-u * 28) * 0.6, 0.25);
+    for (let k = 0; k < 8; k++)                  // charley sur les contretemps
+      add(o + (k + 0.5) * beat / 2, u => (Math.random() * 2 - 1)
+            * Math.exp(-u * 120) * 0.30, 0.09);
+    for (let k = 0; k < 4; k++)                  // basse dub
+      add(o + k * beat + beat * 0.5,
+          u => Math.sin(2 * Math.PI * (k % 2 ? 49 : 65) * u) * Math.exp(-u * 4.2) * 0.55, 0.6);
+    for (const k of [1, 3])                      // accord a contretemps
+      add(o + k * beat, u => (Math.sin(2 * Math.PI * 196 * u) + Math.sin(2 * Math.PI * 233 * u)
+            + Math.sin(2 * Math.PI * 294 * u)) * Math.exp(-u * 7) * 0.12, 0.4);
+  }
+  let mx = 0; for (let i = 0; i < n; i++) mx = Math.max(mx, Math.abs(d[i]));
+  if (mx > 0) for (let i = 0; i < n; i++) d[i] = d[i] / mx * 0.85;
+  return b;
+}
+
+(async function start() {
+  actx = new (window.AudioContext || window.webkitAudioContext)();
+  gainNode = actx.createGain();
+  gainNode.connect(actx.destination);
+  buffer = demoBuffer(actx);
+  A = await analyse(toMono(buffer), buffer.sampleRate);
+  R = new Renderer(640, 360, A);
+  R.setLook(currentLook());
+  readout();
+  setState('boucle de demonstration &mdash; deposez votre morceau');
+  draw();                                        // la machine est dessinee au repos
+})();
+</script>

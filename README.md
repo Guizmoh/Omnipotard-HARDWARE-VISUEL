@@ -297,3 +297,50 @@ Les mêmes réglages existent en ligne de commande sur les deux autres scripts :
 python3 tools/omnipotard_intro.py --palette bleu --bg grille --bg-color '#123a5c'
 python3 tools/mpc_performance.py assets/hint.mp3 --bg degrade --bg-color '#2a0d3f'
 ```
+
+## STUDIO WEB — une page HTML, rien a installer
+
+`tools/build_web_studio.py` fabrique **un seul fichier HTML autonome** : on
+l'ouvre (double-clic depuis le disque, ou en ligne), on depose un morceau, et
+la MPC le joue. Pas de Python, pas de ffmpeg, pas de serveur — tout se passe
+dans le navigateur, et le morceau ne quitte pas la machine.
+
+```bash
+python3 tools/build_web_studio.py -o out/studio-omnipotard.html
+```
+
+La page s'ouvre sur une **boucle de demonstration** deja en train de jouer, pour
+qu'on voie ce que fait l'outil avant meme d'avoir depose un fichier.
+
+### Ce qu'elle fait elle-meme
+
+Tout ce que fait `mpc_performance.py` est porte en JavaScript : STFT (hop 256,
+fenetre 1024), flux spectral par bande, detection des coups, tempo par
+autocorrelation ponderee, calage de phase sur les grosses caisses, paroxysmes,
+enveloppes — puis le faisceau, le bloom a deux echelles, la colorisation, les
+scanlines, le vignettage, le grain, la bombe cathodique et les glitchs.
+
+Sur *Hint*, le portage retrouve les memes paroxysmes que Python a 0,1 s pres
+(8,76 / 19,76 / 30,92 s contre 8,8 / 19,8 / 31,0) et une image dont la
+luminosite moyenne differe de 1,4 %.
+
+### Le trace n'est pas redessine
+
+C'est le point important : la geometrie de la machine est **exportee du moteur
+Python** (`tools/export_geometry.py` : 113 chemins, 58 000 points deja
+reechantillonnes, quantifies en entiers 16 bits) et embarquee dans la page. Le
+navigateur ne fait que la tracer. Une retouche de la machine se propage donc au
+studio web par une simple reconstruction, sans risque de voir les deux dessins
+diverger.
+
+### Ses limites, face a `tools/studio.py`
+
+| | studio web | studio local (Python) |
+| --- | --- | --- |
+| installation | aucune | Python + numpy + ffmpeg |
+| enregistrement | temps reel, webm/mp4 | hors-ligne, mp4 x264 |
+| definition | 360p a 720p | jusqu'a la 4K |
+| duree | celle du morceau, en temps reel | illimitee |
+
+Le studio web sert a essayer, choisir une couleur, sortir vite un extrait. Pour
+un master propre, en 4K ou en lot, c'est `tools/studio.py` qui travaille.

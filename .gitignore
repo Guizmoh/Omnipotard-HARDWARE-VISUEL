@@ -17,3 +17,6 @@ out/mpc_per*.mp4
 
 # atelier du studio : morceaux deposes et rendus (tools/studio.py)
 out/studio/
+# page assemblee : regenerable via tools/build_web_studio.py
+out/studio-omnipotard.html
+out/geometrie.json
