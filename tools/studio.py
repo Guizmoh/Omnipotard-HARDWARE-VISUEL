@@ -639,6 +639,24 @@ function setStatus(t, bad) {
 """
 
 
+def check_deps():
+    """Verifie ffmpeg avant d'ouvrir la page.
+
+    Le studio est fait pour etre lance sur sa propre machine, souvent sans
+    rien y avoir installe : autant le dire clairement tout de suite plutot
+    que de laisser le premier rendu echouer.
+    """
+    import shutil as sh
+    if sh.which("ffmpeg") and sh.which("ffprobe"):
+        return
+    aide = {
+        "darwin": "brew install ffmpeg",
+        "win32": "winget install Gyan.FFmpeg   (ou https://ffmpeg.org/download.html)",
+    }.get(sys.platform, "sudo apt install ffmpeg")
+    sys.exit("ffmpeg est introuvable — le studio en a besoin pour lire vos "
+             "morceaux et encoder les videos.\n  A installer avec :  %s" % aide)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Studio local Omnipotard")
     ap.add_argument("--port", type=int, default=8765)
@@ -648,6 +666,7 @@ def main():
     ap.add_argument("track", nargs="?", help="morceau a charger au demarrage")
     args = ap.parse_args()
 
+    check_deps()
     os.makedirs(UPLOADS, exist_ok=True)
     if args.track:
         tid, info = STUDIO.add_track(os.path.abspath(args.track),

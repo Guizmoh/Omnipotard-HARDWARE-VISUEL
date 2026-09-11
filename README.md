@@ -73,7 +73,12 @@ marquage et grille de haut-parleur en bas.
 
 ```bash
 pip install numpy pillow          # pillow seulement pour --stills
-sudo apt install ffmpeg
+
+# ffmpeg, selon la machine :
+brew install ffmpeg               # macOS
+winget install Gyan.FFmpeg        # Windows
+sudo apt install ffmpeg           # Linux
+
 # placer le morceau dans assets/hint.mp3 (non versionné), puis :
 python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4
 ```
@@ -233,9 +238,18 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
 scripts ci-dessus : pas de ligne de commande, une page dans le navigateur.
 
 ```bash
+git clone https://github.com/Guizmoh/Glitch-visualisateur.git
+cd Glitch-visualisateur
+pip install numpy                 # ffmpeg : voir « Rendu » plus haut
 python3 tools/studio.py
 # le navigateur s'ouvre sur http://127.0.0.1:8765
 ```
+
+L'adresse est **locale** : elle ne marche que sur la machine qui fait tourner
+la commande. Il n'y a pas de version en ligne, et c'est voulu — le studio
+décode l'audio avec ffmpeg, calcule chaque image avec numpy puis encode en
+x264, tout cela sur vos fichiers. Un navigateur seul ne sait pas faire ça, et
+il faudrait de toute façon envoyer vos morceaux sur un serveur.
 
 On y dépose un morceau (mp3, wav, flac, m4a…), on choisit la couleur du trait
 et le fond, et **l'aperçu se recalcule à chaque réglage** — c'est une vraie
