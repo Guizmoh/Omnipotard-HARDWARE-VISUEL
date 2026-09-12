@@ -99,6 +99,7 @@ def look_from(q):
         "bg_clear": float(q.get("bgClear", 0.55)),
         "wobble": float(q.get("wobble", 0.0)),
         "split": float(q.get("split", 1.0)),
+        "split_count": int(float(q.get("splitCount", 3))),
         "snare": float(q.get("snare", 1.0)),
         "wave_gain": float(q.get("wave", 2.6)),
         "trail": float(q.get("trail", 1.0)),
@@ -164,7 +165,8 @@ class Studio:
                 self.renderers[key] = r
         # set_look ne connait que la couleur et le fond ; les deux autres
         # reglages se posent directement sur l'instance
-        POSE = ("wobble", "split", "snare", "wave_gain", "trail", "screen_title")
+        POSE = ("wobble", "split", "split_count", "snare", "wave_gain", "trail",
+                "screen_title")
         r.set_look(palette, **{k: v for k, v in kw.items() if k not in POSE})
         for k in POSE:
             setattr(r, k, kw[k])

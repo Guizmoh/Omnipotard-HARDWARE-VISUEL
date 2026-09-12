@@ -229,9 +229,12 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
   les canaux tels quels ne donnerait qu'une frange pale au lieu de trois
   lignes.
 
-  `sub_hit()` ignore tout ce qui est sous 0,74 de force et repart de zero
-  juste au-dessus, sinon l'effet serait permanent et ne signalerait plus
-  rien. `--split 0` le retire.
+  Le declenchement ne passe pas par un seuil mais par un **classement** :
+  `split_times()` trie les coups graves par force et garde les
+  `--split-count` plus gros de toute la video (3 par defaut), en refusant
+  deux instants trop rapproches. Un seuil aurait dependu du mixage — jamais
+  declenche sur un morceau, vingt fois sur un autre. Sur *Hint* entier, les
+  trois tombent a 79 s, 169 s et 223 s. `--split 0` le retire.
 - **Traînée de la bande** (`--trail`, 1 par defaut) : le fil est redessine a
   quelques instants passes, de plus en plus pale. Sa longueur suit
   `density()`, le nombre de familles d'instruments qui jouent dans la
@@ -240,8 +243,8 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
 - **Dalle** : le bandeau du haut porte le nom du morceau (`--title`, par
   defaut le nom du fichier) et, juste en dessous, une barre de progression.
 - **Image de fond** (`--backdrop`) : n'importe quelle image lisible par
-  ffmpeg. Elle est recadree en « couvrant », assombrie, legerement floutee et
-  creusee derriere la machine — le faisceau etant additif, une image nette et
+  ffmpeg, une par morceau. Elle est recadree en « couvrant », assombrie,
+  legerement floutee et creusee derriere la machine — le faisceau etant additif, une image nette et
   claire lui mangerait tout son contraste. `--backdrop-strength` et
   `--backdrop-clear` reglent le dosage.
 - **Ondulation du trace** (`--wobble`, 0 par defaut) : le leger tremblement

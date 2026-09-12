@@ -135,13 +135,14 @@ def load_full_track(path, start, duration, sr=SR):
 
 def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True,
                               seed=7, palette="vert", wobble=0.0, split=1.0,
-                              split_px=11.0,
+                              split_px=11.0, split_count=3,
                               snare=1.0, wave_gain=2.6, trail=1.0, screen_title="",
-                              backdrop=None, backdrop_strength=0.55,
+                              backdrop=None, backdrop_strength=0.80,
                               backdrop_clear=0.45, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
+    r.split_count = int(split_count)
     r.snare, r.wave_gain = float(snare), float(wave_gain)
     r.trail, r.screen_title = float(trail), str(screen_title or "")
     if backdrop:
@@ -320,7 +321,9 @@ def add_look_args(ap):
     ap.add_argument("--split", type=float, default=1.0,
                     help="dedoublement chromatique du trait sur les gros subs")
     ap.add_argument("--split-px", type=float, default=11.0,
-                    help="ecart des couches, en pixels ramenes a 540p")
+                    help="ecart des copies, en pixels ramenes a 540p")
+    ap.add_argument("--split-count", type=int, default=3,
+                    help="nombre de declenchements dans toute la video")
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=2.6,
@@ -331,7 +334,7 @@ def add_look_args(ap):
                     help="titre affiche sur la dalle (defaut : nom du fichier)")
     ap.add_argument("--backdrop", default=None,
                     help="image de fond (jpg, png, webp...)")
-    ap.add_argument("--backdrop-strength", type=float, default=0.55)
+    ap.add_argument("--backdrop-strength", type=float, default=0.80)
     ap.add_argument("--backdrop-clear", type=float, default=0.45)
 
 
@@ -341,6 +344,7 @@ def look_kwargs(args):
             "bg_strength": args.bg_strength,
             "bg_clear": args.bg_clear,
             "wobble": args.wobble, "split": args.split, "split_px": args.split_px,
+            "split_count": args.split_count,
             "snare": args.snare, "wave_gain": args.wave, "trail": args.trail,
             "screen_title": (args.title if args.title is not None
                              else os.path.splitext(os.path.basename(args.music))[0]),

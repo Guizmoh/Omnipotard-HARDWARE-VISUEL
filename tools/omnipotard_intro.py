@@ -50,7 +50,7 @@ PALETTES = {
 BACKGROUNDS = ("noir", "uni", "grille", "points", "scan", "degrade", "bruit")
 
 
-def load_backdrop(path, w, h, strength=0.55, clear=0.45, scale=None, blur=2.2):
+def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2):
     """Charge une image de fond et la prepare pour la dalle.
 
     Passe par ffmpeg, donc accepte tout ce qu'il lit (jpg, png, webp, et meme
@@ -1089,25 +1089,44 @@ class Renderer:
             return 0.0
         return float(np.max(self.ev_f[m] * np.exp(-self.ev_d[m] * 1.15 * dt[m])))
 
-    def sub_hit(self, t, thresh=0.74):
-        """Enveloppe des plus gros coups graves — c'est elle qui declenche
-        le dedoublement du trait.
+    def split_times(self):
+        """Les quelques instants ou le trait se dedouble, pour toute la video.
 
-        Contrairement a `bass_hit`, qui suit tous les graves, celle-ci ignore
-        tout ce qui est sous le seuil et repart de zero juste au-dessus : seuls
-        les coups vraiment appuyes dedoublent le trait, sinon l'effet serait
-        permanent et ne voudrait plus rien dire.
-
-        La retombee est lente (pres de deux secondes) : c'est ce qui laisse le
-        temps de voir les couleurs se separer puis se recoller.
+        Un seuil ne convient pas ici : selon le mixage il ne se declencherait
+        jamais, ou vingt fois. On classe donc les coups graves par force et on
+        garde les `split_count` plus gros, en refusant deux instants trop
+        rapproches — l'effet doit rester un evenement, pas une ponctuation.
         """
-        dt = t - self.ev_t
-        m = (dt >= 0.0) & (dt < 2.2) & self.ev_bass & (self.ev_f >= thresh)
+        if getattr(self, "_split_t", None) is not None:
+            return self._split_t
+        gap = max(1.2, 0.14 * self.dur)
+        out = []
+        for i in np.argsort(-self.ev_f):
+            if not self.ev_bass[i]:
+                continue
+            t = float(self.ev_t[i])
+            if any(abs(t - u) < gap for u in out):
+                continue
+            out.append(t)
+            if len(out) >= max(0, int(self.split_count)):
+                break
+        self._split_t = np.array(sorted(out), dtype=np.float64)
+        return self._split_t
+
+    def sub_hit(self, t):
+        """Enveloppe du dedoublement : attaque immediate, longue descente.
+
+        Pres de deux secondes de retombee — c'est ce qui laisse le temps de
+        voir les trois copies se separer puis se recoller.
+        """
+        st = self.split_times()
+        if len(st) == 0:
+            return 0.0
+        dt = t - st
+        m = (dt >= 0.0) & (dt < 2.2)
         if not np.any(m):
             return 0.0
-        f = np.clip((self.ev_f[m] - thresh) / (1.0 - thresh), 0.0, 1.0)
-        # attaque quasi immediate, puis longue descente
-        return float(np.max(f * np.exp(-1.35 * dt[m])))
+        return float(np.max(np.exp(-1.35 * dt[m])))
 
     def snare_hit(self, t, thresh=0.42):
         """Caisse claire et percussions : elles eclairent le trait en jaune.
@@ -1663,6 +1682,7 @@ class Renderer:
     wobble = 0.0      # ondulation du trace de la machine (0 = trait net)
     split = 1.0       # dedoublement chromatique du trait sur les gros subs
     split_px = 11.0   # ecart des copies, en pixels ramenes a 540p
+    split_count = 3   # combien de fois il se declenche dans toute la video
     snare = 1.0       # embrasement jaune sur la caisse claire
     wave_gain = 1.0   # amplitude de la courbe sonore
     trail = 1.0       # trainee de la bande, d'autant plus longue qu'il y a
@@ -1870,7 +1890,9 @@ def main():
     ap.add_argument("--split", type=float, default=1.0,
                     help="dedoublement chromatique du trait sur les gros subs")
     ap.add_argument("--split-px", type=float, default=11.0,
-                    help="ecart des couches, en pixels ramenes a 540p")
+                    help="ecart des copies, en pixels ramenes a 540p")
+    ap.add_argument("--split-count", type=int, default=3,
+                    help="nombre de declenchements dans toute la video")
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=1.0,
@@ -1878,7 +1900,7 @@ def main():
     ap.add_argument("--trail", type=float, default=0.0,
                     help="trainee de la bande (0 = trait net)")
     ap.add_argument("--backdrop", default=None, help="image de fond")
-    ap.add_argument("--backdrop-strength", type=float, default=0.55)
+    ap.add_argument("--backdrop-strength", type=float, default=0.80)
     ap.add_argument("--backdrop-clear", type=float, default=0.45)
     ap.add_argument("--no-curve", action="store_true", help="desactive la courbure CRT")
     ap.add_argument("--no-audio", action="store_true", help="video muette (l'image reste pilotee par le son)")
@@ -1904,6 +1926,7 @@ def main():
                   bg_clear=args.bg_clear,
                   bg_color=hex_to_rgb(args.bg_color) if args.bg_color else None)
     _R.wobble, _R.split, _R.split_px = args.wobble, args.split, args.split_px
+    _R.split_count = args.split_count
     _R.snare, _R.wave_gain = args.snare, args.wave
     _R.trail = args.trail
     if args.backdrop:

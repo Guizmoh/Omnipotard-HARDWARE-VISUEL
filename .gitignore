@@ -13,12 +13,12 @@ out/omnipotard_bleu_fond.mp4
 out/omnipotard_rouge_orange.mp4
 out/omnipotard_bleu.mp4
 out/omnipotard_intro_4k.mp4
-out/mpc_per*.mp4
-out/mpc_iris*.mp4
-out/mpc_v[0-9]*.mp4
+# tous les rendus de la MPC : regenerables via tools/mpc_performance.py
+out/mpc_*.mp4
 
 # atelier du studio : morceaux deposes et rendus (tools/studio.py)
 out/studio/
 # page assemblee : regenerable via tools/build_web_studio.py
 out/studio-omnipotard.html
 out/geometrie.json
+out/fond_essai.jpg
