@@ -137,9 +137,9 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               seed=7, palette="vert", wobble=0.0, split=1.0,
                               split_px=11.0, split_count=3,
                               snare=1.0, wave_gain=1.35, trail=1.0, screen_title="",
-                              wave_win=0.085, wave_smooth=90, wave_trig=1.0,
+                              wave_win=0.070, wave_smooth=56, wave_trig=0.0,
                               backdrop=None, backdrop_strength=1.00,
-                              backdrop_clear=0.28, screen_dim=0.88, **bgkw):
+                              backdrop_clear=0.28, screen_dim=0.40, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
@@ -332,11 +332,11 @@ def add_look_args(ap):
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=1.35,
                     help="amplitude de la courbe sonore")
-    ap.add_argument("--wave-win", type=float, default=0.085,
+    ap.add_argument("--wave-win", type=float, default=0.070,
                     help="base de temps de la courbe (s) : large = mouvement lent")
-    ap.add_argument("--wave-smooth", type=int, default=90,
+    ap.add_argument("--wave-smooth", type=int, default=56,
                     help="lissage de la courbe : large = trace plus calme")
-    ap.add_argument("--wave-trig", type=float, default=1.0,
+    ap.add_argument("--wave-trig", type=float, default=0.0,
                     help="balayage declenche : largeur d'ecran en temps (0 = libre)")
     ap.add_argument("--trail", type=float, default=1.0,
                     help="trainee de la bande (0 = trait net)")
@@ -346,7 +346,7 @@ def add_look_args(ap):
                     help="image de fond (jpg, png, webp...)")
     ap.add_argument("--backdrop-strength", type=float, default=1.00)
     ap.add_argument("--backdrop-clear", type=float, default=0.28)
-    ap.add_argument("--screen-dim", type=float, default=0.88,
+    ap.add_argument("--screen-dim", type=float, default=0.40,
                     help="opacite de la dalle devant l'image de fond")
 
 

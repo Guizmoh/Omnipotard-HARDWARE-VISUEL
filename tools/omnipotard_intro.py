@@ -51,7 +51,7 @@ BACKGROUNDS = ("noir", "uni", "grille", "points", "scan", "degrade", "bruit")
 
 
 def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
-                  screen_dim=0.88):
+                  screen_dim=0.40):
     """Charge une image de fond et la prepare pour la dalle.
 
     Passe par ffmpeg, donc accepte tout ce qu'il lit (jpg, png, webp, et meme
@@ -1954,7 +1954,7 @@ def main():
     ap.add_argument("--backdrop", default=None, help="image de fond")
     ap.add_argument("--backdrop-strength", type=float, default=1.00)
     ap.add_argument("--backdrop-clear", type=float, default=0.28)
-    ap.add_argument("--screen-dim", type=float, default=0.88,
+    ap.add_argument("--screen-dim", type=float, default=0.40,
                     help="opacite de la dalle devant l'image de fond")
     ap.add_argument("--no-curve", action="store_true", help="desactive la courbure CRT")
     ap.add_argument("--no-audio", action="store_true", help="video muette (l'image reste pilotee par le son)")

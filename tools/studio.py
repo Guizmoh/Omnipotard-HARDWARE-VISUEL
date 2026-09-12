@@ -102,9 +102,9 @@ def look_from(q):
         "split_count": int(float(q.get("splitCount", 3))),
         "snare": float(q.get("snare", 1.0)),
         "wave_gain": float(q.get("wave", 1.35)),
-        "wave_win": float(q.get("waveWin", 0.085)),
-        "wave_trig": float(q.get("waveTrig", 1.0)),
-        "wave_smooth": int(float(q.get("waveSmooth", 90))),
+        "wave_win": float(q.get("waveWin", 0.070)),
+        "wave_trig": float(q.get("waveTrig", 0.0)),
+        "wave_smooth": int(float(q.get("waveSmooth", 56))),
         "trail": float(q.get("trail", 1.0)),
         "screen_title": str(q.get("title") or ""),
     }
