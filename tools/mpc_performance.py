@@ -38,7 +38,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
-    detect_hits, hex_to_rgb, load_backdrop, write_wav, PAD_OF,
+    detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF,
 )
 
 
@@ -151,9 +151,9 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.wave_passes, r.wave_punch = int(wave_passes), float(wave_punch)
     r.set_wave_smooth(int(wave_smooth))
     if backdrop:
-        r.backdrop = load_backdrop(backdrop, w, h, backdrop_strength,
-                                   backdrop_clear, scale=r.scale,
-                                   screen_dim=screen_dim)
+        r.backdrop = make_backdrop(
+            backdrop, w, h, fps, duration, strength=backdrop_strength,
+            clear=backdrop_clear, scale=r.scale, screen_dim=screen_dim)
     # La machine est deja entierement deployee et joue en continu : on
     # neutralise tout ce qui, dans le moteur de l'intro, appartient au
     # scenario (reveal, pre-lueur, ecran qui se cache au zoom, extinction

@@ -23,6 +23,7 @@ Rendu image par image, sans etat partage entre frames -> parallelisable.
 import argparse
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,45 @@ PALETTES = {
 BACKGROUNDS = ("noir", "uni", "grille", "points", "scan", "degrade", "bruit")
 
 
+def _backdrop_mask(w, h, strength, clear, scale, screen_dim):
+    """Le multiplicateur applique au fond : dosage, creux derriere la machine,
+    et dalle opaque. Il ne depend que du format, donc on le calcule une fois —
+    y compris pour une video, ou il servira sur chaque image."""
+    sc = scale if scale else min(h * 0.5, w * 0.5 / 1.30)
+    yy = np.arange(h, dtype=np.float32)[:, None]
+    xx = np.arange(w, dtype=np.float32)[None, :]
+    m = np.full((h, w), float(strength), dtype=np.float32)
+    if clear > 0:
+        nx = (xx - w * 0.5) / (1.52 * sc)
+        ny = (yy - h * 0.5) / (1.08 * sc)
+        r = np.sqrt(nx * nx + ny * ny)
+        k = np.clip((r - 0.82) / 0.55, 0.0, 1.0)
+        m *= 1.0 - float(clear) * (1.0 - k * k * (3.0 - 2.0 * k))
+    if screen_dim > 0:
+        # la dalle est opaque : sans cela le ciel de la photo passe au travers
+        # et l'ecran de la machine a l'air d'etre en verre.
+        px0 = w * 0.5 + SCREEN[0] * sc
+        px1 = w * 0.5 + SCREEN[2] * sc
+        py0 = h * 0.5 - SCREEN[3] * sc            # l'axe y est inverse a l'ecran
+        py1 = h * 0.5 - SCREEN[1] * sc
+        soft = max(2.0, 0.018 * sc)
+        mx = np.clip(np.minimum(xx - px0, px1 - xx) / soft, 0.0, 1.0)
+        my = np.clip(np.minimum(yy - py0, py1 - yy) / soft, 0.0, 1.0)
+        k = mx * my
+        m *= 1.0 - float(screen_dim) * (k * k * (3.0 - 2.0 * k))
+    return m[..., None]
+
+
+class StillBackdrop:
+    """Fond fixe : la meme image sur toute la video."""
+
+    def __init__(self, img):
+        self.img = img
+
+    def at(self, t):
+        return self.img
+
+
 def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
                   screen_dim=0.40):
     """Charge une image de fond et la prepare pour la dalle.
@@ -70,29 +110,96 @@ def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
            .reshape(h, w, 3).astype(np.float32) / 255.0)
     if blur > 0:
         img = np.stack([gauss(img[:, :, c], blur) for c in range(3)], axis=-1)
-    img *= float(strength)
-    sc = scale if scale else min(h * 0.5, w * 0.5 / 1.30)
-    yy = np.arange(h, dtype=np.float32)[:, None]
-    xx = np.arange(w, dtype=np.float32)[None, :]
-    if clear > 0:
-        nx = (xx - w * 0.5) / (1.52 * sc)
-        ny = (yy - h * 0.5) / (1.08 * sc)
-        r = np.sqrt(nx * nx + ny * ny)
-        k = np.clip((r - 0.82) / 0.55, 0.0, 1.0)
-        img *= (1.0 - float(clear) * (1.0 - k * k * (3.0 - 2.0 * k)))[..., None]
-    if screen_dim > 0:
-        # la dalle est opaque : sans cela le ciel de la photo passe au travers
-        # et l'ecran de la machine a l'air d'etre en verre.
-        px0 = w * 0.5 + SCREEN[0] * sc
-        px1 = w * 0.5 + SCREEN[2] * sc
-        py0 = h * 0.5 - SCREEN[3] * sc            # l'axe y est inverse a l'ecran
-        py1 = h * 0.5 - SCREEN[1] * sc
-        soft = max(2.0, 0.018 * sc)
-        mx = np.clip(np.minimum(xx - px0, px1 - xx) / soft, 0.0, 1.0)
-        my = np.clip(np.minimum(yy - py0, py1 - yy) / soft, 0.0, 1.0)
-        m = mx * my
-        img *= (1.0 - float(screen_dim) * (m * m * (3.0 - 2.0 * m)))[..., None]
-    return np.ascontiguousarray(img, dtype=np.float32)
+    img *= _backdrop_mask(w, h, strength, clear, scale, screen_dim)
+    return StillBackdrop(np.ascontiguousarray(img, dtype=np.float32))
+
+
+def is_video(path):
+    """Vrai si le fichier contient une video animee (et non une seule image)."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=duration,nb_frames,codec_name",
+             "-of", "default=nw=1:nk=1", path],
+            stdout=subprocess.PIPE, check=True).stdout.decode().split()
+    except Exception:                                     # noqa: BLE001
+        return False
+    if any(c in out for c in ("mjpeg", "png", "webp", "bmp", "gif")):
+        # une image fixe est parfois annoncee comme un flux video d'une image
+        if not any(x.replace(".", "").isdigit() and float(x) > 1.5 for x in out):
+            return False
+    return any(x.replace(".", "").isdigit() and float(x) > 1.5 for x in out)
+
+
+class VideoBackdrop:
+    """Fond anime : une video derriere la machine.
+
+    Le rendu calcule les images en parallele et dans un ordre quelconque : une
+    lecture sequentielle de la video ne s'y prete pas. On la detaille donc une
+    fois en vignettes sur le disque, que chaque tache relit par son numero.
+
+    Les vignettes sont volontairement petites — le fond est floute de toute
+    facon, et les garder en pleine definition coûterait des gigaoctets sur un
+    morceau entier. Le flou et le recadrage sont faits par ffmpeg pendant
+    l'extraction, si bien qu'il ne reste plus qu'une lecture et une
+    multiplication par image.
+    """
+
+    DIV = 3            # les vignettes font le tiers de la definition finale
+
+    def __init__(self, path, w, h, fps, duration, strength=0.80, clear=0.45,
+                 scale=None, blur=2.2, screen_dim=0.40, cache_dir=None):
+        from PIL import Image                    # noqa: F401 -- verifie tot
+        self.w, self.h = w, h
+        self.mask = _backdrop_mask(w, h, strength, clear, scale, screen_dim)
+        self.fps = float(fps)
+        sw, sh = max(16, w // self.DIV), max(16, h // self.DIV)
+
+        key = "%s-%d-%d-%d-%d-%.2f-%.2f" % (
+            os.path.basename(path), os.path.getsize(path), sw, sh,
+            int(fps), duration, blur)
+        key = re.sub(r"[^A-Za-z0-9._-]+", "_", key)
+        root = cache_dir or os.path.join(tempfile.gettempdir(), "omnipotard-fonds")
+        self.dir = os.path.join(root, key)
+        done = os.path.join(self.dir, "_complet")
+
+        if not os.path.exists(done):
+            os.makedirs(self.dir, exist_ok=True)
+            vf = ("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d"
+                  % (sw, sh, sw, sh))
+            if blur > 0:
+                vf += ",gblur=sigma=%.2f" % max(0.4, blur / self.DIV)
+            subprocess.run(
+                ["ffmpeg", "-v", "error", "-y", "-stream_loop", "-1", "-i", path,
+                 "-t", "%.3f" % (duration + 1.0 / max(fps, 1)),
+                 "-vf", vf, "-r", "%.4f" % fps, "-q:v", "4",
+                 os.path.join(self.dir, "%06d.jpg")], check=True)
+            open(done, "w").close()
+
+        self.files = sorted(f for f in os.listdir(self.dir) if f.endswith(".jpg"))
+        if not self.files:
+            raise RuntimeError("aucune image extraite de %s" % path)
+        self._cache = (None, None)
+
+    def at(self, t):
+        from PIL import Image
+        i = min(len(self.files) - 1, max(0, int(t * self.fps + 0.5)))
+        if self._cache[0] == i:
+            return self._cache[1]
+        im = Image.open(os.path.join(self.dir, self.files[i])).convert("RGB")
+        if im.size != (self.w, self.h):
+            im = im.resize((self.w, self.h), Image.BILINEAR)
+        img = (np.asarray(im, dtype=np.float32) / 255.0) * self.mask
+        img = np.ascontiguousarray(img, dtype=np.float32)
+        self._cache = (i, img)
+        return img
+
+
+def make_backdrop(path, w, h, fps=30, duration=0.0, **kw):
+    """Image ou video, selon ce que contient le fichier."""
+    if duration > 0 and is_video(path):
+        return VideoBackdrop(path, w, h, fps, duration, **kw)
+    return load_backdrop(path, w, h, **kw)
 
 
 def hex_to_rgb(x):
@@ -1845,7 +1952,7 @@ class Renderer:
         # le travaillent comme le reste de la dalle.
         img += self.c_bg
         if self.backdrop is not None:
-            img += self.backdrop
+            img += self.backdrop.at(t)
 
         yy = np.arange(H, dtype=np.float32)[:, None]
         period = max(2.0, H / 360.0)
@@ -2002,9 +2109,10 @@ def main():
     _R.wave_passes, _R.wave_punch = args.wave_passes, args.wave_punch
     _R.set_wave_smooth(args.wave_smooth)
     if args.backdrop:
-        _R.backdrop = load_backdrop(args.backdrop, args.width, args.height,
-                                    args.backdrop_strength, args.backdrop_clear,
-                                    scale=_R.scale, screen_dim=args.screen_dim)
+        _R.backdrop = make_backdrop(
+            args.backdrop, args.width, args.height, args.fps, args.duration,
+            strength=args.backdrop_strength, clear=args.backdrop_clear,
+            scale=_R.scale, screen_dim=args.screen_dim)
 
     if args.stills:
         from PIL import Image
