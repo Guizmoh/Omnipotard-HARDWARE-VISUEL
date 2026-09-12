@@ -101,7 +101,10 @@ def look_from(q):
         "split": float(q.get("split", 1.0)),
         "split_count": int(float(q.get("splitCount", 3))),
         "snare": float(q.get("snare", 1.0)),
-        "wave_gain": float(q.get("wave", 2.6)),
+        "wave_gain": float(q.get("wave", 1.35)),
+        "wave_win": float(q.get("waveWin", 0.085)),
+        "wave_trig": float(q.get("waveTrig", 1.0)),
+        "wave_smooth": int(float(q.get("waveSmooth", 90))),
         "trail": float(q.get("trail", 1.0)),
         "screen_title": str(q.get("title") or ""),
     }
@@ -165,11 +168,16 @@ class Studio:
                 self.renderers[key] = r
         # set_look ne connait que la couleur et le fond ; les deux autres
         # reglages se posent directement sur l'instance
-        POSE = ("wobble", "split", "split_count", "snare", "wave_gain", "trail",
-                "screen_title")
-        r.set_look(palette, **{k: v for k, v in kw.items() if k not in POSE})
+        # wave_smooth passe par une methode : il faut relisser la courbe
+        POSE = ("wobble", "split", "split_count", "snare", "wave_gain",
+                "wave_win", "wave_trig", "trail", "screen_title")
+        r.set_look(palette, **{k: v for k, v in kw.items()
+                               if k not in POSE and k != "wave_smooth"})
         for k in POSE:
             setattr(r, k, kw[k])
+        if getattr(r, "_smooth_at", None) != kw["wave_smooth"]:
+            r.set_wave_smooth(kw["wave_smooth"])
+            r._smooth_at = kw["wave_smooth"]
         dur = tr["info"]["duration"]
         # l'apercu montre le morceau tel qu'il joue, sans les fondus des bords
         t = max(0.6, min(float(t), dur - 0.8))

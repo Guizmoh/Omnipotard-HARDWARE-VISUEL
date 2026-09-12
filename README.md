@@ -242,6 +242,27 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
   bave derriere lui. `--trail 0` le retire.
 - **Dalle** : le bandeau du haut porte le nom du morceau (`--title`, par
   defaut le nom du fichier) et, juste en dessous, une barre de progression.
+  `--screen-dim` regle son opacite devant une image de fond (0,88 par
+  defaut) — sans quoi le ciel de la photo passe au travers et l'ecran de la
+  machine a l'air d'etre en verre.
+- **Courbe sonore** : deux choses la rendent lisible.
+
+  Son amplitude **suit le niveau** (`--wave`) : petite quand c'est calme,
+  grande quand ca pousse. C'etait l'inverse avant — un calibre automatique
+  d'oscilloscope remontait les passages calmes, et la courbe restait donc
+  haute en permanence.
+
+  Son balayage est **declenche** sur la grille musicale (`--wave-trig`, un
+  temps par defaut ; 0 pour un balayage libre). A 30 images par seconde on
+  echantillonne le son toutes les 33 ms, et tout ce qui depasse une
+  quinzaine de hertz a change entre deux images : en balayage libre le trace
+  saute a chaque image, quel que soit le lissage. Declenche, il se fige
+  pendant tout le temps et ne se renouvelle qu'au suivant — le saut moyen
+  d'une image a l'autre passe de 1,45 fois l'amplitude a 0,13.
+
+  Attention a ne pas confondre la periode de declenchement et la largeur de
+  la fenetre (`--wave-win`, 85 ms) : etaler un temps entier sur la dalle
+  donne une centaine de cycles, soit une bande pleine.
 - **Image de fond** (`--backdrop`) : n'importe quelle image lisible par
   ffmpeg, une par morceau. Elle est recadree en « couvrant », assombrie,
   legerement floutee et creusee derriere la machine — le faisceau etant additif, une image nette et

@@ -136,18 +136,22 @@ def load_full_track(path, start, duration, sr=SR):
 def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True,
                               seed=7, palette="vert", wobble=0.0, split=1.0,
                               split_px=11.0, split_count=3,
-                              snare=1.0, wave_gain=2.6, trail=1.0, screen_title="",
-                              backdrop=None, backdrop_strength=0.80,
-                              backdrop_clear=0.45, **bgkw):
+                              snare=1.0, wave_gain=1.35, trail=1.0, screen_title="",
+                              wave_win=0.085, wave_smooth=90, wave_trig=1.0,
+                              backdrop=None, backdrop_strength=1.00,
+                              backdrop_clear=0.28, screen_dim=0.88, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count = int(split_count)
     r.snare, r.wave_gain = float(snare), float(wave_gain)
     r.trail, r.screen_title = float(trail), str(screen_title or "")
+    r.wave_win, r.wave_trig = float(wave_win), float(wave_trig)
+    r.set_wave_smooth(int(wave_smooth))
     if backdrop:
         r.backdrop = load_backdrop(backdrop, w, h, backdrop_strength,
-                                   backdrop_clear, scale=r.scale)
+                                   backdrop_clear, scale=r.scale,
+                                   screen_dim=screen_dim)
     # La machine est deja entierement deployee et joue en continu : on
     # neutralise tout ce qui, dans le moteur de l'intro, appartient au
     # scenario (reveal, pre-lueur, ecran qui se cache au zoom, extinction
@@ -326,16 +330,24 @@ def add_look_args(ap):
                     help="nombre de declenchements dans toute la video")
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
-    ap.add_argument("--wave", type=float, default=2.6,
+    ap.add_argument("--wave", type=float, default=1.35,
                     help="amplitude de la courbe sonore")
+    ap.add_argument("--wave-win", type=float, default=0.085,
+                    help="base de temps de la courbe (s) : large = mouvement lent")
+    ap.add_argument("--wave-smooth", type=int, default=90,
+                    help="lissage de la courbe : large = trace plus calme")
+    ap.add_argument("--wave-trig", type=float, default=1.0,
+                    help="balayage declenche : largeur d'ecran en temps (0 = libre)")
     ap.add_argument("--trail", type=float, default=1.0,
                     help="trainee de la bande (0 = trait net)")
     ap.add_argument("--title", default=None,
                     help="titre affiche sur la dalle (defaut : nom du fichier)")
     ap.add_argument("--backdrop", default=None,
                     help="image de fond (jpg, png, webp...)")
-    ap.add_argument("--backdrop-strength", type=float, default=0.80)
-    ap.add_argument("--backdrop-clear", type=float, default=0.45)
+    ap.add_argument("--backdrop-strength", type=float, default=1.00)
+    ap.add_argument("--backdrop-clear", type=float, default=0.28)
+    ap.add_argument("--screen-dim", type=float, default=0.88,
+                    help="opacite de la dalle devant l'image de fond")
 
 
 def look_kwargs(args):
@@ -346,6 +358,9 @@ def look_kwargs(args):
             "wobble": args.wobble, "split": args.split, "split_px": args.split_px,
             "split_count": args.split_count,
             "snare": args.snare, "wave_gain": args.wave, "trail": args.trail,
+            "wave_win": args.wave_win, "wave_smooth": args.wave_smooth,
+            "wave_trig": args.wave_trig,
+            "screen_dim": args.screen_dim,
             "screen_title": (args.title if args.title is not None
                              else os.path.splitext(os.path.basename(args.music))[0]),
             "backdrop": args.backdrop,

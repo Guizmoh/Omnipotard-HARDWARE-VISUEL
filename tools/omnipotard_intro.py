@@ -50,7 +50,8 @@ PALETTES = {
 BACKGROUNDS = ("noir", "uni", "grille", "points", "scan", "degrade", "bruit")
 
 
-def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2):
+def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
+                  screen_dim=0.88):
     """Charge une image de fond et la prepare pour la dalle.
 
     Passe par ffmpeg, donc accepte tout ce qu'il lit (jpg, png, webp, et meme
@@ -70,15 +71,27 @@ def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2):
     if blur > 0:
         img = np.stack([gauss(img[:, :, c], blur) for c in range(3)], axis=-1)
     img *= float(strength)
+    sc = scale if scale else min(h * 0.5, w * 0.5 / 1.30)
+    yy = np.arange(h, dtype=np.float32)[:, None]
+    xx = np.arange(w, dtype=np.float32)[None, :]
     if clear > 0:
-        sc = scale if scale else min(h * 0.5, w * 0.5 / 1.30)
-        yy = np.arange(h, dtype=np.float32)[:, None]
-        xx = np.arange(w, dtype=np.float32)[None, :]
         nx = (xx - w * 0.5) / (1.52 * sc)
         ny = (yy - h * 0.5) / (1.08 * sc)
         r = np.sqrt(nx * nx + ny * ny)
         k = np.clip((r - 0.82) / 0.55, 0.0, 1.0)
         img *= (1.0 - float(clear) * (1.0 - k * k * (3.0 - 2.0 * k)))[..., None]
+    if screen_dim > 0:
+        # la dalle est opaque : sans cela le ciel de la photo passe au travers
+        # et l'ecran de la machine a l'air d'etre en verre.
+        px0 = w * 0.5 + SCREEN[0] * sc
+        px1 = w * 0.5 + SCREEN[2] * sc
+        py0 = h * 0.5 - SCREEN[3] * sc            # l'axe y est inverse a l'ecran
+        py1 = h * 0.5 - SCREEN[1] * sc
+        soft = max(2.0, 0.018 * sc)
+        mx = np.clip(np.minimum(xx - px0, px1 - xx) / soft, 0.0, 1.0)
+        my = np.clip(np.minimum(yy - py0, py1 - yy) / soft, 0.0, 1.0)
+        m = mx * my
+        img *= (1.0 - float(screen_dim) * (m * m * (3.0 - 2.0 * m)))[..., None]
     return np.ascontiguousarray(img, dtype=np.float32)
 
 
@@ -954,9 +967,8 @@ class Renderer:
         sr = audio["sr"]
         self.sr = sr
         mono = audio["mono"].astype(np.float64)
-        wave = _lowpass(mono, 56)                     # ce que "voit" l'ecran
-        self.wave = (wave / (np.max(np.abs(wave)) or 1.0)).astype(np.float32)
-        self.nw = len(self.wave)
+        self._mono = mono.astype(np.float32)          # garde pour relisser
+        self.set_wave_smooth(56)                      # ce que "voit" l'ecran
         low = _lowpass(mono, 26)
         self.eh = 240.0                               # resolution des enveloppes
         stepi = max(1, int(sr / self.eh))
@@ -1018,6 +1030,17 @@ class Renderer:
             g = max(g, burst * (1.0 - 0.55 * smoothstep(0.42, 0.80, u)))
         return g
 
+    def set_wave_smooth(self, width):
+        """Lissage de la courbe affichee.
+
+        Plus il est large, plus le trace est calme : on suit le mouvement du
+        grave au lieu du detail du haut du spectre, qui donnait un tremblement
+        illisible d'une image a l'autre.
+        """
+        w = _lowpass(self._mono.astype(np.float64), max(1, int(width)))
+        self.wave = (w / (np.max(np.abs(w)) or 1.0)).astype(np.float32)
+        self.nw = len(self.wave)
+
     def env_at(self, arr, t):
         i = int(np.clip(t * self.eh, 0, len(arr) - 1))
         return float(arr[i])
@@ -1043,7 +1066,8 @@ class Renderer:
         m = np.clip((sweep_x - np.asarray(x) + 0.10) / 0.85, 0.0, 1.0)
         return m * m * (3.0 - 2.0 * m)
 
-    def wave_y(self, x, t, amp=CURVE_AMP, win=CURVE_WIN, agc=True):
+    def wave_y(self, x, t, amp=CURVE_AMP, win=None, agc=True):
+        win = self.wave_win if win is None else win
         """Forme d'onde du morceau, etalee sur la largeur de l'ecran.
 
         Le gain suit l'inverse de l'enveloppe (comme le calibre automatique
@@ -1051,10 +1075,30 @@ class Renderer:
         """
         amp = amp * self.wave_gain
         if agc:
-            # calibre automatique d'oscilloscope, elargi : les passages calmes
-            # reagissent plus, les gros niveaux ne saturent pas pour autant
-            amp = amp * float(np.clip(0.55 / (0.20 + self.env_at(self.e_full, t)), 0.75, 2.30))
-        tt = t + (np.asarray(x) / 1.88) * (win * 0.5)
+            # L'amplitude SUIT le niveau : petite quand c'est calme, grande
+            # quand ca pousse. C'etait l'inverse avant — un calibre automatique
+            # d'oscilloscope, qui remontait les passages calmes et gardait donc
+            # la courbe haute en permanence.
+            amp = amp * float(np.clip(0.22 + 1.45 * self.env_at(self.e_full, t),
+                                      0.14, 1.70))
+        if self.wave_trig > 0.0:
+            # Declenchement, comme sur un oscilloscope : le balayage repart au
+            # debut de chaque temps et l'ecran montre exactement un temps de
+            # musique. Sans cela le trace saute a chaque image — a 30 i/s on
+            # echantillonne le son toutes les 33 ms, et tout ce qui depasse une
+            # quinzaine de hertz a change entre deux images. Le resultat est
+            # illisible, alors que la forme est ici stable pendant tout le
+            # temps et ne se renouvelle qu'au suivant.
+            # La periode de declenchement et la largeur de la fenetre sont
+            # deux choses differentes : on repart au debut de chaque temps,
+            # mais on ne montre que `win` secondes de son. Etaler un temps
+            # entier sur la dalle donnerait une centaine de cycles, soit une
+            # bande pleine et illisible.
+            q = self.beat * self.wave_trig
+            t0 = math.floor(t / q) * q
+            tt = t0 + (np.asarray(x) / 1.88 + 1.0) * 0.5 * win
+        else:
+            tt = t + (np.asarray(x) / 1.88) * (win * 0.5)
         i = tt * self.sr
         i0 = np.floor(i).astype(np.int64)
         f = i - i0
@@ -1488,7 +1532,7 @@ class Renderer:
             x_hi = sx1 - m if self.morph_at(sx1, sweep_x) > 0.5 else min(sx1 - m, sweep_x)
             x_lo = sx0 + m
             if x_hi - x_lo > 0.05:
-                xs = np.linspace(x_lo, x_hi, 320)
+                xs = np.linspace(x_lo, x_hi, 420)
                 u = (xs - (sx0 + m)) / ((sx1 - m) - (sx0 + m)) * 2.0 - 1.0
                 yc = (sy0 + sy1) * 0.5 - 0.03
                 ys = yc + 0.125 * self.wave_y(u * 1.88, t, amp=1.0)
@@ -1683,6 +1727,8 @@ class Renderer:
     split = 1.0       # dedoublement chromatique du trait sur les gros subs
     split_px = 11.0   # ecart des copies, en pixels ramenes a 540p
     split_count = 3   # combien de fois il se declenche dans toute la video
+    wave_win = CURVE_WIN   # base de temps libre (s), quand wave_trig vaut 0
+    wave_trig = 0.0        # balayage declenche : largeur d'ecran, en temps
     snare = 1.0       # embrasement jaune sur la caisse claire
     wave_gain = 1.0   # amplitude de la courbe sonore
     trail = 1.0       # trainee de la bande, d'autant plus longue qu'il y a
@@ -1897,11 +1943,19 @@ def main():
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=1.0,
                     help="amplitude de la courbe sonore")
+    ap.add_argument("--wave-win", type=float, default=0.07,
+                    help="base de temps de la courbe (s) : large = mouvement lent")
+    ap.add_argument("--wave-smooth", type=int, default=56,
+                    help="lissage de la courbe : large = trace plus calme")
+    ap.add_argument("--wave-trig", type=float, default=0.0,
+                    help="balayage declenche : largeur d'ecran en temps (0 = libre)")
     ap.add_argument("--trail", type=float, default=0.0,
                     help="trainee de la bande (0 = trait net)")
     ap.add_argument("--backdrop", default=None, help="image de fond")
-    ap.add_argument("--backdrop-strength", type=float, default=0.80)
-    ap.add_argument("--backdrop-clear", type=float, default=0.45)
+    ap.add_argument("--backdrop-strength", type=float, default=1.00)
+    ap.add_argument("--backdrop-clear", type=float, default=0.28)
+    ap.add_argument("--screen-dim", type=float, default=0.88,
+                    help="opacite de la dalle devant l'image de fond")
     ap.add_argument("--no-curve", action="store_true", help="desactive la courbure CRT")
     ap.add_argument("--no-audio", action="store_true", help="video muette (l'image reste pilotee par le son)")
     ap.add_argument("--stills", default="", help="dossier ou exporter des images cles PNG")
@@ -1929,10 +1983,12 @@ def main():
     _R.split_count = args.split_count
     _R.snare, _R.wave_gain = args.snare, args.wave
     _R.trail = args.trail
+    _R.wave_win, _R.wave_trig = args.wave_win, args.wave_trig
+    _R.set_wave_smooth(args.wave_smooth)
     if args.backdrop:
         _R.backdrop = load_backdrop(args.backdrop, args.width, args.height,
                                     args.backdrop_strength, args.backdrop_clear,
-                                    scale=_R.scale)
+                                    scale=_R.scale, screen_dim=args.screen_dim)
 
     if args.stills:
         from PIL import Image
