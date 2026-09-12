@@ -278,11 +278,24 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
   Par defaut, ni l'un ni l'autre : balayage libre, fenetre de 70 ms, un seul
   passage de lissage. Le mouvement reste vif, et c'est l'amplitude — basse
   dans les creux, doublee sur le temps fort — qui porte la lecture.
-- **Image de fond** (`--backdrop`) : n'importe quelle image lisible par
-  ffmpeg, une par morceau. Elle est recadree en « couvrant », assombrie,
-  legerement floutee et creusee derriere la machine — le faisceau etant additif, une image nette et
-  claire lui mangerait tout son contraste. `--backdrop-strength` et
-  `--backdrop-clear` reglent le dosage.
+- **Fond en image ou en video** (`--backdrop`) : n'importe quel fichier
+  lisible par ffmpeg, un par morceau. Le type est reconnu tout seul.
+
+  Le fond est recadre en « couvrant », assombri, legerement floute et creuse
+  derriere la machine — le faisceau etant additif, une image nette et claire
+  lui mangerait tout son contraste. `--backdrop-strength`, `--backdrop-clear`
+  et `--screen-dim` reglent le dosage.
+
+  Une **video** est detaillee une fois en vignettes sur le disque, que chaque
+  tache de rendu relit par son numero. C'est necessaire : le rendu calcule
+  les images en parallele et dans un ordre quelconque, ce a quoi une lecture
+  sequentielle ne se prete pas. Les vignettes font le tiers de la definition
+  finale — le fond est floute de toute facon, et les garder en pleine
+  definition coûterait des gigaoctets sur un morceau entier (17 Mo pour 12 s
+  ici). Le recadrage et le flou sont delegues a ffmpeg pendant l'extraction,
+  si bien qu'il ne reste qu'une lecture et une multiplication par image. Le
+  resultat est mis en cache dans `/tmp/omnipotard-fonds/`, donc un deuxieme
+  rendu ne re-extrait rien. Une video plus courte que le morceau **boucle**.
 - **Ondulation du trace** (`--wobble`, 0 par defaut) : le leger tremblement
   des contours de la machine. Il est desormais desactive ; `--wobble 1` le
   retablit. A ne pas confondre avec la bombe de la dalle, qui est
