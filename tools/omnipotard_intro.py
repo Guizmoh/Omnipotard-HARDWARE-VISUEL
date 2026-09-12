@@ -1089,11 +1089,11 @@ class Renderer:
 
     def sub_hit(self, t, thresh=0.74):
         """Enveloppe des plus gros coups graves — c'est elle qui declenche
-        l'irisation.
+        le dedoublement du trait.
 
         Contrairement a `bass_hit`, qui suit tous les graves, celle-ci ignore
         tout ce qui est sous le seuil et repart de zero juste au-dessus : seuls
-        les coups vraiment appuyes irisent le trait, sinon l'effet serait
+        les coups vraiment appuyes dedoublent le trait, sinon l'effet serait
         permanent et ne voudrait plus rien dire.
 
         La retombee est lente (pres de deux secondes) : c'est ce qui laisse le
@@ -1659,7 +1659,8 @@ class Renderer:
         return beam.render(), collapse, shake, rng
 
     wobble = 0.0      # ondulation du trace de la machine (0 = trait net)
-    iris = 1.0        # irisation sur les plus gros coups de sub
+    split = 1.0       # dedoublement chromatique du trait sur les gros subs
+    split_px = 11.0   # ecart des copies, en pixels ramenes a 540p
     snare = 1.0       # embrasement jaune sur la caisse claire
     wave_gain = 1.0   # amplitude de la courbe sonore
     trail = 1.0       # trainee de la bande, d'autant plus longue qu'il y a
@@ -1689,61 +1690,48 @@ class Renderer:
             strength=bg_strength, clear=bg_clear if bg else 0.0,
             scale=self.scale, seed=self.seed)
 
-    def _disperse(self, img, k):
-        """Separation chromatique radiale : le rouge s'ecarte du centre, le
-        bleu s'y resserre.
+    @staticmethod
+    def _shift(a, dx, dy):
+        """Decale un plan de (dx, dy) pixels, en noircissant ce qui entre.
 
-        C'est la partie qui fait vraiment « se detacher » les couleurs — un
-        arc-en-ciel pose par-dessus ne separe rien, il teinte. Ici les trois
-        couches sont physiquement decalees, puis se recollent quand le coup
-        retombe.
+        Un np.roll ferait reapparaitre de l'autre cote ce qui sort du cadre :
+        sur un gros decalage, le trait se retrouverait recopie au bord oppose.
         """
-        H, W = self.H, self.W
-        if getattr(self, "_dsp", None) is None or self._dsp[0].shape != (H, W):
-            yy, xx = np.mgrid[0:H, 0:W]
-            self._dsp = (xx.astype(np.float32), yy.astype(np.float32))
-        xx, yy = self._dsp
-        cx, cy = (W - 1) * 0.5, (H - 1) * 0.5
-        out = img.copy()
-        for c, sgn in ((0, 1.0), (2, -1.0)):
-            f = 1.0 + sgn * k
-            sx = np.clip(cx + (xx - cx) * f, 0.0, W - 1.001)
-            sy = np.clip(cy + (yy - cy) * f, 0.0, H - 1.001)
-            x0 = sx.astype(np.int32)
-            y0 = sy.astype(np.int32)
-            fx, fy = sx - x0, sy - y0
-            flat = np.ascontiguousarray(img[:, :, c]).ravel()
-            i00 = y0 * W + x0
-            top = flat[i00] * (1.0 - fx) + flat[i00 + 1] * fx
-            bot = flat[i00 + W] * (1.0 - fx) + flat[i00 + W + 1] * fx
-            out[:, :, c] = top * (1.0 - fy) + bot * fy
+        out = np.zeros_like(a)
+        h, w = a.shape
+        x0s, x1s = max(0, -dx), min(w, w - dx)
+        x0d, x1d = max(0, dx), min(w, w + dx)
+        y0s, y1s = max(0, -dy), min(h, h - dy)
+        y0d, y1d = max(0, dy), min(h, h + dy)
+        if x1s > x0s and y1s > y0s:
+            out[y0d:y1d, x0d:x1d] = a[y0s:y1s, x0s:x1s]
         return out
 
-    def _iridesce(self, img, lum, amount, t):
-        """Irisation : sur un gros coup de sub, le trait se decompose comme
-        une pellicule d'huile.
+    def _split(self, img, amount):
+        """Dedoublement chromatique du trait sur les gros coups de sub.
 
-        Deux mecanismes se cumulent. Les couches de couleur sont d'abord
-        ecartees radialement (`_disperse`) : c'est ce qu'on voit se detacher
-        puis se recoller. Par-dessus, des anneaux spectraux dont l'ecartement
-        suit le coup — a pleine puissance ils sont serres et nombreux, et ils
-        se dilatent jusqu'a disparaitre pendant que le sub s'eteint.
+        Les trois couches se separent lateralement : le rouge part d'un cote,
+        le bleu de l'autre, le vert reste en place — chaque ligne se lit donc
+        en triple, comme un defaut de convergence. Puis elles se recollent
+        pendant que le coup retombe.
 
-        Seul ce qui est allume est irise : la teinte est posee
-        proportionnellement a la luminance, le fond noir reste noir.
+        C'est applique avant que le fond ne soit pose, donc seul ce qui est
+        dessine se dedouble : le fond, lui, ne bouge pas.
         """
-        H, W = self.H, self.W
-        if getattr(self, "_ir_r", None) is None or self._ir_r.shape != (H, W):
-            yy = (np.arange(H, dtype=np.float32)[:, None] / H - 0.5) * 2.0
-            xx = (np.arange(W, dtype=np.float32)[None, :] / W - 0.5) * 2.0
-            self._ir_r = np.sqrt(xx * xx * 0.5 + yy * yy).astype(np.float32)
-        img = self._disperse(img, 0.024 * amount)
-        ph = self._ir_r * (2.5 + 9.0 * amount) + t * 1.15
-        rb = np.stack([0.5 + 0.5 * np.sin(ph),
-                       0.5 + 0.5 * np.sin(ph + 2.0944),
-                       0.5 + 0.5 * np.sin(ph + 4.1888)], axis=-1).astype(np.float32)
-        a = amount * 0.92
-        return img * (1.0 - a) + (lum[..., None] * rb) * (a * 1.38)
+        dx = int(round(self.split_px * (self.H / 540.0) * amount))
+        if dx < 1:
+            return img
+        dy = int(round(dx * 0.22))
+        # On ne decale pas les canaux tels quels : dans une palette verte, le
+        # rouge et le bleu du trait sont presque vides, et les copies decalees
+        # seraient a peine visibles. On repart donc de l'intensite du trait et
+        # on en tire trois copies de meme force, une par couleur primaire —
+        # c'est ce qui donne vraiment trois lignes au lieu d'une frange.
+        lum = img.max(axis=2)
+        trip = np.stack([self._shift(lum, dx, -dy), lum,
+                         self._shift(lum, -dx, dy)], axis=-1)
+        a = amount * 0.90
+        return img * (1.0 - a) + trip * a
 
     def colorize(self, field, t, collapse, shake, rng):
         W, H = self.W, self.H
@@ -1771,9 +1759,9 @@ class Renderer:
         for c in range(3):
             img[:, :, c] = fluo[c] * base + halo[c] * gc * gmul
         img += (np.clip(hot * 1.25, 0, 1.0) ** 1.25)[..., None] * self.c_hot
-        ir = self.iris * self.sub_hit(t)
-        if ir > 0.01:
-            img = self._iridesce(img, base + gc * 0.55, ir, t)
+        sp = self.split * self.sub_hit(t)
+        if sp > 0.01:
+            img = self._split(img, sp)
         # le fond passe sous les textures : scanlines, vignettage et grain
         # le travaillent comme le reste de la dalle.
         img += self.c_bg
@@ -1877,8 +1865,10 @@ def main():
                     help="0 a 1 : creuse le fond derriere la machine")
     ap.add_argument("--wobble", type=float, default=0.0,
                     help="ondulation du trace de la machine (0 = trait net)")
-    ap.add_argument("--iris", type=float, default=1.0,
-                    help="irisation sur les plus gros coups de sub (0 = aucune)")
+    ap.add_argument("--split", type=float, default=1.0,
+                    help="dedoublement chromatique du trait sur les gros subs")
+    ap.add_argument("--split-px", type=float, default=11.0,
+                    help="ecart des couches, en pixels ramenes a 540p")
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=1.0,
@@ -1911,7 +1901,7 @@ def main():
                   bg=args.bg, bg_strength=args.bg_strength,
                   bg_clear=args.bg_clear,
                   bg_color=hex_to_rgb(args.bg_color) if args.bg_color else None)
-    _R.wobble, _R.iris = args.wobble, args.iris
+    _R.wobble, _R.split, _R.split_px = args.wobble, args.split, args.split_px
     _R.snare, _R.wave_gain = args.snare, args.wave
     _R.trail = args.trail
     if args.backdrop:

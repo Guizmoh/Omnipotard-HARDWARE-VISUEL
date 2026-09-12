@@ -98,7 +98,7 @@ def look_from(q):
         "bg_strength": float(q.get("bgStrength", 1.0)),
         "bg_clear": float(q.get("bgClear", 0.55)),
         "wobble": float(q.get("wobble", 0.0)),
-        "iris": float(q.get("iris", 1.0)),
+        "split": float(q.get("split", 1.0)),
         "snare": float(q.get("snare", 1.0)),
         "wave_gain": float(q.get("wave", 2.6)),
         "trail": float(q.get("trail", 1.0)),
@@ -164,7 +164,7 @@ class Studio:
                 self.renderers[key] = r
         # set_look ne connait que la couleur et le fond ; les deux autres
         # reglages se posent directement sur l'instance
-        POSE = ("wobble", "iris", "snare", "wave_gain", "trail", "screen_title")
+        POSE = ("wobble", "split", "snare", "wave_gain", "trail", "screen_title")
         r.set_look(palette, **{k: v for k, v in kw.items() if k not in POSE})
         for k in POSE:
             setattr(r, k, kw[k])
@@ -449,17 +449,17 @@ PAGE = r"""<!doctype html>
 
   <div class="card">
     <h2>Trait</h2>
-    <label for="iris">irisation sur les gros subs &mdash; <span id="v-iris">1.00</span></label>
-    <input type="range" id="iris" min="0" max="1.5" step="0.05" value="1">
+    <label for="split">dedoublement du trait sur les gros subs &mdash; <span id="v-split">1.00</span></label>
+    <input type="range" id="split" min="0" max="2.5" step="0.05" value="1">
     <label for="wobble">ondulation du trace &mdash; <span id="v-wob">0.00</span></label>
     <input type="range" id="wobble" min="0" max="1.5" step="0.05" value="0">
     <label for="trail">trainee de la bande &mdash; <span id="v-trail">1.00</span></label>
     <input type="range" id="trail" min="0" max="2.5" step="0.05" value="1">
     <label for="title">titre affiche sur la dalle</label>
     <input type="text" id="title" maxlength="22" placeholder="nom du fichier">
-    <p class="hint">L'irisation ne se declenche que sur les coups graves
-      vraiment appuyes : le trait s'y decompose comme une pellicule d'huile, et
-      les anneaux s'ecartent pendant que le sub s'eteint.</p>
+    <p class="hint">Sur les coups graves vraiment appuyes — et seulement
+      ceux-la — les trois couches de couleur du trait se separent, puis se
+      recollent quand le coup retombe. Le fond, lui, ne bouge pas.</p>
   </div>
 
   <div class="card">
@@ -561,7 +561,7 @@ function params() {
     palette: $('#palette').value, trait: $('#trait').value,
     bg: $('#bg').value, bgColor: $('#bgColor').value,
     bgStrength: $('#bgStrength').value, bgClear: $('#bgClear').value,
-    iris: $('#iris').value, wobble: $('#wobble').value,
+    split: $('#split').value, wobble: $('#wobble').value,
     trail: $('#trail').value, title: $('#title').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
@@ -586,7 +586,7 @@ $('#palette').onchange = e => {
 };
 $('#bg').onchange = e => { $('#bgopts').hidden = e.target.value === 'noir'; shot(); };
 for (const id of ['#trait','#bgColor','#curve']) $(id).oninput = shot;
-$('#iris').oninput   = e => { $('#v-iris').textContent = (+e.target.value).toFixed(2); shot(); };
+$('#split').oninput  = e => { $('#v-split').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#wobble').oninput = e => { $('#v-wob').textContent  = (+e.target.value).toFixed(2); shot(); };
 $('#trail').oninput  = e => { $('#v-trail').textContent= (+e.target.value).toFixed(2); shot(); };
 $('#title').oninput  = shot;
@@ -619,7 +619,7 @@ $('#go').onclick = async () => {
     palette: $('#palette').value, trait: $('#trait').value,
     bg: $('#bg').value, bgColor: $('#bgColor').value,
     bgStrength: +$('#bgStrength').value, bgClear: +$('#bgClear').value,
-    iris: +$('#iris').value, wobble: +$('#wobble').value,
+    split: +$('#split').value, wobble: +$('#wobble').value,
     trail: +$('#trail').value, title: $('#title').value,
     curve: $('#curve').checked,
   };

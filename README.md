@@ -216,13 +216,22 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
 - L'image respire a chaque grosse caisse (zoom +3,2 %) et le fil d'onde
   passe derriere la machine, accroche de chaque cote, avec son halo sur les
   graves — exactement comme dans l'intro.
-- **Irisation** (`--iris`, 1 par defaut) : sur les coups graves vraiment
-  appuyes — et seulement ceux-la — le trait se decompose comme une pellicule
-  d'huile. La teinte suit la distance au centre et retombe avec le coup, si
-  bien que les anneaux de couleur s'ecartent de la machine pendant que le sub
-  s'eteint. `sub_hit()` ignore tout ce qui est sous 0,55 de force et repart de
-  zero juste au-dessus, sinon l'effet serait permanent et ne voudrait plus
-  rien dire. `--iris 0` le retire.
+- **Dedoublement du trait** (`--split`, 1 par defaut) : sur les coups graves
+  vraiment appuyes — et seulement ceux-la — chaque ligne se lit en triple,
+  rouge d'un cote, bleu de l'autre, vert au milieu, comme un defaut de
+  convergence ; puis les copies se recollent pendant que le sub retombe.
+  L'ecart se regle avec `--split-px` (11 px ramenes a 540p).
+
+  Deux details font tout l'effet. Il est applique **avant** que le fond ne
+  soit pose, donc seul le trace se dedouble, jamais l'image entiere. Et les
+  trois copies sont tirees de l'**intensite** du trait, pas de ses canaux :
+  dans une palette verte le rouge et le bleu sont presque vides, et decaler
+  les canaux tels quels ne donnerait qu'une frange pale au lieu de trois
+  lignes.
+
+  `sub_hit()` ignore tout ce qui est sous 0,74 de force et repart de zero
+  juste au-dessus, sinon l'effet serait permanent et ne signalerait plus
+  rien. `--split 0` le retire.
 - **Traînée de la bande** (`--trail`, 1 par defaut) : le fil est redessine a
   quelques instants passes, de plus en plus pale. Sa longueur suit
   `density()`, le nombre de familles d'instruments qui jouent dans la
