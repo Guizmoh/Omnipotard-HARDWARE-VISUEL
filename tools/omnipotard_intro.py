@@ -1030,14 +1030,20 @@ class Renderer:
             g = max(g, burst * (1.0 - 0.55 * smoothstep(0.42, 0.80, u)))
         return g
 
-    def set_wave_smooth(self, width):
+    def set_wave_smooth(self, width, passes=None):
         """Lissage de la courbe affichee.
 
         Plus il est large, plus le trace est calme : on suit le mouvement du
         grave au lieu du detail du haut du spectre, qui donnait un tremblement
         illisible d'une image a l'autre.
         """
-        w = _lowpass(self._mono.astype(np.float64), max(1, int(width)))
+        w = self._mono.astype(np.float64)
+        # Trois passages plutot qu'un : une moyenne glissante seule ne descend
+        # qu'a 6 dB par octave et laisse passer assez d'aigu pour que le trace
+        # saute quand meme d'une image a l'autre. Cascadee, elle approche une
+        # gaussienne et coupe franchement.
+        for _ in range(max(1, int(self.wave_passes if passes is None else passes))):
+            w = _lowpass(w, max(1, int(width)))
         self.wave = (w / (np.max(np.abs(w)) or 1.0)).astype(np.float32)
         self.nw = len(self.wave)
 
@@ -1081,6 +1087,9 @@ class Renderer:
             # la courbe haute en permanence.
             amp = amp * float(np.clip(0.22 + 1.45 * self.env_at(self.e_full, t),
                                       0.14, 1.70))
+            # et elle gonfle sur le temps fort : c'est ce coup-la qu'on veut
+            # voir passer dans la bande.
+            amp = amp * (1.0 + self.wave_punch * self.kick_hit(t))
         if self.wave_trig > 0.0:
             # Declenchement, comme sur un oscilloscope : le balayage repart au
             # debut de chaque temps et l'ecran montre exactement un temps de
@@ -1729,6 +1738,8 @@ class Renderer:
     split_count = 3   # combien de fois il se declenche dans toute la video
     wave_win = CURVE_WIN   # base de temps libre (s), quand wave_trig vaut 0
     wave_trig = 0.0        # balayage declenche : largeur d'ecran, en temps
+    wave_passes = 1        # passages de lissage : 3 coupe franchement l'aigu
+    wave_punch = 0.85      # gonflement de la courbe sur les temps forts
     snare = 1.0       # embrasement jaune sur la caisse claire
     wave_gain = 1.0   # amplitude de la courbe sonore
     trail = 1.0       # trainee de la bande, d'autant plus longue qu'il y a
@@ -1949,6 +1960,10 @@ def main():
                     help="lissage de la courbe : large = trace plus calme")
     ap.add_argument("--wave-trig", type=float, default=0.0,
                     help="balayage declenche : largeur d'ecran en temps (0 = libre)")
+    ap.add_argument("--wave-passes", type=int, default=1,
+                    help="passages de lissage (3 = trace nettement plus calme)")
+    ap.add_argument("--wave-punch", type=float, default=0.85,
+                    help="gonflement de la courbe sur les temps forts")
     ap.add_argument("--trail", type=float, default=0.0,
                     help="trainee de la bande (0 = trait net)")
     ap.add_argument("--backdrop", default=None, help="image de fond")
@@ -1984,6 +1999,7 @@ def main():
     _R.snare, _R.wave_gain = args.snare, args.wave
     _R.trail = args.trail
     _R.wave_win, _R.wave_trig = args.wave_win, args.wave_trig
+    _R.wave_passes, _R.wave_punch = args.wave_passes, args.wave_punch
     _R.set_wave_smooth(args.wave_smooth)
     if args.backdrop:
         _R.backdrop = load_backdrop(args.backdrop, args.width, args.height,

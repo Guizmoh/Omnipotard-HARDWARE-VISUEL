@@ -136,8 +136,9 @@ def load_full_track(path, start, duration, sr=SR):
 def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True,
                               seed=7, palette="vert", wobble=0.0, split=1.0,
                               split_px=11.0, split_count=3,
-                              snare=1.0, wave_gain=1.35, trail=1.0, screen_title="",
+                              snare=1.0, wave_gain=1.10, trail=1.0, screen_title="",
                               wave_win=0.070, wave_smooth=56, wave_trig=0.0,
+                              wave_passes=1, wave_punch=0.85,
                               backdrop=None, backdrop_strength=1.00,
                               backdrop_clear=0.28, screen_dim=0.40, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
@@ -147,6 +148,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.snare, r.wave_gain = float(snare), float(wave_gain)
     r.trail, r.screen_title = float(trail), str(screen_title or "")
     r.wave_win, r.wave_trig = float(wave_win), float(wave_trig)
+    r.wave_passes, r.wave_punch = int(wave_passes), float(wave_punch)
     r.set_wave_smooth(int(wave_smooth))
     if backdrop:
         r.backdrop = load_backdrop(backdrop, w, h, backdrop_strength,
@@ -330,7 +332,7 @@ def add_look_args(ap):
                     help="nombre de declenchements dans toute la video")
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
-    ap.add_argument("--wave", type=float, default=1.35,
+    ap.add_argument("--wave", type=float, default=1.10,
                     help="amplitude de la courbe sonore")
     ap.add_argument("--wave-win", type=float, default=0.070,
                     help="base de temps de la courbe (s) : large = mouvement lent")
@@ -338,6 +340,10 @@ def add_look_args(ap):
                     help="lissage de la courbe : large = trace plus calme")
     ap.add_argument("--wave-trig", type=float, default=0.0,
                     help="balayage declenche : largeur d'ecran en temps (0 = libre)")
+    ap.add_argument("--wave-passes", type=int, default=1,
+                    help="passages de lissage (3 = trace nettement plus calme)")
+    ap.add_argument("--wave-punch", type=float, default=0.85,
+                    help="gonflement de la courbe sur les temps forts")
     ap.add_argument("--trail", type=float, default=1.0,
                     help="trainee de la bande (0 = trait net)")
     ap.add_argument("--title", default=None,
@@ -359,7 +365,8 @@ def look_kwargs(args):
             "split_count": args.split_count,
             "snare": args.snare, "wave_gain": args.wave, "trail": args.trail,
             "wave_win": args.wave_win, "wave_smooth": args.wave_smooth,
-            "wave_trig": args.wave_trig,
+            "wave_trig": args.wave_trig, "wave_passes": args.wave_passes,
+            "wave_punch": args.wave_punch,
             "screen_dim": args.screen_dim,
             "screen_title": (args.title if args.title is not None
                              else os.path.splitext(os.path.basename(args.music))[0]),

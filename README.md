@@ -253,16 +253,31 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
   d'oscilloscope remontait les passages calmes, et la courbe restait donc
   haute en permanence.
 
-  Le balayage est **libre** par defaut (fenetre `--wave-win`, 70 ms). Un
-  balayage **declenche** sur la grille musicale existe (`--wave-trig`, en
-  temps) : le trace s'y fige pendant tout le temps et ne se renouvelle qu'au
-  suivant, ce qui divise par dix le saut d'une image a l'autre. C'est
-  techniquement bien plus stable, mais visuellement ca fige trop — la bande
-  ne vit plus. Garde pour qui voudrait un oscilloscope verrouille.
+  Elle **gonfle sur le temps fort** (`--wave-punch`) : plus du double de sa
+  hauteur sur chaque grosse caisse. C'est ce coup-la qu'on veut voir passer
+  dans la bande.
 
-  Si on l'active, ne pas confondre la periode de declenchement et la largeur
-  de la fenetre : etaler un temps entier sur la dalle donne une centaine de
-  cycles, soit une bande pleine.
+  ### Pourquoi le trace ne peut pas etre « fluide »
+
+  A 30 images par seconde on echantillonne le son toutes les 33 ms : tout ce
+  qui depasse une quinzaine de hertz a deja change d'une image a l'autre. Le
+  saut moyen entre deux images vaut 1,7 fois la hauteur de la courbe, et
+  aucun lissage n'y change rien — une moyenne glissante seule ne descend qu'a
+  6 dB par octave. Cascadee trois fois (`--wave-passes 3`) on tombe a 0,73,
+  mais il faut ecraser le signal au point que ce n'est plus une forme d'onde.
+
+  Deux echappatoires, toutes deux avec un cout :
+
+  - `--wave-trig` (balayage declenche sur la grille musicale) descend le saut
+    a 0,13 — dix fois plus stable. Mais le trace se fige pendant tout le
+    temps : la bande ne vit plus.
+  - `--wave-passes 3` avec une large `--wave-win` donne un mouvement plus
+    coulant, au prix d'une courbe qui ressemble a une enveloppe et non plus a
+    un signal.
+
+  Par defaut, ni l'un ni l'autre : balayage libre, fenetre de 70 ms, un seul
+  passage de lissage. Le mouvement reste vif, et c'est l'amplitude — basse
+  dans les creux, doublee sur le temps fort — qui porte la lecture.
 - **Image de fond** (`--backdrop`) : n'importe quelle image lisible par
   ffmpeg, une par morceau. Elle est recadree en « couvrant », assombrie,
   legerement floutee et creusee derriere la machine — le faisceau etant additif, une image nette et

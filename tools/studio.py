@@ -101,9 +101,11 @@ def look_from(q):
         "split": float(q.get("split", 1.0)),
         "split_count": int(float(q.get("splitCount", 3))),
         "snare": float(q.get("snare", 1.0)),
-        "wave_gain": float(q.get("wave", 1.35)),
+        "wave_gain": float(q.get("wave", 1.10)),
         "wave_win": float(q.get("waveWin", 0.070)),
         "wave_trig": float(q.get("waveTrig", 0.0)),
+        "wave_passes": int(float(q.get("wavePasses", 1))),
+        "wave_punch": float(q.get("wavePunch", 0.85)),
         "wave_smooth": int(float(q.get("waveSmooth", 56))),
         "trail": float(q.get("trail", 1.0)),
         "screen_title": str(q.get("title") or ""),
@@ -170,7 +172,8 @@ class Studio:
         # reglages se posent directement sur l'instance
         # wave_smooth passe par une methode : il faut relisser la courbe
         POSE = ("wobble", "split", "split_count", "snare", "wave_gain",
-                "wave_win", "wave_trig", "trail", "screen_title")
+                "wave_win", "wave_trig", "wave_passes",
+                "wave_punch", "trail", "screen_title")
         r.set_look(palette, **{k: v for k, v in kw.items()
                                if k not in POSE and k != "wave_smooth"})
         for k in POSE:
