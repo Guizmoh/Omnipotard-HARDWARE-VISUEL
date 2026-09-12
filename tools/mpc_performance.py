@@ -38,7 +38,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
-    detect_hits, hex_to_rgb, write_wav, PAD_OF,
+    detect_hits, hex_to_rgb, load_backdrop, write_wav, PAD_OF,
 )
 
 
@@ -134,10 +134,18 @@ def load_full_track(path, start, duration, sr=SR):
 
 
 def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True,
-                              seed=7, palette="vert", wobble=0.0, iris=1.0, **bgkw):
+                              seed=7, palette="vert", wobble=0.0, iris=1.0,
+                              snare=1.0, wave_gain=2.6, trail=1.0, screen_title="",
+                              backdrop=None, backdrop_strength=0.55,
+                              backdrop_clear=0.45, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
     r.wobble, r.iris = float(wobble), float(iris)
+    r.snare, r.wave_gain = float(snare), float(wave_gain)
+    r.trail, r.screen_title = float(trail), str(screen_title or "")
+    if backdrop:
+        r.backdrop = load_backdrop(backdrop, w, h, backdrop_strength,
+                                   backdrop_clear, scale=r.scale)
     # La machine est deja entierement deployee et joue en continu : on
     # neutralise tout ce qui, dans le moteur de l'intro, appartient au
     # scenario (reveal, pre-lueur, ecran qui se cache au zoom, extinction
@@ -310,6 +318,18 @@ def add_look_args(ap):
                     help="ondulation du trace de la machine (0 = trait net)")
     ap.add_argument("--iris", type=float, default=1.0,
                     help="irisation sur les plus gros coups de sub (0 = aucune)")
+    ap.add_argument("--snare", type=float, default=1.0,
+                    help="embrasement jaune sur la caisse claire (0 = aucun)")
+    ap.add_argument("--wave", type=float, default=2.6,
+                    help="amplitude de la courbe sonore")
+    ap.add_argument("--trail", type=float, default=1.0,
+                    help="trainee de la bande (0 = trait net)")
+    ap.add_argument("--title", default=None,
+                    help="titre affiche sur la dalle (defaut : nom du fichier)")
+    ap.add_argument("--backdrop", default=None,
+                    help="image de fond (jpg, png, webp...)")
+    ap.add_argument("--backdrop-strength", type=float, default=0.55)
+    ap.add_argument("--backdrop-clear", type=float, default=0.45)
 
 
 def look_kwargs(args):
@@ -317,7 +337,13 @@ def look_kwargs(args):
             "bg_color": hex_to_rgb(args.bg_color) if args.bg_color else None,
             "bg_strength": args.bg_strength,
             "bg_clear": args.bg_clear,
-            "wobble": args.wobble, "iris": args.iris}
+            "wobble": args.wobble, "iris": args.iris,
+            "snare": args.snare, "wave_gain": args.wave, "trail": args.trail,
+            "screen_title": (args.title if args.title is not None
+                             else os.path.splitext(os.path.basename(args.music))[0]),
+            "backdrop": args.backdrop,
+            "backdrop_strength": args.backdrop_strength,
+            "backdrop_clear": args.backdrop_clear}
 
 
 def main():

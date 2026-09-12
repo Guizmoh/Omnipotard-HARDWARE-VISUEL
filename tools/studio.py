@@ -99,6 +99,10 @@ def look_from(q):
         "bg_clear": float(q.get("bgClear", 0.55)),
         "wobble": float(q.get("wobble", 0.0)),
         "iris": float(q.get("iris", 1.0)),
+        "snare": float(q.get("snare", 1.0)),
+        "wave_gain": float(q.get("wave", 2.6)),
+        "trail": float(q.get("trail", 1.0)),
+        "screen_title": str(q.get("title") or ""),
     }
 
 
@@ -160,9 +164,10 @@ class Studio:
                 self.renderers[key] = r
         # set_look ne connait que la couleur et le fond ; les deux autres
         # reglages se posent directement sur l'instance
-        r.set_look(palette, **{k: v for k, v in kw.items()
-                               if k not in ("wobble", "iris")})
-        r.wobble, r.iris = kw["wobble"], kw["iris"]
+        POSE = ("wobble", "iris", "snare", "wave_gain", "trail", "screen_title")
+        r.set_look(palette, **{k: v for k, v in kw.items() if k not in POSE})
+        for k in POSE:
+            setattr(r, k, kw[k])
         dur = tr["info"]["duration"]
         # l'apercu montre le morceau tel qu'il joue, sans les fondus des bords
         t = max(0.6, min(float(t), dur - 0.8))
@@ -448,6 +453,10 @@ PAGE = r"""<!doctype html>
     <input type="range" id="iris" min="0" max="1.5" step="0.05" value="1">
     <label for="wobble">ondulation du trace &mdash; <span id="v-wob">0.00</span></label>
     <input type="range" id="wobble" min="0" max="1.5" step="0.05" value="0">
+    <label for="trail">trainee de la bande &mdash; <span id="v-trail">1.00</span></label>
+    <input type="range" id="trail" min="0" max="2.5" step="0.05" value="1">
+    <label for="title">titre affiche sur la dalle</label>
+    <input type="text" id="title" maxlength="22" placeholder="nom du fichier">
     <p class="hint">L'irisation ne se declenche que sur les coups graves
       vraiment appuyes : le trait s'y decompose comme une pellicule d'huile, et
       les anneaux s'ecartent pendant que le sub s'eteint.</p>
@@ -531,6 +540,7 @@ async function upload(f) {
     $('#m-drops').textContent = drops.length;
     $('#trackmeta').hidden = false;
     drop.innerHTML = '<b>' + j.name + '</b>cliquer pour changer de morceau';
+    $('#title').placeholder = j.name.replace(/\.[^.]+$/, '');
     $('#scrub').max = Math.max(1, duration - 1); $('#scrub').disabled = false;
     // on ouvre sur un moment ordinaire, pas sur un paroxysme : l'image
     // glitchee ne dit rien des couleurs. Le bouton dedie y emmene.
@@ -552,6 +562,7 @@ function params() {
     bg: $('#bg').value, bgColor: $('#bgColor').value,
     bgStrength: $('#bgStrength').value, bgClear: $('#bgClear').value,
     iris: $('#iris').value, wobble: $('#wobble').value,
+    trail: $('#trail').value, title: $('#title').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
   return p;
@@ -577,6 +588,8 @@ $('#bg').onchange = e => { $('#bgopts').hidden = e.target.value === 'noir'; shot
 for (const id of ['#trait','#bgColor','#curve']) $(id).oninput = shot;
 $('#iris').oninput   = e => { $('#v-iris').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#wobble').oninput = e => { $('#v-wob').textContent  = (+e.target.value).toFixed(2); shot(); };
+$('#trail').oninput  = e => { $('#v-trail').textContent= (+e.target.value).toFixed(2); shot(); };
+$('#title').oninput  = shot;
 $('#bgStrength').oninput = e => { $('#v-str').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#bgClear').oninput   = e => { $('#v-clr').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#scrub').oninput     = e => { $('#v-t').textContent = (+e.target.value).toFixed(1) + ' s'; shot(); };
@@ -607,6 +620,7 @@ $('#go').onclick = async () => {
     bg: $('#bg').value, bgColor: $('#bgColor').value,
     bgStrength: +$('#bgStrength').value, bgClear: +$('#bgClear').value,
     iris: +$('#iris').value, wobble: +$('#wobble').value,
+    trail: +$('#trail').value, title: $('#title').value,
     curve: $('#curve').checked,
   };
   $('#go').disabled = true; $('#done').hidden = true; $('#prog').hidden = false;

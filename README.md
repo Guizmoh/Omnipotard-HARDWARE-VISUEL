@@ -223,6 +223,18 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
   s'eteint. `sub_hit()` ignore tout ce qui est sous 0,55 de force et repart de
   zero juste au-dessus, sinon l'effet serait permanent et ne voudrait plus
   rien dire. `--iris 0` le retire.
+- **Traînée de la bande** (`--trail`, 1 par defaut) : le fil est redessine a
+  quelques instants passes, de plus en plus pale. Sa longueur suit
+  `density()`, le nombre de familles d'instruments qui jouent dans la
+  demi-seconde : un passage depouille laisse un trait net, un passage charge
+  bave derriere lui. `--trail 0` le retire.
+- **Dalle** : le bandeau du haut porte le nom du morceau (`--title`, par
+  defaut le nom du fichier) et, juste en dessous, une barre de progression.
+- **Image de fond** (`--backdrop`) : n'importe quelle image lisible par
+  ffmpeg. Elle est recadree en « couvrant », assombrie, legerement floutee et
+  creusee derriere la machine — le faisceau etant additif, une image nette et
+  claire lui mangerait tout son contraste. `--backdrop-strength` et
+  `--backdrop-clear` reglent le dosage.
 - **Ondulation du trace** (`--wobble`, 0 par defaut) : le leger tremblement
   des contours de la machine. Il est desormais desactive ; `--wobble 1` le
   retablit. A ne pas confondre avec la bombe de la dalle, qui est

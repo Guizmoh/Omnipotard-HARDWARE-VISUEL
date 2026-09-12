@@ -15,6 +15,7 @@ out/omnipotard_bleu.mp4
 out/omnipotard_intro_4k.mp4
 out/mpc_per*.mp4
 out/mpc_iris*.mp4
+out/mpc_v[0-9]*.mp4
 
 # atelier du studio : morceaux deposes et rendus (tools/studio.py)
 out/studio/

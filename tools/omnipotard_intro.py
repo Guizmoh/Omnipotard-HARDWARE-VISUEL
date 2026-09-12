@@ -50,6 +50,38 @@ PALETTES = {
 BACKGROUNDS = ("noir", "uni", "grille", "points", "scan", "degrade", "bruit")
 
 
+def load_backdrop(path, w, h, strength=0.55, clear=0.45, scale=None, blur=2.2):
+    """Charge une image de fond et la prepare pour la dalle.
+
+    Passe par ffmpeg, donc accepte tout ce qu'il lit (jpg, png, webp, et meme
+    une image extraite d'une video). L'image est recadree en « couvrant »
+    le format de sortie, assombrie, un peu floutee et creusee derriere la
+    machine — le faisceau etant additif, une image nette et claire derriere
+    le trait lui mangerait tout son contraste.
+    """
+    out = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", path,
+         "-vf", "scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d"
+                % (w, h, w, h),
+         "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        stdout=subprocess.PIPE, check=True).stdout
+    img = (np.frombuffer(out, dtype=np.uint8)[:w * h * 3]
+           .reshape(h, w, 3).astype(np.float32) / 255.0)
+    if blur > 0:
+        img = np.stack([gauss(img[:, :, c], blur) for c in range(3)], axis=-1)
+    img *= float(strength)
+    if clear > 0:
+        sc = scale if scale else min(h * 0.5, w * 0.5 / 1.30)
+        yy = np.arange(h, dtype=np.float32)[:, None]
+        xx = np.arange(w, dtype=np.float32)[None, :]
+        nx = (xx - w * 0.5) / (1.52 * sc)
+        ny = (yy - h * 0.5) / (1.08 * sc)
+        r = np.sqrt(nx * nx + ny * ny)
+        k = np.clip((r - 0.82) / 0.55, 0.0, 1.0)
+        img *= (1.0 - float(clear) * (1.0 - k * k * (3.0 - 2.0 * k)))[..., None]
+    return np.ascontiguousarray(img, dtype=np.float32)
+
+
 def hex_to_rgb(x):
     """#rrggbb (ou rrggbb, ou #rgb) -> (r, g, b) en 0..1."""
     x = str(x).strip().lstrip("#")
@@ -133,6 +165,10 @@ def make_background(w, h, kind="noir", color=(0.0, 0.0, 0.0), strength=1.0,
 
     return (pat[..., None] * col.reshape(1, 1, 3)).astype(np.float32)
 
+
+# Caisse claire : jaune de tube, et un halo un peu plus ambre.
+SNARE_RGB = (1.00, 0.86, 0.16)
+SNARE_HALO = (1.00, 0.62, 0.04)
 
 SR = 48000
 DUREE_REF = 11.5                 # 15 temps + 1s de maintien sur le logo
@@ -361,6 +397,7 @@ VOLUME, VOLUME_R = (-1.266, 0.669), 0.119
 STEP_X0, STEP_Y0, STEP_W, STEP_H, STEP_GAP = -1.087, 0.627, 0.1183, 0.090, 0.0239
 TOPBTN = ((1.198, 0.627, 1.298, 0.717), (1.318, 0.627, 1.418, 0.717))
 STRIP = (-1.343, -0.269, -1.224, 0.448)
+STRIPBTN = (-1.343, -0.399, -1.224, -0.303)   # bouton isole sous la bande
 PAD_X0, PAD_Y0 = -1.116, -0.299
 PAD_W, PAD_H, PAD_GX, PAD_GY = 0.2386, 0.1936, 0.0299, 0.0299
 SCREEN = (0.018, -0.167, 1.086, 0.567)
@@ -420,6 +457,12 @@ def build_mpc(step=STEP):
         y = STRIP[1] + 0.045 + (STRIP[3] - STRIP[1] - 0.09) * k / 10.0
         add(Path([(STRIP[0] + 0.022, y), (STRIP[2] - 0.022, y)], tag="strip", step=step))
 
+    # bouton isole sous la bande tactile
+    add(Path(rrect_pts(*STRIPBTN, r=0.022), closed=True, tag="stripbtn", step=step))
+    add(Path(rrect_pts(STRIPBTN[0] + 0.021, STRIPBTN[1] + 0.018,
+                       STRIPBTN[2] - 0.021, STRIPBTN[3] - 0.018, 0.014),
+             closed=True, tag="stripbtn", step=step))
+
     # grille 4x4 : contour + biseau interieur
     for i in range(4):
         for j in range(4):
@@ -453,6 +496,8 @@ def build_mpc(step=STEP):
 
     # marquage + grille de haut-parleur
     P += text_paths("MPC LIVE III", 0.095, -1.070, -0.470, step=step, center=False, tag="logo")
+    P += text_paths("OMNIPOTARD", 0.058, -1.068, -0.556, step=step, center=False,
+                    tag="mark", tracking=0.46)
     add(Path(rrect_pts(*GRILLE, r=0.030), closed=True, tag="grille", step=step))
     for k in range(5):
         y = GRILLE[1] + 0.038 + (GRILLE[3] - GRILLE[1] - 0.076) * k / 4.0
@@ -1002,8 +1047,11 @@ class Renderer:
         Le gain suit l'inverse de l'enveloppe (comme le calibre automatique
         d'un oscilloscope) : les passages calmes restent lisibles.
         """
+        amp = amp * self.wave_gain
         if agc:
-            amp = amp * float(np.clip(0.55 / (0.20 + self.env_at(self.e_full, t)), 0.80, 1.60))
+            # calibre automatique d'oscilloscope, elargi : les passages calmes
+            # reagissent plus, les gros niveaux ne saturent pas pour autant
+            amp = amp * float(np.clip(0.55 / (0.20 + self.env_at(self.e_full, t)), 0.75, 2.30))
         tt = t + (np.asarray(x) / 1.88) * (win * 0.5)
         i = tt * self.sr
         i0 = np.floor(i).astype(np.int64)
@@ -1039,7 +1087,7 @@ class Renderer:
             return 0.0
         return float(np.max(self.ev_f[m] * np.exp(-self.ev_d[m] * 1.15 * dt[m])))
 
-    def sub_hit(self, t, thresh=0.55):
+    def sub_hit(self, t, thresh=0.74):
         """Enveloppe des plus gros coups graves — c'est elle qui declenche
         l'irisation.
 
@@ -1047,13 +1095,48 @@ class Renderer:
         tout ce qui est sous le seuil et repart de zero juste au-dessus : seuls
         les coups vraiment appuyes irisent le trait, sinon l'effet serait
         permanent et ne voudrait plus rien dire.
+
+        La retombee est lente (pres de deux secondes) : c'est ce qui laisse le
+        temps de voir les couleurs se separer puis se recoller.
         """
         dt = t - self.ev_t
-        m = (dt >= 0.0) & (dt < 0.75) & self.ev_bass & (self.ev_f >= thresh)
+        m = (dt >= 0.0) & (dt < 2.2) & self.ev_bass & (self.ev_f >= thresh)
         if not np.any(m):
             return 0.0
         f = np.clip((self.ev_f[m] - thresh) / (1.0 - thresh), 0.0, 1.0)
-        return float(np.max(f * np.exp(-4.2 * dt[m])))
+        # attaque quasi immediate, puis longue descente
+        return float(np.max(f * np.exp(-1.35 * dt[m])))
+
+    def snare_hit(self, t, thresh=0.42):
+        """Caisse claire et percussions : elles eclairent le trait en jaune.
+
+        Volontairement breve — la bande medium est bien fournie, et sans une
+        retombee rapide la machine resterait jaune en permanence au lieu d'etre
+        frappee par eclairs.
+        """
+        dt = t - self.ev_t
+        m = ((dt >= 0.0) & (dt < 0.40) & (self.ev_f >= thresh)
+             & ((self.ev_pad == PAD_OF["rim"]) | (self.ev_pad == PAD_OF["perc"])))
+        if not np.any(m):
+            return 0.0
+        return float(np.max(self.ev_f[m] * np.exp(-11.0 * dt[m])))
+
+    def progress_at(self, t):
+        """Avancement dans la video, pour la barre de la dalle."""
+        return t / self.dur if self.dur > 0 else 0.0
+
+    def density(self, t, win=0.45):
+        """Combien de familles d'instruments jouent en ce moment.
+
+        C'est ce qui regle la longueur de la trainee : un morceau depouille
+        laisse un trait net, un passage charge le fait bavez derriere lui.
+        """
+        dt = t - self.ev_t
+        m = (dt >= 0.0) & (dt < win)
+        if not np.any(m):
+            return 0.0
+        n = len(np.unique(self.ev_pad[m]))
+        return float(np.clip((n - 1) / 3.0, 0.0, 1.0))
 
     def step_index(self, t):
         return int((t - self.tl.start("groove")) / self.six) % 16
@@ -1176,6 +1259,14 @@ class Renderer:
         P = np.stack([xs, self.wave_y(xs, t)], axis=1)
         px, py = self.to_px(P, collapse)
         beam.add(px, py, 0.85 * a * (1.0 + 0.85 * hit))
+        # trainee : le trait d'il y a quelques images, de plus en plus pale.
+        # Sa longueur suit le nombre d'instruments qui jouent — un passage
+        # charge bave derriere lui, un passage depouille reste net.
+        ntr = int(round(self.trail * self.density(t) * 7))
+        for k in range(1, ntr + 1):
+            Q = np.stack([xs, self.wave_y(xs, t - k * 0.034)], axis=1)
+            qx, qy = self.to_px(Q, collapse)
+            beam.add(qx, qy, 0.62 * a * (1.0 - k / (ntr + 1.0)) ** 1.7)
         if thick:
             for dy in (0.0035, -0.0035):
                 px, py = self.to_px(P + np.array([0.0, dy]), collapse)
@@ -1381,6 +1472,32 @@ class Renderer:
                 yc = (sy0 + sy1) * 0.5 - 0.03
                 ys = yc + 0.125 * self.wave_y(u * 1.88, t, amp=1.0)
                 self._dyn(beam, np.stack([xs, ys], axis=1), 1.0, collapse, melt, t)
+                # bandeau du haut : nom du morceau, comme ecrit sur la dalle
+                if self.screen_title:
+                    if getattr(self, "_ttl", None) is None:
+                        self._ttl = text_paths(self.screen_title.upper()[:22], 0.050,
+                                               sx0 + 0.052, sy1 - 0.099,
+                                               center=False, tag="scr", tracking=0.42)
+                    for q in self._ttl:
+                        self._dyn(beam, q.P, 0.80, collapse, melt, t)
+                # barre de progression, sous le bandeau. Tout passe par
+                # resample() : rrect_pts et rect_fill rendent des polygones
+                # grossiers, qui donneraient un trait pointille sur une barre
+                # aussi large que la dalle.
+                py0, ph = sy1 - 0.150, 0.017
+                rx0, rx1 = sx0 + 0.052, sx1 - 0.052
+                rail, _, _ = resample(np.vstack([rrect_pts(rx0, py0, rx1, py0 + ph,
+                                                           r=ph * 0.5),
+                                                 [[rx1 - ph * 0.5, py0]]]))
+                self._dyn(beam, rail, 0.32, collapse, melt, t)
+                u = float(np.clip(self.progress_at(t), 0.0, 1.0))
+                fx1 = rx0 + 0.004 + (rx1 - rx0 - 0.008) * u
+                if fx1 - (rx0 + 0.004) > 0.004:
+                    for j in range(4):
+                        y = py0 + 0.004 + (ph - 0.008) * j / 3.0
+                        seg, _, _ = resample([(rx0 + 0.004, y), (fx1, y)])
+                        self._dyn(beam, seg, 1.00, collapse, melt, t)
+
                 base = sy0 + 0.055
                 for k in range(8):
                     v = (e_low, e_full, e_high)[k % 3] * (0.5 + 0.5 * math.sin(k * 1.7 + t * 5.0))
@@ -1543,6 +1660,11 @@ class Renderer:
 
     wobble = 0.0      # ondulation du trace de la machine (0 = trait net)
     iris = 1.0        # irisation sur les plus gros coups de sub
+    snare = 1.0       # embrasement jaune sur la caisse claire
+    wave_gain = 1.0   # amplitude de la courbe sonore
+    trail = 1.0       # trainee de la bande, d'autant plus longue qu'il y a
+                      # d'instruments qui jouent
+    screen_title = ""  # nom du morceau, affiche dans le bandeau de la dalle
 
     def set_look(self, palette="vert", bg=None, bg_color=None,
                  bg_strength=1.0, bg_clear=0.55):
@@ -1560,33 +1682,68 @@ class Renderer:
         self.c_fluo, self.c_halo = tuple(fluo), tuple(halo)
         self.c_hot = np.float32(hotc)
         # le fond de la palette reste la valeur par defaut ; `bg` le remplace
+        self.backdrop = None      # image de fond, ajoutee sous la texture
         self.c_bg = make_background(
             self.W, self.H, kind=bg or "uni",
             color=pbg if bg_color is None else bg_color,
             strength=bg_strength, clear=bg_clear if bg else 0.0,
             scale=self.scale, seed=self.seed)
 
+    def _disperse(self, img, k):
+        """Separation chromatique radiale : le rouge s'ecarte du centre, le
+        bleu s'y resserre.
+
+        C'est la partie qui fait vraiment « se detacher » les couleurs — un
+        arc-en-ciel pose par-dessus ne separe rien, il teinte. Ici les trois
+        couches sont physiquement decalees, puis se recollent quand le coup
+        retombe.
+        """
+        H, W = self.H, self.W
+        if getattr(self, "_dsp", None) is None or self._dsp[0].shape != (H, W):
+            yy, xx = np.mgrid[0:H, 0:W]
+            self._dsp = (xx.astype(np.float32), yy.astype(np.float32))
+        xx, yy = self._dsp
+        cx, cy = (W - 1) * 0.5, (H - 1) * 0.5
+        out = img.copy()
+        for c, sgn in ((0, 1.0), (2, -1.0)):
+            f = 1.0 + sgn * k
+            sx = np.clip(cx + (xx - cx) * f, 0.0, W - 1.001)
+            sy = np.clip(cy + (yy - cy) * f, 0.0, H - 1.001)
+            x0 = sx.astype(np.int32)
+            y0 = sy.astype(np.int32)
+            fx, fy = sx - x0, sy - y0
+            flat = np.ascontiguousarray(img[:, :, c]).ravel()
+            i00 = y0 * W + x0
+            top = flat[i00] * (1.0 - fx) + flat[i00 + 1] * fx
+            bot = flat[i00 + W] * (1.0 - fx) + flat[i00 + W + 1] * fx
+            out[:, :, c] = top * (1.0 - fy) + bot * fy
+        return out
+
     def _iridesce(self, img, lum, amount, t):
         """Irisation : sur un gros coup de sub, le trait se decompose comme
         une pellicule d'huile.
 
-        La teinte suit la distance au centre et retombe avec le coup, si bien
-        que les anneaux de couleur s'ecartent de la machine pendant que le sub
-        s'eteint — une onde, pas un clignotement. Seul ce qui est allume est
-        irise : la teinte est posee proportionnellement a la luminance, le
-        fond noir reste noir.
+        Deux mecanismes se cumulent. Les couches de couleur sont d'abord
+        ecartees radialement (`_disperse`) : c'est ce qu'on voit se detacher
+        puis se recoller. Par-dessus, des anneaux spectraux dont l'ecartement
+        suit le coup — a pleine puissance ils sont serres et nombreux, et ils
+        se dilatent jusqu'a disparaitre pendant que le sub s'eteint.
+
+        Seul ce qui est allume est irise : la teinte est posee
+        proportionnellement a la luminance, le fond noir reste noir.
         """
         H, W = self.H, self.W
         if getattr(self, "_ir_r", None) is None or self._ir_r.shape != (H, W):
             yy = (np.arange(H, dtype=np.float32)[:, None] / H - 0.5) * 2.0
             xx = (np.arange(W, dtype=np.float32)[None, :] / W - 0.5) * 2.0
             self._ir_r = np.sqrt(xx * xx * 0.5 + yy * yy).astype(np.float32)
-        ph = 7.5 * self._ir_r + 11.0 * amount + t * 2.4
+        img = self._disperse(img, 0.024 * amount)
+        ph = self._ir_r * (2.5 + 9.0 * amount) + t * 1.15
         rb = np.stack([0.5 + 0.5 * np.sin(ph),
                        0.5 + 0.5 * np.sin(ph + 2.0944),
                        0.5 + 0.5 * np.sin(ph + 4.1888)], axis=-1).astype(np.float32)
-        a = amount * 0.72
-        return img * (1.0 - a) + (lum[..., None] * rb) * (a * 1.24)
+        a = amount * 0.92
+        return img * (1.0 - a) + (lum[..., None] * rb) * (a * 1.38)
 
     def colorize(self, field, t, collapse, shake, rng):
         W, H = self.W, self.H
@@ -1601,15 +1758,27 @@ class Renderer:
 
         img = np.zeros((H, W, 3), dtype=np.float32)
         base = np.clip(inten, 0, 1.6)
+        # la caisse claire embrase le trait : il vire au jaune et le halo enfle
+        fluo, halo = self.c_fluo, self.c_halo
+        sn = self.snare * self.snare_hit(t)
+        gmul = 0.55
+        if sn > 0.01:
+            k = min(0.78, sn * 0.82)
+            fluo = tuple(f * (1.0 - k) + y * k for f, y in zip(fluo, SNARE_RGB))
+            halo = tuple(h * (1.0 - k) + y * k for h, y in zip(halo, SNARE_HALO))
+            gmul = 0.55 * (1.0 + 1.25 * sn)
+        gc = np.clip(glow, 0, 3.0)
         for c in range(3):
-            img[:, :, c] = self.c_fluo[c] * base + self.c_halo[c] * np.clip(glow, 0, 3.0) * 0.55
+            img[:, :, c] = fluo[c] * base + halo[c] * gc * gmul
         img += (np.clip(hot * 1.25, 0, 1.0) ** 1.25)[..., None] * self.c_hot
         ir = self.iris * self.sub_hit(t)
         if ir > 0.01:
-            img = self._iridesce(img, base + np.clip(glow, 0, 3.0) * 0.55, ir, t)
+            img = self._iridesce(img, base + gc * 0.55, ir, t)
         # le fond passe sous les textures : scanlines, vignettage et grain
         # le travaillent comme le reste de la dalle.
         img += self.c_bg
+        if self.backdrop is not None:
+            img += self.backdrop
 
         yy = np.arange(H, dtype=np.float32)[:, None]
         period = max(2.0, H / 360.0)
@@ -1710,6 +1879,15 @@ def main():
                     help="ondulation du trace de la machine (0 = trait net)")
     ap.add_argument("--iris", type=float, default=1.0,
                     help="irisation sur les plus gros coups de sub (0 = aucune)")
+    ap.add_argument("--snare", type=float, default=1.0,
+                    help="embrasement jaune sur la caisse claire (0 = aucun)")
+    ap.add_argument("--wave", type=float, default=1.0,
+                    help="amplitude de la courbe sonore")
+    ap.add_argument("--trail", type=float, default=0.0,
+                    help="trainee de la bande (0 = trait net)")
+    ap.add_argument("--backdrop", default=None, help="image de fond")
+    ap.add_argument("--backdrop-strength", type=float, default=0.55)
+    ap.add_argument("--backdrop-clear", type=float, default=0.45)
     ap.add_argument("--no-curve", action="store_true", help="desactive la courbure CRT")
     ap.add_argument("--no-audio", action="store_true", help="video muette (l'image reste pilotee par le son)")
     ap.add_argument("--stills", default="", help="dossier ou exporter des images cles PNG")
@@ -1734,6 +1912,12 @@ def main():
                   bg_clear=args.bg_clear,
                   bg_color=hex_to_rgb(args.bg_color) if args.bg_color else None)
     _R.wobble, _R.iris = args.wobble, args.iris
+    _R.snare, _R.wave_gain = args.snare, args.wave
+    _R.trail = args.trail
+    if args.backdrop:
+        _R.backdrop = load_backdrop(args.backdrop, args.width, args.height,
+                                    args.backdrop_strength, args.backdrop_clear,
+                                    scale=_R.scale)
 
     if args.stills:
         from PIL import Image
