@@ -496,8 +496,10 @@ def build_mpc(step=STEP):
 
     # marquage + grille de haut-parleur
     P += text_paths("MPC LIVE III", 0.095, -1.070, -0.470, step=step, center=False, tag="logo")
-    P += text_paths("OMNIPOTARD", 0.058, -1.068, -0.556, step=step, center=False,
-                    tag="mark", tracking=0.46)
+    # plus petit et remonte : le halo du trait mordait sur la grille du
+    # haut-parleur, qui commence a -0.570
+    P += text_paths("OMNIPOTARD", 0.040, -1.066, -0.544, step=step, center=False,
+                    tag="mark", tracking=0.52)
     add(Path(rrect_pts(*GRILLE, r=0.030), closed=True, tag="grille", step=step))
     for k in range(5):
         y = GRILLE[1] + 0.038 + (GRILLE[3] - GRILLE[1] - 0.076) * k / 4.0
