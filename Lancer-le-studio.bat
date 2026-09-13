@@ -39,6 +39,31 @@ if errorlevel 1 (
     )
 )
 
+REM ---- ffmpeg : indispensable pour lire les morceaux et encoder les videos.
+REM On le pose dans le dossier du projet plutot que dans le systeme : pas de
+REM droits administrateur, pas de PATH a modifier, rien a desinstaller ensuite.
+set "FFDIR=%~dp0bin"
+if exist "%FFDIR%\ffmpeg.exe" set "PATH=%FFDIR%;%PATH%"
+where ffmpeg >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo   Telechargement de ffmpeg ^(une seule fois, environ 110 Mo^)...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $z=Join-Path $env:TEMP 'ffomni.zip'; $d=Join-Path $env:TEMP 'ffomni'; Invoke-WebRequest -UseBasicParsing 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $z; if(Test-Path $d){Remove-Item $d -Recurse -Force}; Expand-Archive $z $d -Force; $e=@(Get-ChildItem $d -Recurse -Filter ffmpeg.exe)[0]; New-Item -ItemType Directory -Force -Path '%FFDIR%' > $null; Copy-Item $e.FullName '%FFDIR%'; Copy-Item (Join-Path $e.Directory.FullName 'ffprobe.exe') '%FFDIR%'; Remove-Item $z,$d -Recurse -Force"
+    if exist "%FFDIR%\ffmpeg.exe" (
+        set "PATH=%FFDIR%;%PATH%"
+        echo   ffmpeg est en place, dans le sous-dossier bin du projet.
+    ) else (
+        echo.
+        echo   Le telechargement a echoue. Deux solutions :
+        echo       winget install Gyan.FFmpeg
+        echo   ou telecharger a la main sur https://www.gyan.dev/ffmpeg/builds/
+        echo   puis copier ffmpeg.exe et ffprobe.exe dans le sous-dossier bin.
+        echo.
+        pause
+        exit /b 1
+    )
+)
+
 echo.
 echo   Demarrage du studio. LAISSEZ CETTE FENETRE OUVERTE.
 echo   Pour arreter : fermez cette fenetre.

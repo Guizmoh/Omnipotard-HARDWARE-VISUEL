@@ -25,3 +25,6 @@ out/fond_essai.jpg
 out/fond_video_test.mp4
 out/fond_traveling.mp4
 out/omnipotard_4k*.mp4
+
+# ffmpeg portable pose par le raccourci Windows
+bin/

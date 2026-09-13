@@ -350,9 +350,13 @@ racine du projet :
 | macOS, Linux | `Lancer-le-studio.command` |
 | Windows | `Lancer-le-studio.bat` |
 
-Il trouve Python, installe `numpy` s'il manque, démarre le studio et **laisse
-la fenêtre ouverte** si quelque chose se passe mal — sans quoi le message
-d'erreur disparaît avant d'être lu.
+Il trouve Python, installe `numpy` s'il manque, **télécharge ffmpeg** s'il
+n'est pas là, démarre le studio et **laisse la fenêtre ouverte** si quelque
+chose se passe mal — sans quoi le message d'erreur disparaît avant d'être lu.
+
+Sous Windows, ffmpeg est posé dans le sous-dossier `bin/` du projet plutôt
+que dans le système : pas de droits administrateur, pas de `PATH` à modifier,
+et il suffit de supprimer le dossier pour tout enlever.
 
 En ligne de commande, c'est :
 
