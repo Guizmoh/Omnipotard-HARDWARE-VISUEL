@@ -37,12 +37,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mpc_performance import (  # noqa: E402
     analyze, frame_performance, probe_duration, render_video, _renderer,
 )
-from omnipotard_intro import BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex  # noqa: E402
+from omnipotard_intro import (  # noqa: E402
+    BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
+)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # tout ce que le studio fabrique tient dans un seul dossier de travail
 WORKDIR = os.path.join(ROOT, "out", "studio")
 UPLOADS = os.path.join(WORKDIR, "morceaux")
+FONDS = os.path.join(WORKDIR, "fonds")        # images et videos de fond
 OUTDIR = WORKDIR
 MAX_UPLOAD = 220 * 1024 * 1024          # un morceau, pas une discotheque
 
@@ -107,9 +110,23 @@ def look_from(q):
         "wave_passes": int(float(q.get("wavePasses", 1))),
         "wave_punch": float(q.get("wavePunch", 0.85)),
         "wave_smooth": int(float(q.get("waveSmooth", 56))),
+        "split_px": float(q.get("splitPx", 11.0)),
         "trail": float(q.get("trail", 1.0)),
         "screen_title": str(q.get("title") or ""),
+        "backdrop": backdrop_path(q.get("backdrop")),
+        "backdrop_strength": float(q.get("bdStrength", 0.78)),
+        "backdrop_clear": float(q.get("bdClear", 0.40)),
+        "screen_dim": float(q.get("screenDim", 0.40)),
     }
+
+
+def backdrop_path(name):
+    """Chemin du fond depose, ou None. Le nom vient de la page, donc on le
+    ramene a un simple nom de fichier dans le dossier prevu."""
+    if not name:
+        return None
+    p = os.path.join(FONDS, safe_name(name))
+    return p if os.path.exists(p) else None
 
 
 # --------------------------------------------------------------------------
@@ -171,16 +188,31 @@ class Studio:
         # set_look ne connait que la couleur et le fond ; les deux autres
         # reglages se posent directement sur l'instance
         # wave_smooth passe par une methode : il faut relisser la courbe
-        POSE = ("wobble", "split", "split_count", "snare", "wave_gain",
-                "wave_win", "wave_trig", "wave_passes",
+        POSE = ("wobble", "split", "split_px", "split_count", "snare",
+                "wave_gain", "wave_win", "wave_trig", "wave_passes",
                 "wave_punch", "trail", "screen_title")
-        r.set_look(palette, **{k: v for k, v in kw.items()
-                               if k not in POSE and k != "wave_smooth"})
+        APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
+                        "backdrop_clear", "screen_dim")
+        r.set_look(palette, **{k: v for k, v in kw.items() if k not in APART})
         for k in POSE:
             setattr(r, k, kw[k])
         if getattr(r, "_smooth_at", None) != kw["wave_smooth"]:
             r.set_wave_smooth(kw["wave_smooth"])
             r._smooth_at = kw["wave_smooth"]
+        # Le fond de l'apercu est une image fixe, meme quand c'est une video :
+        # on extrait la seule image de l'instant regarde (une demi-seconde)
+        # plutot que de detailler tout le fichier, ce que le rendu fera.
+        r._split_t = None            # le classement depend de split_count
+        bd = kw["backdrop"]
+        stamp = (bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
+                 kw["screen_dim"], round(float(t), 1))
+        if bd and getattr(r, "_bd_stamp", None) != stamp:
+            r.backdrop = load_backdrop(
+                bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
+                scale=r.scale, screen_dim=kw["screen_dim"], seek=float(t))
+            r._bd_stamp = stamp
+        elif not bd:
+            r.backdrop, r._bd_stamp = None, None
         dur = tr["info"]["duration"]
         # l'apercu montre le morceau tel qu'il joue, sans les fondus des bords
         t = max(0.6, min(float(t), dur - 0.8))
@@ -332,6 +364,19 @@ class Handler(BaseHTTPRequestHandler):
                     "duration": info["total"], "bpm": info["bpm"],
                     "hits": info["hits"], "drops": info["drops"]})
 
+            if u.path == "/backdrop":
+                os.makedirs(FONDS, exist_ok=True)
+                name = safe_name(self.headers.get("X-Filename"))
+                path = os.path.join(FONDS, name)
+                with open(path, "wb") as f:
+                    f.write(body)
+                try:                        # ffmpeg doit savoir le lire
+                    load_backdrop(path, 64, 36)
+                except Exception:           # noqa: BLE001
+                    os.remove(path)
+                    return self._fail("ffmpeg ne sait pas lire ce fichier")
+                return self._json({"name": name, "video": is_video(path)})
+
             if u.path == "/render":
                 return self._json(STUDIO.start_job(json.loads(body or b"{}")))
 
@@ -461,11 +506,42 @@ PAGE = r"""<!doctype html>
   </div>
 
   <div class="card">
+    <h2>Image ou video de fond</h2>
+    <div class="drop" id="bdrop">
+      <b id="bdname">Deposer une image ou une video</b>
+      jpg, png, mp4, mov&hellip; ou cliquer
+    </div>
+    <input type="file" id="bdfile" accept="image/*,video/*" hidden>
+    <div id="bdopts" hidden>
+      <label for="bdStrength">presence du fond &mdash; <span id="v-bds">0.78</span></label>
+      <input type="range" id="bdStrength" min="0" max="1.6" step="0.02" value="0.78">
+      <label for="bdClear">degagement derriere la machine &mdash; <span id="v-bdc">0.40</span></label>
+      <input type="range" id="bdClear" min="0" max="1" step="0.05" value="0.40">
+      <label for="screenDim">opacite de la dalle &mdash; <span id="v-sd">0.40</span></label>
+      <input type="range" id="screenDim" min="0" max="1" step="0.05" value="0.40">
+      <button class="ghost" id="bdclear" style="margin-top:8px">retirer le fond</button>
+      <p class="hint">Sur une video, l'apercu montre l'image de l'instant
+        regarde ; le rendu, lui, la joue en entier (et la boucle si elle est
+        plus courte que le morceau).</p>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Trait</h2>
     <label for="split">dedoublement du trait sur les gros subs &mdash; <span id="v-split">1.00</span></label>
     <input type="range" id="split" min="0" max="2.5" step="0.05" value="1">
     <label for="wobble">ondulation du trace &mdash; <span id="v-wob">0.00</span></label>
     <input type="range" id="wobble" min="0" max="1.5" step="0.05" value="0">
+    <label for="splitCount">nombre de dedoublements dans la video &mdash; <span id="v-sc">3</span></label>
+    <input type="range" id="splitCount" min="0" max="12" step="1" value="3">
+    <label for="splitPx">ecart des copies &mdash; <span id="v-spx">11</span> px</label>
+    <input type="range" id="splitPx" min="0" max="30" step="1" value="11">
+    <label for="snare">eclair jaune sur la caisse claire &mdash; <span id="v-sn">1.00</span></label>
+    <input type="range" id="snare" min="0" max="2" step="0.05" value="1">
+    <label for="wave">amplitude de la courbe &mdash; <span id="v-wv">1.10</span></label>
+    <input type="range" id="wave" min="0" max="3" step="0.05" value="1.10">
+    <label for="wavePunch">gonflement sur le temps fort &mdash; <span id="v-wp">0.85</span></label>
+    <input type="range" id="wavePunch" min="0" max="2.5" step="0.05" value="0.85">
     <label for="trail">trainee de la bande &mdash; <span id="v-trail">1.00</span></label>
     <input type="range" id="trail" min="0" max="2.5" step="0.05" value="1">
     <label for="title">titre affiche sur la dalle</label>
@@ -576,6 +652,11 @@ function params() {
     bgStrength: $('#bgStrength').value, bgClear: $('#bgClear').value,
     split: $('#split').value, wobble: $('#wobble').value,
     trail: $('#trail').value, title: $('#title').value,
+    splitCount: $('#splitCount').value, splitPx: $('#splitPx').value,
+    snare: $('#snare').value, wave: $('#wave').value,
+    wavePunch: $('#wavePunch').value, backdrop,
+    bdStrength: $('#bdStrength').value, bdClear: $('#bdClear').value,
+    screenDim: $('#screenDim').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
   return p;
@@ -602,6 +683,38 @@ for (const id of ['#trait','#bgColor','#curve']) $(id).oninput = shot;
 $('#split').oninput  = e => { $('#v-split').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#wobble').oninput = e => { $('#v-wob').textContent  = (+e.target.value).toFixed(2); shot(); };
 $('#trail').oninput  = e => { $('#v-trail').textContent= (+e.target.value).toFixed(2); shot(); };
+const bind = (id, out, dec) => { $(id).oninput = e => {
+  $(out).textContent = dec ? (+e.target.value).toFixed(dec) : e.target.value; shot(); }; };
+bind('#splitCount','#v-sc',0); bind('#splitPx','#v-spx',0);
+bind('#snare','#v-sn',2); bind('#wave','#v-wv',2); bind('#wavePunch','#v-wp',2);
+bind('#bdStrength','#v-bds',2); bind('#bdClear','#v-bdc',2); bind('#screenDim','#v-sd',2);
+
+/* ---- fond : image ou video ---- */
+let backdrop = '';
+const bdrop = $('#bdrop'), bdfile = $('#bdfile');
+bdrop.onclick = () => bdfile.click();
+bdrop.ondragover = e => { e.preventDefault(); bdrop.classList.add('over'); };
+bdrop.ondragleave = () => bdrop.classList.remove('over');
+bdrop.ondrop = e => { e.preventDefault(); bdrop.classList.remove('over');
+                      if (e.dataTransfer.files[0]) sendBackdrop(e.dataTransfer.files[0]); };
+bdfile.onchange = () => bdfile.files[0] && sendBackdrop(bdfile.files[0]);
+$('#bdclear').onclick = () => { backdrop = ''; $('#bdopts').hidden = true;
+  $('#bdname').textContent = 'Deposer une image ou une video'; shot(); };
+
+async function sendBackdrop(f) {
+  setStatus('envoi du fond ' + f.name + '\u2026');
+  try {
+    const r = await fetch('/backdrop', {method:'POST', body:f,
+                                        headers:{'X-Filename': f.name}});
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    backdrop = j.name;
+    $('#bdname').textContent = j.name + (j.video ? ' (video)' : '');
+    $('#bdopts').hidden = false;
+    setStatus('fond en place');
+    shot();
+  } catch (e) { setStatus('fond refuse : ' + e.message, true); }
+}
 $('#title').oninput  = shot;
 $('#bgStrength').oninput = e => { $('#v-str').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#bgClear').oninput   = e => { $('#v-clr').textContent = (+e.target.value).toFixed(2); shot(); };
@@ -634,6 +747,11 @@ $('#go').onclick = async () => {
     bgStrength: +$('#bgStrength').value, bgClear: +$('#bgClear').value,
     split: +$('#split').value, wobble: +$('#wobble').value,
     trail: +$('#trail').value, title: $('#title').value,
+    splitCount: +$('#splitCount').value, splitPx: +$('#splitPx').value,
+    snare: +$('#snare').value, wave: +$('#wave').value,
+    wavePunch: +$('#wavePunch').value, backdrop,
+    bdStrength: +$('#bdStrength').value, bdClear: +$('#bdClear').value,
+    screenDim: +$('#screenDim').value,
     curve: $('#curve').checked,
   };
   $('#go').disabled = true; $('#done').hidden = true; $('#prog').hidden = false;

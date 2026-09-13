@@ -91,7 +91,7 @@ class StillBackdrop:
 
 
 def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
-                  screen_dim=0.40):
+                  screen_dim=0.40, seek=0.0):
     """Charge une image de fond et la prepare pour la dalle.
 
     Passe par ffmpeg, donc accepte tout ce qu'il lit (jpg, png, webp, et meme
@@ -100,8 +100,17 @@ def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
     machine — le faisceau etant additif, une image nette et claire derriere
     le trait lui mangerait tout son contraste.
     """
+    # `seek` sert a l'apercu : sur une video de fond on n'extrait qu'une image,
+    # celle de l'instant regarde, au lieu de detailler tout le fichier. On
+    # repli l'instant sur la duree du fond, puisque le rendu le boucle — sans
+    # quoi demander la 170e seconde d'une video qui en dure douze ne renvoie
+    # rien du tout.
+    if seek > 0:
+        seek = seek % (media_duration(path) or 1e9)
     out = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", path,
+        ["ffmpeg", "-v", "error"]
+        + (["-ss", "%.3f" % seek] if seek > 0 else [])
+        + ["-i", path,
          "-vf", "scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d"
                 % (w, h, w, h),
          "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
@@ -112,6 +121,18 @@ def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
         img = np.stack([gauss(img[:, :, c], blur) for c in range(3)], axis=-1)
     img *= _backdrop_mask(w, h, strength, clear, scale, screen_dim)
     return StillBackdrop(np.ascontiguousarray(img, dtype=np.float32))
+
+
+def media_duration(path):
+    """Duree d'un fichier en secondes, ou 0 si ce n'en est pas un (une image)."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", path],
+            stdout=subprocess.PIPE, check=True).stdout.decode().strip()
+        return float(out)
+    except Exception:                                     # noqa: BLE001
+        return 0.0
 
 
 def is_video(path):

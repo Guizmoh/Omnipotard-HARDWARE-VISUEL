@@ -335,14 +335,21 @@ décode l'audio avec ffmpeg, calcule chaque image avec numpy puis encode en
 x264, tout cela sur vos fichiers. Un navigateur seul ne sait pas faire ça, et
 il faudrait de toute façon envoyer vos morceaux sur un serveur.
 
-On y dépose un morceau (mp3, wav, flac, m4a…), on choisit la couleur du trait
-et le fond, et **l'aperçu se recalcule à chaque réglage** — c'est une vraie
+On y dépose un morceau (mp3, wav, flac, m4a…) et, si on veut, une **image ou
+une vidéo de fond**. Tous les réglages du moteur sont là : couleur, fond de
+dalle, dédoublement du trait (nombre et écart), éclair de caisse claire,
+amplitude et gonflement de la courbe, traînée, titre affiché sur la dalle.
+L'**aperçu se recalcule à chaque réglage** — c'est une vraie
 image du rendu, pas une simulation : ce qu'on voit est ce qu'on obtient. Le
 bouton *aller au prochain paroxysme* saute là où tomberont les glitchs, pour
 les juger avant de lancer quoi que ce soit.
 
-Le rendu se lance depuis la même page, avec une barre de progression et un
-bouton de téléchargement. Tout ce que le studio fabrique (morceaux déposés et
+Sur une vidéo de fond, l'aperçu n'extrait que l'image de l'instant regardé
+(une demi-seconde) plutôt que de détailler tout le fichier ; c'est le rendu
+qui la joue en entier, et la boucle si elle est plus courte que le morceau.
+
+Le rendu se lance depuis la même page, en 1080p, 4K, 720p, carré ou vertical,
+avec une barre de progression et un bouton de téléchargement. Tout ce que le studio fabrique (morceaux déposés et
 vidéos) reste dans `out/studio/`.
 
 Rien ne sort de la machine : le serveur n'écoute que sur `127.0.0.1`, il n'y a
