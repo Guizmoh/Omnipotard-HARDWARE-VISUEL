@@ -342,6 +342,20 @@ python3 tools/mpc_performance.py assets/hint.mp3 --start 20 --duration 15 -o out
 `tools/studio.py` est la version « on charge son morceau et on voit » des deux
 scripts ci-dessus : pas de ligne de commande, une page dans le navigateur.
 
+**Sans toucher au terminal**, il y a un raccourci à double-cliquer à la
+racine du projet :
+
+| système | fichier |
+| --- | --- |
+| macOS, Linux | `Lancer-le-studio.command` |
+| Windows | `Lancer-le-studio.bat` |
+
+Il trouve Python, installe `numpy` s'il manque, démarre le studio et **laisse
+la fenêtre ouverte** si quelque chose se passe mal — sans quoi le message
+d'erreur disparaît avant d'être lu.
+
+En ligne de commande, c'est :
+
 ```bash
 git clone https://github.com/Guizmoh/Glitch-visualisateur.git
 cd Glitch-visualisateur
