@@ -350,6 +350,12 @@ python3 tools/studio.py
 # le navigateur s'ouvre sur http://127.0.0.1:8765
 ```
 
+**Après un `git pull`, il faut relancer le studio.** Python lit les modules au
+démarrage : un studio laissé ouvert continue de servir l'ancien moteur, et on
+cherche longtemps pourquoi une nouveauté « n'est pas là ». La version
+réellement chargée est affichée en haut de la page, à côté du titre — c'est
+elle qui fait foi.
+
 L'adresse est **locale** : elle ne marche que sur la machine qui fait tourner
 la commande. Il n'y a pas de version en ligne, et c'est voulu — le studio
 décode l'audio avec ffmpeg, calcule chaque image avec numpy puis encode en

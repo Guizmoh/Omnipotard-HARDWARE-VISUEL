@@ -22,6 +22,7 @@ import json
 import os
 import re
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -39,9 +40,27 @@ from mpc_performance import (  # noqa: E402
 )
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
+    pick_split_times,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def version():
+    """Version du code effectivement charge.
+
+    Python lit les modules au demarrage : un studio laisse ouvert continue de
+    servir l'ancien moteur meme apres un git pull. Afficher la version evite
+    de chercher longtemps pourquoi une nouveaute « n'est pas la ».
+    """
+    try:
+        out = subprocess.run(["git", "-C", ROOT, "log", "-1",
+                              "--format=%h %ad %s", "--date=short"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             check=True).stdout.decode().strip()
+    except Exception:                                     # noqa: BLE001
+        return "version inconnue"
+    return out[:72]
 # tout ce que le studio fabrique tient dans un seul dossier de travail
 WORKDIR = os.path.join(ROOT, "out", "studio")
 UPLOADS = os.path.join(WORKDIR, "morceaux")
@@ -112,7 +131,9 @@ def look_from(q):
         "wave_smooth": int(float(q.get("waveSmooth", 56))),
         "split_px": float(q.get("splitPx", 11.0)),
         "trail": float(q.get("trail", 1.0)),
-        "screen_title": str(q.get("title") or ""),
+        # a defaut de titre saisi, celui du fichier : un champ vide laissait la
+        # dalle sans nom, alors que la page affichait le nom en invite.
+        "screen_title": str(q.get("title") or q.get("fallbackTitle") or ""),
         "backdrop": backdrop_path(q.get("backdrop")),
         "backdrop_strength": float(q.get("bdStrength", 0.78)),
         "backdrop_clear": float(q.get("bdClear", 0.40)),
@@ -308,6 +329,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, "text/html; charset=utf-8", PAGE.encode("utf-8"))
             if u.path == "/config":
                 return self._json({
+                    "version": version(),
                     "palettes": {k: {"trait": rgb_to_hex(v[0]),
                                      "fond": rgb_to_hex(v[3])}
                                  for k, v in sorted(PALETTES.items())},
@@ -318,6 +340,16 @@ class Handler(BaseHTTPRequestHandler):
                 img = STUDIO.still(q["track"], float(q.get("t", 0.0)), q,
                                    int(q.get("w", 640)), int(q.get("h", 360)))
                 return self._send(200, "image/png", png_bytes(img))
+            if u.path == "/splits":
+                tr = STUDIO.track(q["track"])
+                ev = tr["info"]["_audio"]["events"]
+                t = np.array([e[0] for e in ev])
+                f = np.array([e[2] for e in ev])
+                bass = np.array([e[1] <= 3 for e in ev])
+                st = pick_split_times(t, f, bass, tr["info"]["duration"],
+                                      int(float(q.get("count", 3))))
+                return self._json({"times": [round(float(x), 2) for x in st]})
+
             if u.path == "/job":
                 with STUDIO.lock:
                     job = dict(STUDIO.jobs.get(q.get("id"), {}))
@@ -430,7 +462,8 @@ PAGE = r"""<!doctype html>
     text-align:center;color:var(--dim);cursor:pointer;transition:.15s}
   .drop:hover,.drop.over{border-color:var(--acc);color:var(--ink)}
   .drop b{color:var(--acc);display:block;margin-bottom:4px;letter-spacing:.08em}
-  #shot{width:100%;border-radius:8px;border:1px solid var(--line);display:block;
+  #shot.calcul{opacity:.35;transition:opacity .2s}
+#shot{width:100%;border-radius:8px;border:1px solid var(--line);display:block;
     background:#000;aspect-ratio:16/9;object-fit:contain}
   .meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--dim);margin-top:10px;
     font-size:11px;letter-spacing:.06em}
@@ -446,6 +479,7 @@ PAGE = r"""<!doctype html>
 
 <header>
   <h1>Studio Omnipotard</h1>
+  <span id="ver" style="color:#5a6b64;font-size:11px"></span>
   <span id="status">deposez un morceau pour commencer</span>
 </header>
 
@@ -590,6 +624,7 @@ PAGE = r"""<!doctype html>
     <label for="scrub">instant du morceau &mdash; <span id="v-t">0.0 s</span></label>
     <input type="range" id="scrub" min="0" max="100" step="0.1" value="0" disabled>
     <div class="row" style="margin-top:8px">
+      <button class="ghost" id="toSplit">aller au prochain dedoublement</button>
       <button class="ghost" id="toDrop">aller au prochain paroxysme</button>
       <button class="ghost" id="hi">chercher un kick</button>
     </div>
@@ -652,6 +687,7 @@ function params() {
     bgStrength: $('#bgStrength').value, bgClear: $('#bgClear').value,
     split: $('#split').value, wobble: $('#wobble').value,
     trail: $('#trail').value, title: $('#title').value,
+    fallbackTitle: ($('#title').placeholder || ''),
     splitCount: $('#splitCount').value, splitPx: $('#splitPx').value,
     snare: $('#snare').value, wave: $('#wave').value,
     wavePunch: $('#wavePunch').value, backdrop,
@@ -668,7 +704,15 @@ function shot() {
   pending = setTimeout(() => {           // on ne recalcule pas a chaque pixel
     const n = ++shotSeq;
     const img = new Image();
-    img.onload = () => { if (n === shotSeq) $('#shot').src = img.src; };
+    // la premiere image d'un morceau demande quelques secondes (le moteur
+    // depouille tout le son) : on le montre, sinon l'apercu a l'air casse.
+    $('#shot').classList.add('calcul');
+    img.onload = () => {
+      if (n !== shotSeq) return;
+      $('#shot').src = img.src;
+      $('#shot').classList.remove('calcul');
+    };
+    img.onerror = () => { if (n === shotSeq) $('#shot').classList.remove('calcul'); };
     img.src = '/still?' + params().toString();
   }, 90);
 }
@@ -720,6 +764,23 @@ $('#bgStrength').oninput = e => { $('#v-str').textContent = (+e.target.value).to
 $('#bgClear').oninput   = e => { $('#v-clr').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#scrub').oninput     = e => { $('#v-t').textContent = (+e.target.value).toFixed(1) + ' s'; shot(); };
 
+/* Le dedoublement ne tombe que sur les 2 ou 3 plus gros coups de tout le
+   morceau : sans ce bouton on peut chercher longtemps avant d'en voir un. */
+$('#toSplit').onclick = async () => {
+  if (!track) return;
+  const j = await (await fetch('/splits?track=' + track +
+                               '&count=' + $('#splitCount').value)).json();
+  const ts = j.times || [];
+  if (!ts.length) return setStatus('aucun dedoublement sur ce morceau');
+  const t = +$('#scrub').value;
+  const next = ts.find(d => d > t + 0.2) ?? ts[0];
+  $('#scrub').value = next + 0.08;
+  $('#v-t').textContent = (next + 0.08).toFixed(1) + ' s';
+  setStatus('dedoublement a ' + next.toFixed(1) + ' s  (tous : ' +
+            ts.map(x => x.toFixed(1) + ' s').join(', ') + ')');
+  shot();
+};
+
 $('#toDrop').onclick = () => {
   if (!drops.length) return setStatus('aucun paroxysme detecte sur ce morceau');
   const t = +$('#scrub').value;
@@ -747,6 +808,7 @@ $('#go').onclick = async () => {
     bgStrength: +$('#bgStrength').value, bgClear: +$('#bgClear').value,
     split: +$('#split').value, wobble: +$('#wobble').value,
     trail: +$('#trail').value, title: $('#title').value,
+    fallbackTitle: ($('#title').placeholder || ''),
     splitCount: +$('#splitCount').value, splitPx: +$('#splitPx').value,
     snare: +$('#snare').value, wave: +$('#wave').value,
     wavePunch: +$('#wavePunch').value, backdrop,
@@ -790,6 +852,13 @@ function watch(id) {
       : j.state + '…';
   }, 700);
 }
+
+/* La version du code effectivement charge : un studio laisse ouvert continue
+   de servir l'ancien moteur apres un git pull, et on cherche longtemps
+   pourquoi une nouveaute « n'est pas la ». */
+fetch('/config').then(r => r.json())
+  .then(c => { if (c.version) $('#ver').textContent = c.version; })
+  .catch(() => {});
 
 /* ---------- divers ---------- */
 function fmt(s) {

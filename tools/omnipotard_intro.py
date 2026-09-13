@@ -1271,27 +1271,10 @@ class Renderer:
         return float(np.max(self.ev_f[m] * np.exp(-self.ev_d[m] * 1.15 * dt[m])))
 
     def split_times(self):
-        """Les quelques instants ou le trait se dedouble, pour toute la video.
-
-        Un seuil ne convient pas ici : selon le mixage il ne se declencherait
-        jamais, ou vingt fois. On classe donc les coups graves par force et on
-        garde les `split_count` plus gros, en refusant deux instants trop
-        rapproches — l'effet doit rester un evenement, pas une ponctuation.
-        """
-        if getattr(self, "_split_t", None) is not None:
-            return self._split_t
-        gap = max(1.2, 0.14 * self.dur)
-        out = []
-        for i in np.argsort(-self.ev_f):
-            if not self.ev_bass[i]:
-                continue
-            t = float(self.ev_t[i])
-            if any(abs(t - u) < gap for u in out):
-                continue
-            out.append(t)
-            if len(out) >= max(0, int(self.split_count)):
-                break
-        self._split_t = np.array(sorted(out), dtype=np.float64)
+        """Les quelques instants ou le trait se dedouble, pour toute la video."""
+        if getattr(self, "_split_t", None) is None:
+            self._split_t = pick_split_times(
+                self.ev_t, self.ev_f, self.ev_bass, self.dur, self.split_count)
         return self._split_t
 
     def sub_hit(self, t):
@@ -2314,6 +2297,28 @@ def _salience(e, fps, idx, ahead=0.02):
     base = _lowpass(e, max(1, int(fps * 1.5))) + 1e-12
     w = max(1, int(fps * ahead))
     return np.array([e[max(0, i - 1):i + w].max() / base[i] for i in idx])
+
+
+def pick_split_times(ev_t, ev_f, ev_bass, dur, count):
+    """Les instants ou le trait se dedouble, pour toute une video.
+
+    Un seuil ne conviendrait pas : selon le mixage il ne se declencherait
+    jamais, ou vingt fois. On classe donc les coups graves par force et on
+    garde les `count` plus gros, en refusant deux instants trop rapproches —
+    l'effet doit rester un evenement, pas une ponctuation.
+    """
+    gap = max(1.2, 0.14 * dur)
+    out = []
+    for i in np.argsort(-np.asarray(ev_f)):
+        if not ev_bass[i]:
+            continue
+        t = float(ev_t[i])
+        if any(abs(t - u) < gap for u in out):
+            continue
+        out.append(t)
+        if len(out) >= max(0, int(count)):
+            break
+    return np.array(sorted(out), dtype=np.float64)
 
 
 def detect_hits(mono, sr):
