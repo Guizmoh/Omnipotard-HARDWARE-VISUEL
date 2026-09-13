@@ -1,37 +1,50 @@
 @echo off
 REM Raccourci Windows : double-cliquer ce fichier lance le studio.
-chcp 65001 >nul
 cd /d "%~dp0"
+title Studio Omnipotard
 
-set PY=
-where py >nul 2>&1 && set PY=py
-if "%PY%"=="" (where python >nul 2>&1 && set PY=python)
-if "%PY%"=="" (
-    echo Python n'est pas installe.
-    echo A telecharger sur https://www.python.org/downloads/
-    echo Pensez a cocher "Add Python to PATH" pendant l'installation.
+REM On essaie py puis python, et on VERIFIE que l'interpreteur repond : sous
+REM Windows, "python" peut n'etre qu'un raccourci vers le Microsoft Store, qui
+REM ouvre la boutique au lieu de signaler que Python manque.
+set "PY="
+for %%C in (py python python3) do (
+    if not defined PY (
+        %%C -c "import sys" >nul 2>&1 && set "PY=%%C"
+    )
+)
+
+if not defined PY (
+    echo.
+    echo   Python n'est pas installe sur cette machine.
+    echo.
+    echo   A telecharger ici : https://www.python.org/downloads/
+    echo   Pendant l'installation, COCHEZ "Add Python to PATH".
     echo.
     pause
     exit /b 1
 )
 
-REM numpy est la seule dependance a installer ; on la pose si elle manque
+REM numpy est la seule bibliotheque a installer ; on la pose si elle manque
 %PY% -c "import numpy" >nul 2>&1
 if errorlevel 1 (
-    echo Installation de numpy ^(une seule fois^)...
+    echo Installation de numpy ^(une seule fois, patientez^)...
     %PY% -m pip install --quiet numpy
     if errorlevel 1 (
-        echo L'installation a echoue. Essayez :  %PY% -m pip install numpy
+        echo.
+        echo   L'installation a echoue. Essayez dans une invite de commandes :
+        echo       %PY% -m pip install numpy
+        echo.
         pause
         exit /b 1
     )
 )
 
-echo Demarrage du studio - laissez cette fenetre ouverte.
-echo Pour arreter : Ctrl-C, ou fermez cette fenetre.
+echo.
+echo   Demarrage du studio. LAISSEZ CETTE FENETRE OUVERTE.
+echo   Pour arreter : fermez cette fenetre.
 echo.
 %PY% tools\studio.py
 
 echo.
-echo Le studio s'est arrete.
+echo   Le studio s'est arrete.
 pause
