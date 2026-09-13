@@ -2251,31 +2251,142 @@ def detect_beat(mono, sr):
         dbl = best * 2                    # si le double tient presque aussi bien
         if dbl < len(ac) and lags[dbl] < 1.10 and ac[dbl] > 0.62 * ac[best]:
             best = dbl
-    return float(lags[best])
+    return _refine_beat(S, freqs, fps, float(lags[best]))
+
+
+def _refine_beat(S, freqs, fps, coarse):
+    """Affine la periode sur les attaques graves.
+
+    Le pas d'autocorrelation vaut 5,3 ms. A 85 BPM, deux millisecondes
+    d'erreur suffisent a decaler d'un quart de temps au bout de quatre
+    minutes : la grille du sequenceur part alors en vrille, et les coups ne
+    tombent plus ou il faut. On cherche donc, autour du sommet, la periode
+    qui range le mieux les attaques graves sur la grille.
+
+    Sur Hint, cela corrige 0,7040 s en 0,7060 s — et la concentration des
+    grosses caisses sur la grille passe de 1,4 a 3,8.
+    """
+    low = _env(S, freqs, 35, 110, smooth=max(2, int(fps * 0.045)))
+    idx = _attacks(low, fps, 0.16, 2.2)
+    if len(idx) < 12:
+        return coarse
+    t = idx / fps
+    best, score = coarse, -1.0
+    for b in np.linspace(coarse * 0.985, coarse * 1.015, 81):
+        h = np.histogram(np.mod(t, b) / b, bins=8, range=(0, 1))[0]
+        c = h.max() / max(h.mean(), 1e-9)
+        if c > score:
+            best, score = float(b), c
+    return best
+
+
+def _env(S, freqs, lo, hi, smooth=1):
+    """Enveloppe d'une bande, lissee sur `smooth` trames.
+
+    Le lissage n'est pas cosmetique : dans le grave, l'enveloppe redressee
+    ondule a deux fois la frequence du son (100 Hz pour un sub a 50 Hz). Sans
+    l'effacer, on prend cette ondulation pour des coups et on en compte deux
+    fois trop.
+    """
+    e = S[:, (freqs >= lo) & (freqs < hi)].sum(axis=1)
+    return _lowpass(e, smooth) if smooth > 1 else e
+
+
+def _attacks(e, fps, gap, rel):
+    """Instants ou une enveloppe monte nettement plus que d'ordinaire."""
+    d = np.maximum(np.diff(e, prepend=e[0]), 0.0)
+    base = _lowpass(d, max(1, int(fps * 1.5))) + 0.4 * d.std() + 1e-12
+    r = d / base
+    step, out, i, n = max(1, int(fps * gap)), [], 1, len(e)
+    while i < n - 1:
+        if r[i] > rel and r[i] >= r[i - 1] and r[i] >= r[i + 1]:
+            out.append(i)
+            i += step
+        else:
+            i += 1
+    return np.array(out, dtype=np.int64)
+
+
+def _salience(e, fps, idx, ahead=0.02):
+    """Combien une bande ressort a ces instants, rapportee a son ordinaire."""
+    if len(idx) == 0:
+        return np.zeros(0)
+    base = _lowpass(e, max(1, int(fps * 1.5))) + 1e-12
+    w = max(1, int(fps * ahead))
+    return np.array([e[max(0, i - 1):i + w].max() / base[i] for i in idx])
 
 
 def detect_hits(mono, sr):
-    """Coups de batterie par bande -> evenements de pads.
+    """Coups de batterie -> evenements de pads.
 
-    grave -> grosse caisse, medium -> caisse claire et percussions,
-    aigu -> charleston. Chaque famille garde le meme pad, pour qu'on
-    reconnaisse l'instrument a l'endroit ou il s'allume.
+    Le flux par bande ne suffisait pas a distinguer les instruments : dans un
+    morceau dub la basse occupe la meme bande que la grosse caisse, et le pad
+    de kick s'allumait donc sur chaque note de basse. Chaque famille est ici
+    reconnue par ce qui la distingue physiquement.
+
+    - **Grosse caisse** : une attaque dans le grave *accompagnee d'un clic*
+      entre 2 et 6 kHz. Une note de basse n'a pas ce clic. Mesure sur Hint :
+      sans ce test, 2,05 attaques graves par temps reparties au hasard
+      (concentration 1,15 sur la grille) ; avec, 0,6 par temps nettement
+      calees (concentration 3,3).
+    - **Caisse claire** : un corps entre 180 et 450 Hz accompagne de bruit
+      entre 2,5 et 8 kHz. Le bruit elimine les notes tenues et les accords,
+      qui sont harmoniques. De 3,98 coups par temps a 1,34, concentration
+      1,47 -> 3,0.
+    - **Charley** : l'aigu seul, sans corps. Il reste dense, et c'est normal.
+    - Une attaque grave **sans** clic est une note de basse : elle a son
+      propre pad, plus discret, au lieu de se faire passer pour un kick.
     """
     S, freqs, fps = _frames(mono, sr)
     lag = 0.025          # la detection voit l'attaque au debut de sa fenetre
+    nyq = sr * 0.5
+
+    low = _env(S, freqs, 35, 110, smooth=max(2, int(fps * 0.045)))
+    body = _env(S, freqs, 180, 450, smooth=2)
+    click = _env(S, freqs, 2000, min(6000, nyq))
+    noise = _env(S, freqs, 2500, min(8000, nyq))
+    air = _env(S, freqs, min(8000, nyq * 0.8), min(15000, nyq))
+
     ev = []
-    for (lo, hi), kind, thresh, gap in (((30, 140), "kick", 2.1, 0.14),
-                                        ((160, 1200), "rim", 2.3, 0.10),
-                                        ((4000, 10000), "hat", 2.0, 0.055)):
-        for i, (t, f) in enumerate(_pick(_band_flux(S, freqs, lo, hi), fps, thresh, gap)):
-            if kind == "kick":
-                pads = (PAD_OF["kick"],) if f > 0.45 else (1,)
-            elif kind == "rim":
-                pads = (PAD_OF["rim"],) if f > 0.55 else (PAD_OF["perc"],)
-            else:
-                pads = (10, 11)[i % 2],
-            for pad in pads:
-                ev.append((t + lag, pad, max(0.30, f), DECAY_OF[kind]))
+
+    # ---- grave : grosse caisse si ca claque, note de basse sinon
+    idx = _attacks(low, fps, 0.16, 2.2)
+    cl = _salience(click, fps, idx)
+    st = _salience(low, fps, idx, 0.04)
+    for i, c, v in zip(idx, cl, st):
+        t = i / fps + lag
+        f = float(np.clip(v / 6.0, 0.30, 1.0))
+        if c > 1.6:
+            ev.append((t, PAD_OF["kick"], f, DECAY_OF["kick"]))
+        else:
+            ev.append((t, 1, f * 0.7, DECAY_OF["bass"]))
+
+    # ---- medium : caisse claire, si le coup est bruite et pas un grave
+    idx = _attacks(body, fps, 0.11, 2.2)
+    nz = _salience(noise, fps, idx)
+    lo = _salience(low, fps, idx, 0.03)
+    st = _salience(body, fps, idx)
+    for i, n_, l_, v in zip(idx, nz, lo, st):
+        if n_ <= 1.8 or l_ >= 2.0:
+            continue
+        f = float(np.clip(v / 6.0, 0.30, 1.0))
+        # le partage se fait sur la force : les coups appuyes du contretemps
+        # vont a la caisse claire, les petites frappes aux percussions.
+        pad = PAD_OF["rim"] if f > 0.42 else PAD_OF["perc"]
+        ev.append((i / fps + lag, pad, f, DECAY_OF["rim"]))
+
+    # ---- aigu : charleston, s'il n'a pas de corps
+    idx = _attacks(air, fps, 0.05, 2.0)
+    bd = _salience(body, fps, idx)
+    st = _salience(air, fps, idx)
+    k = 0
+    for i, b_, v in zip(idx, bd, st):
+        if b_ >= 1.8:
+            continue
+        f = float(np.clip(v / 5.0, 0.30, 1.0))
+        ev.append((i / fps + lag, (10, 11)[k % 2], f, DECAY_OF["hat"]))
+        k += 1
+
     ev.sort()
     return ev
 

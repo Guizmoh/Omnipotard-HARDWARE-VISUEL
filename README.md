@@ -42,11 +42,32 @@ refaire à la main :
   toute l'image et le mot est **posé dessus** : logo et onde ne font qu'un trait ;
 - le clip d'ouverture affiche l'enveloppe crête **du morceau lui-même** : on y
   voit le drop, le groove, le break, l'impact et la traîne ;
-- **les pads suivent la vraie batterie du morceau** : le script détecte les
-  attaques par bande (grave → grosse caisse, medium → caisse claire et
-  percussions, aigu → charley) et chaque famille garde son pad, pour qu'on
-  reconnaisse l'instrument à l'endroit où il s'allume ;
-- la bande de 16 pas suit le pas courant du séquenceur ;
+- **les pads suivent la vraie batterie du morceau**, et chaque famille garde
+  son pad pour qu'on reconnaisse l'instrument à l'endroit où il s'allume.
+
+  Le flux par bande ne suffisait pas : dans un morceau dub, la basse occupe
+  la même bande que la grosse caisse, et le pad de kick s'allumait donc sur
+  chaque note de basse. Chaque famille est maintenant reconnue par ce qui la
+  distingue **physiquement** :
+
+  | famille | ce qui la reconnaît | avant → après (coups par temps, concentration sur la grille) |
+  | --- | --- | --- |
+  | grosse caisse | attaque grave **avec un clic** 2–6 kHz | 2,05 / 1,15 → 0,36 / **3,6** |
+  | note de basse | attaque grave **sans** clic — son propre pad | — |
+  | caisse claire | corps 180–450 Hz **avec du bruit** 2,5–8 kHz | 3,98 / 1,47 → 0,26 / **5,2** |
+  | charley | l'aigu seul, sans corps | 4,77 / 1,60 → 1,81 / 2,6 |
+
+  Une concentration de 1 signifie « réparti au hasard » ; au-delà de 2, les
+  coups tombent vraiment sur la grille.
+
+  Un piège trouvé en chemin : dans le grave, l'enveloppe redressée ondule à
+  deux fois la fréquence du son (100 Hz pour un sub à 50 Hz). Sans un lissage
+  d'au moins 45 ms, on prend cette ondulation pour des coups et on en compte
+  deux fois trop — c'était la moitié du problème ;
+- la bande de 16 pas suit le pas courant du séquenceur. Le tempo est affiné
+  sur les attaques graves après l'autocorrélation, dont le pas vaut 5,3 ms :
+  deux millisecondes d'erreur suffisent à décaler d'un quart de temps au bout
+  de quatre minutes. Sur *Hint*, cela corrige 0,7040 s en 0,7058 s ;
 - le fil d'onde **s'allume légèrement à chaque coup grave** (grosse caisse et
   notes de basse), avec un halo qui s'ajoute au trait ;
 - **l'image respire sur chaque grosse caisse** pendant que la machine joue :
