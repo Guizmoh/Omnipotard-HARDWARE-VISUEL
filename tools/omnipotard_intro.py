@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import wave
 
 import numpy as np
@@ -500,18 +501,99 @@ GLYPHS = {
     "S": (0.60, [[(.60, .84), (.44, 1), (.16, 1), (0, .84), (0, .66), (.16, .50), (.44, .50), (.60, .34), (.60, .16), (.44, 0), (.16, 0), (0, .16)]]),
     "U": (0.62, [[(0, 1), (0, .18), (.18, 0), (.44, 0), (.62, .18), (.62, 1)]]),
     "Y": (0.62, [[(0, 1), (.31, .55), (.62, 1)], [(.31, .55), (.31, 0)]]),
+    # Le reste de l'alphabet, les chiffres et un peu de ponctuation : un titre
+    # de morceau n'a aucune raison de se limiter aux lettres d'OMNIPOTARD.
+    "B": (0.60, [[(0, 0), (0, 1), (.44, 1), (.60, .86), (.60, .64), (.44, .50), (0, .50)],
+                 [(.44, .50), (.60, .36), (.60, .14), (.44, 0), (0, 0)]]),
+    "F": (0.56, [[(.56, 1), (0, 1), (0, 0)], [(0, .52), (.44, .52)]]),
+    "G": (0.64, [[(.64, .80), (.44, 1), (.18, 1), (0, .82), (0, .18), (.18, 0),
+                  (.46, 0), (.64, .18), (.64, .44), (.38, .44)]]),
+    "J": (0.46, [[(.46, 1), (.46, .20), (.32, 0), (.14, 0), (0, .20)]]),
+    "K": (0.62, [[(0, 0), (0, 1)], [(.60, 1), (0, .42)], [(.24, .60), (.62, 0)]]),
+    "Q": (0.62, [[(0, .18), (.18, 0), (.44, 0), (.62, .18), (.62, .82), (.44, 1),
+                  (.18, 1), (0, .82), (0, .18)], [(.36, .26), (.66, 0)]]),
+    "X": (0.62, [[(0, 1), (.62, 0)], [(0, 0), (.62, 1)]]),
+    "Z": (0.60, [[(0, 1), (.60, 1), (0, 0), (.60, 0)]]),
+    "2": (0.50, [[(0, .82), (.14, 1), (.36, 1), (.50, .84), (.50, .68), (0, .14),
+                  (0, 0), (.50, 0)]]),
+    "3": (0.48, [[(0, .86), (.14, 1), (.34, 1), (.48, .86), (.48, .68), (.32, .52),
+                  (.48, .36), (.48, .14), (.34, 0), (.14, 0), (0, .14)]]),
+    "4": (0.52, [[(.38, 0), (.38, 1), (0, .30), (.52, .30)]]),
+    "5": (0.48, [[(.48, 1), (.04, 1), (.04, .58), (.30, .64), (.46, .50), (.46, .16),
+                  (.30, 0), (.10, 0), (0, .12)]]),
+    "6": (0.48, [[(.42, .94), (.28, 1), (.12, 1), (0, .82), (0, .18), (.14, 0),
+                  (.32, 0), (.46, .16), (.46, .36), (.32, .52), (.14, .52), (0, .38)]]),
+    "7": (0.46, [[(0, 1), (.46, 1), (.14, 0)]]),
+    "8": (0.48, [[(.16, .52), (0, .66), (0, .86), (.16, 1), (.32, 1), (.48, .86),
+                  (.48, .66), (.32, .52), (.16, .52), (0, .36), (0, .14), (.16, 0),
+                  (.32, 0), (.48, .14), (.48, .36), (.32, .52)]]),
+    "9": (0.48, [[(.06, .06), (.20, 0), (.36, 0), (.48, .18), (.48, .82), (.34, 1),
+                  (.16, 1), (.02, .84), (.02, .64), (.16, .48), (.34, .48), (.48, .62)]]),
+    "-": (0.40, [[(.06, .50), (.34, .50)]]),
+    ".": (0.20, [[(.05, 0), (.13, 0), (.13, .08), (.05, .08), (.05, 0)]]),
+    ",": (0.20, [[(.13, .10), (.03, 0)]]),
+    "'": (0.18, [[(.09, .76), (.09, 1)]]),
+    '"': (0.30, [[(.08, .76), (.08, 1)], [(.22, .76), (.22, 1)]]),
+    "!": (0.16, [[(.08, .26), (.08, 1)], [(.08, 0), (.08, .08)]]),
+    "?": (0.50, [[(0, .82), (.14, 1), (.34, 1), (.50, .84), (.50, .66), (.25, .48),
+                  (.25, .28)], [(.25, 0), (.25, .08)]]),
+    "(": (0.30, [[(.26, 1), (.06, .70), (.06, .30), (.26, 0)]]),
+    ")": (0.30, [[(.04, 1), (.24, .70), (.24, .30), (.04, 0)]]),
+    "/": (0.44, [[(0, 0), (.44, 1)]]),
+    ":": (0.18, [[(.09, .14), (.09, .24)], [(.09, .56), (.09, .66)]]),
+    "+": (0.44, [[(.04, .50), (.40, .50)], [(.22, .32), (.22, .68)]]),
+    "=": (0.44, [[(.04, .36), (.40, .36)], [(.04, .62), (.40, .62)]]),
+    "&": (0.62, [[(.62, 0), (.16, .58), (.16, .84), (.30, 1), (.44, .86), (.44, .68),
+                  (0, .28), (0, .12), (.14, 0), (.34, 0), (.52, .20)]]),
+    "*": (0.36, [[(.18, .54), (.18, 1)], [(.02, .64), (.34, .90)],
+                 [(.02, .90), (.34, .64)]]),
+    "#": (0.58, [[(.14, 0), (.22, 1)], [(.34, 0), (.42, 1)],
+                 [(.02, .32), (.54, .32)], [(.04, .68), (.56, .68)]]),
     " ": (0.30, []),
 }
+
+# Ce que la police ne trace pas mais qu'un titre peut contenir : on replie
+# plutot que de s'arreter. Les accents partent d'eux-memes (la decomposition
+# NFD les detache de la lettre) ; restent les ligatures et la ponctuation
+# typographique, que les logiciels de musique aiment glisser dans un nom.
+_EQUIVALENTS = {
+    "\u0152": "OE", "\u0153": "OE", "\u00c6": "AE", "\u00e6": "AE",
+    "\u00d8": "O", "\u00f8": "O", "\u0110": "D", "\u0111": "D",
+    "\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"',
+    "\u2013": "-", "\u2014": "-", "_": "-", "\u00b7": ".", "\u2026": "...",
+    "\u20ac": "E", "\u00a9": "(C)", "\u2122": "TM", "@": "A",
+}
+
+
+def fold_text(txt):
+    """Ramene un texte a ce que la police sait tracer.
+
+    Elle ne connait que des capitales, des chiffres et un peu de ponctuation.
+    Un nom de morceau, lui, arrive avec des minuscules, des accents, parfois
+    un caractere qu'aucune police de trente traits ne dessinera. Tout cela se
+    replie ; ce qui ne se replie pas devient une espace. Un titre exotique
+    s'affiche donc de travers, ce qui est toujours mieux qu'un rendu qui
+    s'arrete au milieu.
+    """
+    out = []
+    for ch in unicodedata.normalize("NFD", str(txt)).upper():
+        if unicodedata.combining(ch):          # accent detache par la NFD
+            continue
+        for c in _EQUIVALENTS.get(ch, ch):
+            out.append(c if c in GLYPHS else " ")
+    return " ".join("".join(out).split())      # pas d'espaces en trop
 
 TRACKING = 0.145
 
 
 def text_width(txt, tracking=TRACKING):
+    txt = fold_text(txt)
     return sum(GLYPHS[c][0] for c in txt) + tracking * max(0, len(txt) - 1)
 
 
 def glyph_strokes(txt, height, x0, y0, center=True, tracking=TRACKING):
     """Traits du texte, positionnes : liste de (indice_lettre, points)."""
+    txt = fold_text(txt)
     x = x0 - text_width(txt, tracking) * height * 0.5 if center else x0
     out = []
     for gi, ch in enumerate(txt):
@@ -520,6 +602,21 @@ def glyph_strokes(txt, height, x0, y0, center=True, tracking=TRACKING):
             out.append((gi, [(x + px * height, y0 + py * height) for px, py in st]))
         x += (gw + tracking) * height
     return out
+
+
+def fit_text(txt, height, width, tracking=TRACKING, tail="..."):
+    """Raccourcit un texte pour qu'il tienne dans une largeur donnee.
+
+    Compter les caracteres ne suffit pas : un M est sept fois plus large qu'un
+    I. On mesure donc, et on coupe a la lettre pres, en signalant la coupe.
+    """
+    txt = fold_text(txt)
+    if not txt or text_width(txt, tracking) * height <= width:
+        return txt
+    while txt and text_width(txt + tail, tracking) * height > width:
+        txt = txt[:-1]
+    txt = txt.rstrip()
+    return (txt + tail) if txt else ""
 
 
 def text_paths(txt, height, x0, y0, step=STEP, center=True, tag="txt", tracking=TRACKING):
@@ -1692,10 +1789,16 @@ class Renderer:
                 self._dyn(beam, np.stack([xs, ys], axis=1), 1.0, collapse, melt, t)
                 # bandeau du haut : nom du morceau, comme ecrit sur la dalle
                 if self.screen_title:
-                    if getattr(self, "_ttl", None) is None:
-                        self._ttl = text_paths(self.screen_title.upper()[:22], 0.050,
-                                               sx0 + 0.052, sy1 - 0.099,
-                                               center=False, tag="scr", tracking=0.42)
+                    # le trace est garde d'une image a l'autre, mais il doit
+                    # suivre le titre : dans le studio on peut le changer sans
+                    # que le moteur, lui, soit reconstruit.
+                    if getattr(self, "_ttl_de", None) != self.screen_title:
+                        self._ttl = text_paths(
+                            fit_text(self.screen_title, 0.050,
+                                     (sx1 - 0.052) - (sx0 + 0.052), tracking=0.42),
+                            0.050, sx0 + 0.052, sy1 - 0.099,
+                            center=False, tag="scr", tracking=0.42)
+                        self._ttl_de = self.screen_title
                     for q in self._ttl:
                         self._dyn(beam, q.P, 0.80, collapse, melt, t)
                 # barre de progression, sous le bandeau. Tout passe par

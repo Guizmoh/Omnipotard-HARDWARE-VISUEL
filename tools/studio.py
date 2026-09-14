@@ -360,7 +360,21 @@ class Handler(BaseHTTPRequestHandler):
                    json.dumps(obj).encode("utf-8"))
 
     def _fail(self, e, code=400):
-        self._json({"error": str(e)}, code)
+        """Le message que la page affichera.
+
+        `str()` sur une KeyError rend la cle entre guillemets, et certaines
+        exceptions n'ont pas de message du tout : sans le nom de la classe,
+        la page afficherait une ligne vide, impossible a rapporter.
+        """
+        if isinstance(e, str):
+            msg = e
+        else:
+            texte = (str(e.args[0]) if isinstance(e, KeyError) and e.args
+                     else str(e))
+            msg = texte or e.__class__.__name__
+            if not isinstance(e, (ValueError, RuntimeError)):
+                msg = "%s : %s" % (e.__class__.__name__, msg)
+        self._json({"error": msg}, code)
 
     # ---- GET
     def do_GET(self):
@@ -508,6 +522,10 @@ PAGE = r"""<!doctype html>
   .drop:hover,.drop.over{border-color:var(--acc);color:var(--ink)}
   .drop b{color:var(--acc);display:block;margin-bottom:4px;letter-spacing:.08em}
   #shot.calcul{opacity:.35;transition:opacity .2s}
+  #shoterr{display:none;margin-top:8px;padding:8px 10px;border-radius:6px;
+    font-size:12px;line-height:1.45;background:#2a1416;border:1px solid #6b2b30;
+    color:#ffb4b4}
+  #shoterr.on{display:block}
 #shot{width:100%;border-radius:8px;border:1px solid var(--line);display:block;
     background:#000;aspect-ratio:16/9;object-fit:contain}
   .meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--dim);margin-top:10px;
@@ -666,6 +684,7 @@ PAGE = r"""<!doctype html>
   <div class="card">
     <h2>Apercu</h2>
     <img id="shot" alt="apercu">
+    <div id="shoterr"></div>
     <label for="scrub">instant du morceau &mdash; <span id="v-t">0.0 s</span></label>
     <input type="range" id="scrub" min="0" max="100" step="0.1" value="0" disabled>
     <div class="row" style="margin-top:8px">
@@ -748,17 +767,32 @@ function shot() {
   clearTimeout(pending);
   pending = setTimeout(() => {           // on ne recalcule pas a chaque pixel
     const n = ++shotSeq;
-    const img = new Image();
     // la premiere image d'un morceau demande quelques secondes (le moteur
     // depouille tout le son) : on le montre, sinon l'apercu a l'air casse.
     $('#shot').classList.add('calcul');
-    img.onload = () => {
-      if (n !== shotSeq) return;
-      $('#shot').src = img.src;
+    // On passe par fetch plutot que par img.src : quand le serveur refuse,
+    // une balise <img> ne donne qu'une image cassee, sans dire pourquoi.
+    fetch('/still?' + params().toString()).then(async r => {
+      if (n !== shotSeq) return;             // un reglage a bouge entre-temps
+      if (r.status === 409) return;          // apercu abandonne, un autre arrive
+      if (!r.ok) {
+        let m = 'erreur ' + r.status;
+        try { m = (await r.json()).error || m; } catch (e) { /* pas du JSON */ }
+        throw new Error(m);
+      }
+      const url = URL.createObjectURL(await r.blob());
+      const vieux = $('#shot').dataset.blob;
+      if (vieux) URL.revokeObjectURL(vieux);
+      $('#shot').dataset.blob = url;
+      $('#shot').src = url;
       $('#shot').classList.remove('calcul');
-    };
-    img.onerror = () => { if (n === shotSeq) $('#shot').classList.remove('calcul'); };
-    img.src = '/still?' + params().toString();
+      $('#shoterr').classList.remove('on');
+    }).catch(e => {
+      if (n !== shotSeq) return;
+      $('#shot').classList.remove('calcul');
+      $('#shoterr').textContent = "L'apercu n'a pas pu etre calcule : " + e.message;
+      $('#shoterr').classList.add('on');
+    });
   }, 90);
 }
 
