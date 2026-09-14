@@ -449,6 +449,61 @@ python3 tools/omnipotard_intro.py --palette bleu --bg grille --bg-color '#123a5c
 python3 tools/mpc_performance.py assets/hint.mp3 --bg degrade --bg-color '#2a0d3f'
 ```
 
+### Travelling sur l'image de fond
+
+Une photo immobile derrière une machine qui bouge finit par ressembler à un
+décor collé. Le **travelling** l'anime : l'image est chargée plus grande que
+l'écran, et on s'y déplace lentement du début à la fin du morceau. Le curseur
+dit **quelle part de l'image est parcourue** — 20 % suffisent largement — et
+le sens se choisit parmi `avant`, `arriere`, `gauche`, `droite`, `haut`, `bas`
+(ou `aucun`).
+
+La marge est prise sur l'image d'origine, jamais sur l'image finale : le cadre
+reste net d'un bout à l'autre, là où un agrandissement après coup l'aurait
+rendu flou. Le creux derrière la machine et l'opacité de la dalle, eux, ne
+bougent pas — ils appartiennent à l'écran, pas à la photo.
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --backdrop photo.jpg \
+    --travel 0.20 --travel-mode avant
+```
+
+### Réactions au son
+
+Sept réglages qui font répondre l'image à la batterie. Chacun se **cale sur
+l'instrument de son choix** : la batterie ayant été reconnue à l'analyse
+(grosse caisse contre note de basse, caisse claire contre charley), « caisse
+claire » veut vraiment dire caisse claire. À zéro, la réaction est éteinte.
+
+| réglage | ce que ça fait | option |
+| --- | --- | --- |
+| zoom d'impact | l'image respire sur le coup | `--punch`, `--punch-on` |
+| secousse | l'image est bousculée | `--shake`, `--shake-on` |
+| étincelles | des braises jaillissent du châssis et retombent | `--parts`, `--parts-on`, `--parts-speed`, `--parts-life` |
+| onde de choc | un anneau s'ouvre depuis la machine | `--ring`, `--ring-on` |
+| pulsation de la grille | la grille du fond s'allume | `--grid-pulse`, `--grid-on` |
+| éclat du fond | la photo est éclairée comme par un flash | `--bg-flash`, `--flash-on` |
+
+Les instruments disponibles : `grosse caisse`, `basse`, `caisse claire`,
+`percussions`, `charley`, `accords`, `tout`.
+
+Tout est dessiné **au faisceau**, comme la machine : les étincelles sont
+échantillonnées à pas constant en unités du monde, donc elles gardent la même
+densité en 4K qu'en 540p, et elles passent par le même halo et les mêmes
+scanlines que le reste. Et tout reste **déterministe** — chaque jet est tiré
+d'un hasard semé par le numéro du coup, sans quoi le calcul en parallèle
+donnerait des étincelles différentes d'une image à l'autre.
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 \
+    --parts 1.3 --parts-on "caisse claire" \
+    --ring 1.0 --ring-on "grosse caisse" \
+    --grid-pulse 1.1 --punch 0.06 --shake 0.35
+```
+
+Le coût est faible : toutes réactions allumées, une image 1080p passe de
+503 ms à 529 ms, soit 5 % de plus.
+
 ## STUDIO WEB — une page HTML, rien a installer
 
 `tools/build_web_studio.py` fabrique **un seul fichier HTML autonome** : on

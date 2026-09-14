@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
     detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, pool_context,
-    fit_jobs,
+    fit_jobs, INSTRUMENTS, TRAVELLINGS,
 )
 
 
@@ -124,6 +124,14 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               snare=1.0, wave_gain=1.10, trail=1.0, screen_title="",
                               wave_win=0.070, wave_smooth=56, wave_trig=0.0,
                               wave_passes=1, wave_punch=0.85,
+                              punch=0.032, punch_on="grosse caisse",
+                              shake_amp=0.0, shake_on="grosse caisse",
+                              parts=0.0, parts_on="caisse claire",
+                              parts_speed=1.0, parts_life=0.55,
+                              ring=0.0, ring_on="grosse caisse",
+                              grid_pulse=0.0, grid_on="grosse caisse",
+                              bg_flash=0.0, flash_on="caisse claire",
+                              travel=0.0, travel_mode="avant",
                               backdrop=None, backdrop_strength=1.00,
                               backdrop_clear=0.28, screen_dim=0.40, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
@@ -134,11 +142,20 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.trail, r.screen_title = float(trail), str(screen_title or "")
     r.wave_win, r.wave_trig = float(wave_win), float(wave_trig)
     r.wave_passes, r.wave_punch = int(wave_passes), float(wave_punch)
+    r.punch, r.punch_on = float(punch), str(punch_on)
+    r.shake_amp, r.shake_on = float(shake_amp), str(shake_on)
+    r.parts, r.parts_on = float(parts), str(parts_on)
+    r.parts_speed, r.parts_life = float(parts_speed), float(parts_life)
+    r.ring, r.ring_on = float(ring), str(ring_on)
+    r.grid_pulse, r.grid_on = float(grid_pulse), str(grid_on)
+    r.bg_flash, r.flash_on = float(bg_flash), str(flash_on)
+    r.travel, r.travel_mode = float(travel), str(travel_mode)
     r.set_wave_smooth(int(wave_smooth))
     if backdrop:
         r.backdrop = make_backdrop(
             backdrop, w, h, fps, duration, strength=backdrop_strength,
-            clear=backdrop_clear, scale=r.scale, screen_dim=screen_dim)
+            clear=backdrop_clear, scale=r.scale, screen_dim=screen_dim,
+            travel=r.travel, travel_mode=r.travel_mode)
     # La machine est deja entierement deployee et joue en continu : on
     # neutralise tout ce qui, dans le moteur de l'intro, appartient au
     # scenario (reveal, pre-lueur, ecran qui se cache au zoom, extinction
@@ -155,16 +172,28 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
 
 def frame_performance(r, t, duration):
     rng = np.random.default_rng(r.seed + int(t * r.fps + 0.5))
-    r._zoom = 1.0 + 0.032 * r.kick_hit(t)     # respire sur chaque kick
-    r._cam, r._cam_z = (0.0, 0.0), 1.0        # jamais de zoom dans l'ecran
+    # l'image respire sur l'instrument choisi, et peut aussi etre bousculee
+    r._zoom = 1.0 + r.punch * r.hit_env(t, r.punch_on, fall=9.0)
+    r._cam_z = 1.0                            # jamais de zoom dans l'ecran
+    r._cam = (0.0, 0.0)
+    if r.shake_amp > 0.001:
+        sec = r.shake_amp * r.hit_env(t, r.shake_on, fall=16.0)
+        # on ne puise dans le tirage que s'il y a vraiment une secousse :
+        # sinon activer l'option deplacerait tout le hasard de l'image — le
+        # grain, les tranches de glitch — sans rien secouer du tout.
+        if sec > 0.002:
+            r._cam = (float(rng.uniform(-1, 1) * 0.055 * sec),
+                      float(rng.uniform(-1, 1) * 0.040 * sec))
     shake = r.glitch_at(t)
 
     beam = Beam(r.H, r.W, r.gain)
     r._grid(beam, t, 0.55, 1.0)
     r._hud(beam, t, 1.0, 0.65)
+    r._onde(beam, t, 1.0)                     # anneau, sous la machine
     # le fil du morceau passe derriere la machine et s'allume sur les graves
     r._wave_line(beam, t, 1.0, 0.48, None, 999.0, 0.0)
     r._machine(beam, t, 1.0, 999.0, 0.0, rng, shake)   # sweep_x enorme = deployee
+    r._etincelles(beam, t, 1.0)               # etincelles, par-dessus
     field = beam.render()
     img = r.colorize(field, t, 1.0, shake, rng)
 
@@ -363,6 +392,33 @@ def add_look_args(ap):
     ap.add_argument("--backdrop-clear", type=float, default=0.28)
     ap.add_argument("--screen-dim", type=float, default=0.40,
                     help="opacite de la dalle devant l'image de fond")
+    ap.add_argument("--travel", type=float, default=0.0,
+                    help="travelling sur le fond : part de l'image parcourue "
+                         "du debut a la fin (0.20 = 20%%)")
+    ap.add_argument("--travel-mode", default="avant", choices=TRAVELLINGS,
+                    help="sens du travelling")
+    # ---- reactions au son : chacune se cale sur l'instrument de son choix
+    ap.add_argument("--punch", type=float, default=0.032,
+                    help="zoom d'impact sur chaque coup")
+    ap.add_argument("--punch-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--shake", type=float, default=0.0,
+                    help="secousse de l'image sur chaque coup")
+    ap.add_argument("--shake-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--parts", type=float, default=0.0,
+                    help="etincelles ejectees a chaque coup")
+    ap.add_argument("--parts-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--parts-speed", type=float, default=1.0)
+    ap.add_argument("--parts-life", type=float, default=0.55,
+                    help="duree de vie d'une etincelle, en secondes")
+    ap.add_argument("--ring", type=float, default=0.0,
+                    help="onde de choc : un anneau qui s'ouvre sur le coup")
+    ap.add_argument("--ring-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--grid-pulse", type=float, default=0.0,
+                    help="la grille du fond s'allume sur le coup")
+    ap.add_argument("--grid-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--bg-flash", type=float, default=0.0,
+                    help="l'image de fond est eclairee par le coup")
+    ap.add_argument("--flash-on", default="caisse claire", choices=INSTRUMENTS)
 
 
 def look_kwargs(args):
@@ -377,6 +433,14 @@ def look_kwargs(args):
             "wave_trig": args.wave_trig, "wave_passes": args.wave_passes,
             "wave_punch": args.wave_punch,
             "screen_dim": args.screen_dim,
+            "travel": args.travel, "travel_mode": args.travel_mode,
+            "punch": args.punch, "punch_on": args.punch_on,
+            "shake_amp": args.shake, "shake_on": args.shake_on,
+            "parts": args.parts, "parts_on": args.parts_on,
+            "parts_speed": args.parts_speed, "parts_life": args.parts_life,
+            "ring": args.ring, "ring_on": args.ring_on,
+            "grid_pulse": args.grid_pulse, "grid_on": args.grid_on,
+            "bg_flash": args.bg_flash, "flash_on": args.flash_on,
             "screen_title": (args.title if args.title is not None
                              else os.path.splitext(os.path.basename(args.music))[0]),
             "backdrop": args.backdrop,

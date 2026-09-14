@@ -40,7 +40,7 @@ from mpc_performance import (  # noqa: E402
 )
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
-    pick_split_times, VERSION,
+    pick_split_times, VERSION, INSTRUMENTS, TRAVELLINGS,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -111,6 +111,16 @@ def safe_name(name):
     return name[:120]
 
 
+def _dans(valeur, permises, defaut):
+    """Un nom venu de la page, ramene a ceux que le moteur connait.
+
+    La page peut etre ouverte dans un onglet reste sur une version plus
+    ancienne : mieux vaut retomber sur la valeur par defaut que lever une
+    erreur au milieu d'un rendu.
+    """
+    return valeur if valeur in permises else defaut
+
+
 def look_from(q):
     """Traduit les reglages de la page en arguments du moteur."""
     pal = q.get("palette", "vert")
@@ -140,6 +150,23 @@ def look_from(q):
         "backdrop_strength": float(q.get("bdStrength", 0.78)),
         "backdrop_clear": float(q.get("bdClear", 0.40)),
         "screen_dim": float(q.get("screenDim", 0.40)),
+        "travel": float(q.get("travel", 0.0)),
+        "travel_mode": _dans(q.get("travelMode"), TRAVELLINGS, "avant"),
+        # ---- reactions au son
+        "punch": float(q.get("punch", 0.032)),
+        "punch_on": _dans(q.get("punchOn"), INSTRUMENTS, "grosse caisse"),
+        "shake_amp": float(q.get("shake", 0.0)),
+        "shake_on": _dans(q.get("shakeOn"), INSTRUMENTS, "grosse caisse"),
+        "parts": float(q.get("parts", 0.0)),
+        "parts_on": _dans(q.get("partsOn"), INSTRUMENTS, "caisse claire"),
+        "parts_speed": float(q.get("partsSpeed", 1.0)),
+        "parts_life": float(q.get("partsLife", 0.55)),
+        "ring": float(q.get("ring", 0.0)),
+        "ring_on": _dans(q.get("ringOn"), INSTRUMENTS, "grosse caisse"),
+        "grid_pulse": float(q.get("gridPulse", 0.0)),
+        "grid_on": _dans(q.get("gridOn"), INSTRUMENTS, "grosse caisse"),
+        "bg_flash": float(q.get("bgFlash", 0.0)),
+        "flash_on": _dans(q.get("flashOn"), INSTRUMENTS, "caisse claire"),
     }
 
 
@@ -235,9 +262,13 @@ class Studio:
         # wave_smooth passe par une methode : il faut relisser la courbe
         POSE = ("wobble", "split", "split_px", "split_count", "snare",
                 "wave_gain", "wave_win", "wave_trig", "wave_passes",
-                "wave_punch", "trail", "screen_title")
+                "wave_punch", "trail", "screen_title",
+                "punch", "punch_on", "shake_amp", "shake_on",
+                "parts", "parts_on", "parts_speed", "parts_life",
+                "ring", "ring_on", "grid_pulse", "grid_on",
+                "bg_flash", "flash_on")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
-                        "backdrop_clear", "screen_dim")
+                        "backdrop_clear", "screen_dim", "travel", "travel_mode")
         r.set_look(palette, **{k: v for k, v in kw.items() if k not in APART})
         for k in POSE:
             setattr(r, k, kw[k])
@@ -250,14 +281,25 @@ class Studio:
         r._split_t = None            # le classement depend de split_count
         bd = kw["backdrop"]
         stamp = (bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
-                 kw["screen_dim"], round(float(t), 1))
-        if bd and getattr(r, "_bd_stamp", None) != stamp:
-            r.backdrop = load_backdrop(
-                bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
-                scale=r.scale, screen_dim=kw["screen_dim"], seek=float(t))
-            r._bd_stamp = stamp
-        elif not bd:
-            r.backdrop, r._bd_stamp = None, None
+                 kw["screen_dim"], round(float(t), 1),
+                 kw["travel"], kw["travel_mode"])
+        # set_look, plus haut, remet le fond a zero — il fait partie de
+        # l'allure. On le repose donc ici a chaque fois, en ne le rechargeant
+        # que si un de ses reglages a bouge : sans cela, tout apercu qui ne
+        # rechargeait pas le fond le perdait purement et simplement.
+        if bd:
+            if getattr(r, "_bd_stamp", None) != stamp:
+                # le travelling s'etale sur tout le morceau : l'apercu montre
+                # le cadre de l'instant regarde, pas celui du debut
+                r._bd = load_backdrop(
+                    bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
+                    scale=r.scale, screen_dim=kw["screen_dim"], seek=float(t),
+                    travel=kw["travel"], travel_mode=kw["travel_mode"],
+                    dur=max(tr["info"]["duration"], 1e-3))
+                r._bd_stamp = stamp
+            r.backdrop = r._bd
+        else:
+            r.backdrop, r._bd, r._bd_stamp = None, None, None
         dur = tr["info"]["duration"]
         # l'apercu montre le morceau tel qu'il joue, sans les fondus des bords
         t = max(0.6, min(float(t), dur - 0.8))
@@ -398,6 +440,8 @@ class Handler(BaseHTTPRequestHandler):
                                      "fond": rgb_to_hex(v[3])}
                                  for k, v in sorted(PALETTES.items())},
                     "fonds": list(BACKGROUNDS),
+                    "instruments": list(INSTRUMENTS),
+                    "travellings": list(TRAVELLINGS),
                 })
             if u.path == "/still":
                 q["curve"] = q.get("curve", "1") == "1"
@@ -532,6 +576,7 @@ PAGE = r"""<!doctype html>
   .drop:hover,.drop.over{border-color:var(--acc);color:var(--ink)}
   .drop b{color:var(--acc);display:block;margin-bottom:4px;letter-spacing:.08em}
   #shot.calcul{opacity:.35;transition:opacity .2s}
+  select.inst{margin:2px 0 10px;font-size:11px;color:var(--dim)}
   #shoterr{display:none;margin-top:8px;padding:8px 10px;border-radius:6px;
     font-size:12px;line-height:1.45;background:#2a1416;border:1px solid #6b2b30;
     color:#ffb4b4}
@@ -626,10 +671,17 @@ PAGE = r"""<!doctype html>
       <input type="range" id="bdClear" min="0" max="1" step="0.05" value="0.40">
       <label for="screenDim">opacite de la dalle &mdash; <span id="v-sd">0.40</span></label>
       <input type="range" id="screenDim" min="0" max="1" step="0.05" value="0.40">
+      <label for="travel">travelling &mdash; <span id="v-tv">0 %</span> de l'image parcourue</label>
+      <input type="range" id="travel" min="0" max="0.5" step="0.01" value="0">
+      <label for="travelMode">sens du travelling</label>
+      <select id="travelMode"></select>
       <button class="ghost" id="bdclear" style="margin-top:8px">retirer le fond</button>
       <p class="hint">Sur une video, l'apercu montre l'image de l'instant
         regarde ; le rendu, lui, la joue en entier (et la boucle si elle est
-        plus courte que le morceau).</p>
+        plus courte que le morceau).<br>
+        Le travelling s'etale sur tout le morceau : l'image est chargee plus
+        grande que l'ecran et on s'y deplace lentement. Quelques pour cent
+        suffisent a lui oter son air de decor colle derriere la machine.</p>
     </div>
   </div>
 
@@ -656,6 +708,50 @@ PAGE = r"""<!doctype html>
     <p class="hint">Sur les coups graves vraiment appuyes — et seulement
       ceux-la — les trois couches de couleur du trait se separent, puis se
       recollent quand le coup retombe. Le fond, lui, ne bouge pas.</p>
+  </div>
+
+  <div class="card">
+    <h2>Reactions au son</h2>
+    <p class="hint" style="margin-top:0">Chaque reaction se cale sur
+      l'instrument de votre choix : la batterie est reconnue a l'analyse, donc
+      « caisse claire » veut vraiment dire caisse claire. A zero, la reaction
+      est eteinte.</p>
+
+    <label for="punch">zoom d'impact &mdash; <span id="v-pu">0.03</span></label>
+    <input type="range" id="punch" min="0" max="0.25" step="0.005" value="0.032">
+    <select id="punchOn" class="inst"></select>
+
+    <label for="shake">secousse de l'image &mdash; <span id="v-sh">0.00</span></label>
+    <input type="range" id="shake" min="0" max="2" step="0.05" value="0">
+    <select id="shakeOn" class="inst"></select>
+
+    <label for="parts">etincelles ejectees &mdash; <span id="v-pa">0.00</span></label>
+    <input type="range" id="parts" min="0" max="3" step="0.05" value="0">
+    <select id="partsOn" class="inst"></select>
+    <div class="row">
+      <div>
+        <label for="partsSpeed">vitesse &mdash; <span id="v-pas">1.00</span></label>
+        <input type="range" id="partsSpeed" min="0.2" max="2.5" step="0.05" value="1">
+      </div>
+      <div>
+        <label for="partsLife">duree &mdash; <span id="v-pal">0.55</span> s</label>
+        <input type="range" id="partsLife" min="0.15" max="1.5" step="0.05" value="0.55">
+      </div>
+    </div>
+
+    <label for="ring">onde de choc &mdash; <span id="v-ri">0.00</span></label>
+    <input type="range" id="ring" min="0" max="3" step="0.05" value="0">
+    <select id="ringOn" class="inst"></select>
+
+    <label for="gridPulse">pulsation de la grille &mdash; <span id="v-gp">0.00</span></label>
+    <input type="range" id="gridPulse" min="0" max="3" step="0.05" value="0">
+    <select id="gridOn" class="inst"></select>
+
+    <label for="bgFlash">eclat du fond &mdash; <span id="v-bf">0.00</span></label>
+    <input type="range" id="bgFlash" min="0" max="2" step="0.05" value="0">
+    <select id="flashOn" class="inst"></select>
+    <p class="hint">L'eclat du fond ne se voit que s'il y a une image ou une
+      video derriere la machine.</p>
   </div>
 
   <div class="card">
@@ -767,6 +863,14 @@ function params() {
     wavePunch: $('#wavePunch').value, backdrop,
     bdStrength: $('#bdStrength').value, bdClear: $('#bdClear').value,
     screenDim: $('#screenDim').value,
+    travel: $('#travel').value, travelMode: $('#travelMode').value,
+    punch: $('#punch').value, punchOn: $('#punchOn').value,
+    shake: $('#shake').value, shakeOn: $('#shakeOn').value,
+    parts: $('#parts').value, partsOn: $('#partsOn').value,
+    partsSpeed: $('#partsSpeed').value, partsLife: $('#partsLife').value,
+    ring: $('#ring').value, ringOn: $('#ringOn').value,
+    gridPulse: $('#gridPulse').value, gridOn: $('#gridOn').value,
+    bgFlash: $('#bgFlash').value, flashOn: $('#flashOn').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
   return p;
@@ -824,6 +928,13 @@ const bind = (id, out, dec) => { $(id).oninput = e => {
 bind('#splitCount','#v-sc',0); bind('#splitPx','#v-spx',0);
 bind('#snare','#v-sn',2); bind('#wave','#v-wv',2); bind('#wavePunch','#v-wp',2);
 bind('#bdStrength','#v-bds',2); bind('#bdClear','#v-bdc',2); bind('#screenDim','#v-sd',2);
+bind('#punch','#v-pu',3); bind('#shake','#v-sh',2); bind('#parts','#v-pa',2);
+bind('#partsSpeed','#v-pas',2); bind('#partsLife','#v-pal',2);
+bind('#ring','#v-ri',2); bind('#gridPulse','#v-gp',2); bind('#bgFlash','#v-bf',2);
+$('#travel').oninput = e => {
+  $('#v-tv').textContent = Math.round(+e.target.value * 100) + ' %'; shot(); };
+for (const id of ['#travelMode','#punchOn','#shakeOn','#partsOn','#ringOn',
+                  '#gridOn','#flashOn']) $(id).onchange = shot;
 
 /* ---- fond : image ou video ---- */
 let backdrop = '';
@@ -949,7 +1060,25 @@ function watch(id) {
    de servir l'ancien moteur apres un git pull, et on cherche longtemps
    pourquoi une nouveaute « n'est pas la ». */
 fetch('/config').then(r => r.json())
-  .then(c => { if (c.version) $('#ver').textContent = c.version; })
+  .then(c => {
+    if (c.version) $('#ver').textContent = c.version;
+    // Les instruments et les sens de travelling viennent du moteur : la page
+    // n'en garde pas sa propre copie, qui finirait par diverger.
+    const remplir = (sel, liste, choisi) => {
+      $(sel).innerHTML = liste.map(
+        v => '<option value="' + v + '"' + (v === choisi ? ' selected' : '')
+             + '>' + (sel === '#travelMode' ? v : 'sur : ' + v) + '</option>'
+      ).join('');
+    };
+    for (const [sel, def] of [['#punchOn', 'grosse caisse'],
+                              ['#shakeOn', 'grosse caisse'],
+                              ['#partsOn', 'caisse claire'],
+                              ['#ringOn', 'grosse caisse'],
+                              ['#gridOn', 'grosse caisse'],
+                              ['#flashOn', 'caisse claire']])
+      remplir(sel, c.instruments || [], def);
+    remplir('#travelMode', c.travellings || [], 'avant');
+  })
   .catch(() => {});
 
 /* ---------- divers ---------- */

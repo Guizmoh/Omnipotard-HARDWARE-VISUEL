@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-14.6"
+VERSION = "2026-09-14.7"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -56,6 +56,59 @@ PALETTES = {
 # du trait. Toutes ces textures restent donc sombres, et se creusent derriere
 # la machine (voir `clear`) pour qu'elle garde son relief.
 BACKGROUNDS = ("noir", "uni", "grille", "points", "scan", "degrade", "bruit")
+
+
+TRAVELLINGS = ("aucun", "avant", "arriere", "gauche", "droite", "haut", "bas")
+
+
+def _sample2d(src, xs, ys):
+    """Echantillonnage bilineaire aux coordonnees demandees, axe par axe.
+
+    Le cadre n'est jamais tourne : echantillonner les lignes puis les colonnes
+    donne exactement le meme resultat qu'un filtrage bilineaire complet, pour
+    deux gathers au lieu de quatre.
+    """
+    hs, ws = src.shape[:2]
+    x0 = np.clip(np.floor(xs), 0, ws - 2).astype(np.int32)
+    y0 = np.clip(np.floor(ys), 0, hs - 2).astype(np.int32)
+    fx = (xs - x0)[None, :, None]
+    fy = (ys - y0)[:, None, None]
+    lig = src[y0] * (1.0 - fy) + src[y0 + 1] * fy           # (h, ws, 3)
+    return (lig[:, x0] * (1.0 - fx) + lig[:, x0 + 1] * fx).astype(np.float32)
+
+
+def travel_crop(src, u, amount, mode, w, h):
+    """Le cadre de l'instant u, decoupe dans une image chargee avec de la marge.
+
+    C'est le travelling : la photo est plus grande que l'ecran, et on s'y
+    promene du debut a la fin du morceau — on entre dedans, on s'en eloigne,
+    ou on la balaye. Une image fixe derriere une machine qui bouge finit par
+    sembler collee ; un mouvement lent, meme de quelques pour cent, suffit a
+    lui rendre de la profondeur.
+    """
+    hs, ws = src.shape[:2]
+    if amount <= 1e-4 or mode == "aucun" or (hs <= h and ws <= w):
+        return src[:h, :w]
+    u = min(max(float(u), 0.0), 1.0)
+    mx, my = ws - w, hs - h                     # marge disponible, en pixels
+    if mode in ("avant", "arriere"):
+        k = u if mode == "avant" else 1.0 - u   # avant : le cadre se resserre
+        cw, ch = ws - mx * k, hs - my * k
+        x0, y0 = (ws - cw) * 0.5, (hs - ch) * 0.5
+    else:
+        cw, ch = float(w), float(h)
+        x0, y0 = mx * 0.5, my * 0.5
+        if mode == "droite":
+            x0 = mx * u
+        elif mode == "gauche":
+            x0 = mx * (1.0 - u)
+        elif mode == "bas":
+            y0 = my * u
+        elif mode == "haut":
+            y0 = my * (1.0 - u)
+    xs = np.linspace(x0, x0 + cw - 1.0, w, dtype=np.float32)
+    ys = np.linspace(y0, y0 + ch - 1.0, h, dtype=np.float32)
+    return _sample2d(src, xs, ys)
 
 
 def _backdrop_mask(w, h, strength, clear, scale, screen_dim):
@@ -88,17 +141,35 @@ def _backdrop_mask(w, h, strength, clear, scale, screen_dim):
 
 
 class StillBackdrop:
-    """Fond fixe : la meme image sur toute la video."""
+    """Fond fixe : la meme image sur toute la video, eventuellement parcourue.
 
-    def __init__(self, img):
-        self.img = img
+    L'image et le masque sont gardes separes. Le masque — le creux derriere la
+    machine et la dalle opaque — appartient a l'ecran, pas a la photo : si on
+    le multipliait une fois pour toutes, le creux se promenerait avec l'image
+    pendant le travelling.
+    """
+
+    def __init__(self, img, mask, dur=1.0, travel=0.0, travel_mode="avant"):
+        self.img, self.mask = img, mask
+        self.dur = max(float(dur), 1e-3)
+        self.travel, self.mode = float(travel), travel_mode
+        self.h, self.w = mask.shape[0], mask.shape[1]
+        self._fixe = None
 
     def at(self, t):
-        return self.img
+        if self.travel <= 1e-4 or self.mode == "aucun":
+            if self._fixe is None:
+                self._fixe = np.ascontiguousarray(
+                    self.img[:self.h, :self.w] * self.mask, dtype=np.float32)
+            return self._fixe
+        cadre = travel_crop(self.img, t / self.dur, self.travel, self.mode,
+                            self.w, self.h)
+        return np.ascontiguousarray(cadre * self.mask, dtype=np.float32)
 
 
 def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
-                  screen_dim=0.40, seek=0.0):
+                  screen_dim=0.40, seek=0.0, travel=0.0, travel_mode="avant",
+                  dur=1.0):
     """Charge une image de fond et la prepare pour la dalle.
 
     Passe par ffmpeg, donc accepte tout ce qu'il lit (jpg, png, webp, et meme
@@ -118,23 +189,30 @@ def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
     if seek > 0:
         duree = media_duration(path)
         seek = seek % duree if duree > 0.5 else 0.0
+    # Avec un travelling, on charge plus grand que l'ecran : c'est cette marge
+    # qu'on parcourt. Elle est prise sur l'image d'origine, donc le cadre reste
+    # net d'un bout a l'autre — l'agrandir apres coup le rendrait flou.
+    aw, ah = w, h
+    if travel > 1e-4 and travel_mode != "aucun":
+        aw = int(round(w * (1.0 + travel)))
+        ah = int(round(h * (1.0 + travel)))
     out = subprocess.run(
         ["ffmpeg", "-v", "error"]
         + (["-ss", "%.3f" % seek] if seek > 0 else [])
         + ["-i", path,
          "-vf", "scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d"
-                % (w, h, w, h),
+                % (aw, ah, aw, ah),
          "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if out.returncode or len(out.stdout) < w * h * 3:
+    if out.returncode or len(out.stdout) < aw * ah * 3:
         raise RuntimeError(_fond_illisible(path, out.stderr))
-    out = out.stdout
-    img = (np.frombuffer(out, dtype=np.uint8)[:w * h * 3]
-           .reshape(h, w, 3).astype(np.float32) / 255.0)
+    img = (np.frombuffer(out.stdout, dtype=np.uint8)[:aw * ah * 3]
+           .reshape(ah, aw, 3).astype(np.float32) / 255.0)
     if blur > 0:
         img = np.stack([gauss(img[:, :, c], blur) for c in range(3)], axis=-1)
-    img *= _backdrop_mask(w, h, strength, clear, scale, screen_dim)
-    return StillBackdrop(np.ascontiguousarray(img, dtype=np.float32))
+    return StillBackdrop(np.ascontiguousarray(img, dtype=np.float32),
+                         _backdrop_mask(w, h, strength, clear, scale, screen_dim),
+                         dur=dur, travel=travel, travel_mode=travel_mode)
 
 
 def _fond_illisible(path, err=b""):
@@ -199,7 +277,8 @@ class VideoBackdrop:
     DIV = 3            # les vignettes font le tiers de la definition finale
 
     def __init__(self, path, w, h, fps, duration, strength=0.80, clear=0.45,
-                 scale=None, blur=2.2, screen_dim=0.40, cache_dir=None):
+                 scale=None, blur=2.2, screen_dim=0.40, cache_dir=None,
+                 travel=0.0, travel_mode="avant"):
         try:
             from PIL import Image                # noqa: F401 -- verifie tot
         except ImportError:
@@ -210,7 +289,12 @@ class VideoBackdrop:
         self.w, self.h = w, h
         self.mask = _backdrop_mask(w, h, strength, clear, scale, screen_dim)
         self.fps = float(fps)
-        sw, sh = max(16, w // self.DIV), max(16, h // self.DIV)
+        self.dur = max(float(duration), 1e-3)
+        self.travel, self.mode = float(travel), travel_mode
+        marge = (1.0 + self.travel) if (self.travel > 1e-4
+                                        and travel_mode != "aucun") else 1.0
+        sw = max(16, int(w * marge) // self.DIV)
+        sh = max(16, int(h * marge) // self.DIV)
 
         key = "%s-%d-%d-%d-%d-%.2f-%.2f" % (
             os.path.basename(path), os.path.getsize(path), sw, sh,
@@ -243,12 +327,20 @@ class VideoBackdrop:
     def at(self, t):
         from PIL import Image
         i = min(len(self.files) - 1, max(0, int(t * self.fps + 0.5)))
-        if self._cache[0] == i:
-            return self._cache[1]
+        if self._cache[0] == i and self.travel <= 1e-4:
+            return self._cache[1]        # sans travelling, le cadre ne bouge pas
         im = Image.open(os.path.join(self.dir, self.files[i])).convert("RGB")
-        if im.size != (self.w, self.h):
-            im = im.resize((self.w, self.h), Image.BILINEAR)
-        img = (np.asarray(im, dtype=np.float32) / 255.0) * self.mask
+        # la vignette est agrandie a la taille du cadre a parcourir, puis on y
+        # decoupe l'instant voulu — comme pour une photo
+        cible = (int(round(self.w * (1.0 + self.travel)))
+                 if self.travel > 1e-4 and self.mode != "aucun" else self.w)
+        cibleh = (int(round(self.h * (1.0 + self.travel)))
+                  if self.travel > 1e-4 and self.mode != "aucun" else self.h)
+        if im.size != (cible, cibleh):
+            im = im.resize((cible, cibleh), Image.BILINEAR)
+        img = np.asarray(im, dtype=np.float32) / 255.0
+        img = travel_crop(img, t / self.dur, self.travel, self.mode,
+                          self.w, self.h) * self.mask
         img = np.ascontiguousarray(img, dtype=np.float32)
         self._cache = (i, img)
         return img
@@ -258,7 +350,9 @@ def make_backdrop(path, w, h, fps=30, duration=0.0, **kw):
     """Image ou video, selon ce que contient le fichier."""
     if duration > 0 and is_video(path):
         return VideoBackdrop(path, w, h, fps, duration, **kw)
-    return load_backdrop(path, w, h, **kw)
+    # une photo a besoin de connaitre la duree du morceau : c'est sur elle que
+    # s'etale le travelling
+    return load_backdrop(path, w, h, dur=max(duration, 1e-3), **kw)
 
 
 def hex_to_rgb(x):
@@ -861,6 +955,20 @@ BASSLINE = (((0, "A1", 6), (10, "C2", 4)),)
 
 # pad allume par famille d'evenement (grille 4x4, 0 = en bas a gauche)
 PAD_OF = {"kick": 0, "rim": 5, "hat": 10, "perc": 6}
+
+# Les familles sur lesquelles chaque effet peut se caler. C'est la meme liste
+# partout : une fois la batterie reconnue, pointer une reaction sur la caisse
+# claire plutot que sur la grosse caisse ne demande qu'un nom.
+FAMILLES = {
+    "grosse caisse": (0,),
+    "basse": (1, 2, 3),
+    "caisse claire": (5,),
+    "percussions": (6,),
+    "charley": (10, 11),
+    "accords": (12, 13, 14, 15),
+    "tout": None,
+}
+INSTRUMENTS = tuple(FAMILLES)
 PAD_BASS = {"A1": 1, "G1": 1, "C2": 2, "D2": 2, "E2": 3}
 PAD_SKANK = (12, 13, 14, 15)
 DECAY_OF = {"kick": 4.5, "rim": 8.0, "hat": 14.0, "perc": 13.0,
@@ -1396,6 +1504,25 @@ class Renderer:
                 out[int(pad)] = max(out.get(int(pad), 0.0), float(val))
         return out
 
+    def hit_env(self, t, famille, fall=9.0, win=0.55, seuil=0.0):
+        """Enveloppe des coups d'une famille d'instruments a l'instant t.
+
+        Attaque immediate sur le coup, puis retombee exponentielle : c'est la
+        forme que toutes les reactions partagent, seule la vitesse de chute
+        change. Renvoyer une valeur continue plutot qu'un declenchement permet
+        aux effets de retomber au lieu de clignoter.
+        """
+        pads = FAMILLES.get(famille, FAMILLES["grosse caisse"])
+        dt = t - self.ev_t
+        m = (dt >= 0.0) & (dt < win)
+        if seuil > 0.0:
+            m &= self.ev_f >= seuil
+        if pads is not None:
+            m &= np.isin(self.ev_pad, pads)
+        if not np.any(m):
+            return 0.0
+        return float(np.max(self.ev_f[m] * np.exp(-fall * dt[m])))
+
     def kick_hit(self, t):
         """Enveloppe des grosses caisses seules : sert au zoom de l'image."""
         dt = t - self.ev_t
@@ -1546,6 +1673,9 @@ class Renderer:
     # -- couches -----------------------------------------------------------
 
     def _grid(self, beam, t, alpha, collapse):
+        if self.grid_pulse > 0.01:
+            alpha = alpha * (1.0 + 2.4 * self.grid_pulse
+                             * self.hit_env(t, self.grid_on, fall=11.0))
         if alpha <= 0.003:
             return
         for x in np.linspace(-1.6, 1.6, 9):
@@ -1556,6 +1686,83 @@ class Renderer:
             P = np.stack([np.linspace(-1.66, 1.66, 380), np.full(380, y)], axis=1)
             px, py = self.to_px(P, collapse)
             beam.add(px, py, 0.080 * alpha)
+
+    def _etincelles(self, beam, t, collapse):
+        """Etincelles ejectees par la machine a chaque coup.
+
+        Elles partent du bord du chassis, filent vers l'exterieur et
+        s'eteignent. Chaque coup a son jet, tire d'un tirage seme par le numero
+        de l'evenement : deux rendus de la meme video donnent donc exactement
+        les memes etincelles, ce dont le calcul en parallele a besoin.
+        """
+        if self.parts <= 0.01:
+            return
+        pads = FAMILLES.get(self.parts_on, None)
+        vie = max(0.12, float(self.parts_life))
+        dt = t - self.ev_t
+        m = (dt >= 0.0) & (dt < vie) & (self.ev_f > 0.16)
+        if pads is not None:
+            m &= np.isin(self.ev_pad, pads)
+        idx = np.nonzero(m)[0]
+        if len(idx) == 0:
+            return
+        n = max(3, int(round(14 * self.parts)))
+        # Le faisceau pose un point a la fois : pour qu'une etincelle soit un
+        # filet continu et non une file de points, on l'echantillonne a pas
+        # constant, comme tout le reste du dessin. Le pas etant fixe en unites
+        # du monde, la meme etincelle garde sa densite en 4K comme en 540p.
+        PAS = 0.0030
+        for i in idx[-6:]:                      # au plus six jets simultanes
+            age = float((t - self.ev_t[i]) / vie)
+            force = float(self.ev_f[i])
+            r = np.random.default_rng(7919 + int(i))
+            a = r.uniform(0.0, 2.0 * math.pi, n)
+            v = (0.55 + 0.90 * r.random(n)) * float(self.parts_speed)
+            # depart juste en dehors du chassis : posees dessus, les etincelles
+            # se confondent avec le dessin de la machine et passent pour du bruit
+            ox, oy = 1.37 * np.cos(a), 0.71 * np.sin(a)
+            # course mesuree : assez pour se detacher du chassis, pas assez
+            # pour traverser l'ecran et devenir une rayure
+            course = 1.15 * v * (0.45 + force)
+            d1 = course * max(0.0, age - 0.18) ** 0.75
+            d0 = course * age ** 0.75
+            k = int(np.clip(float(np.max(d0 - d1)) / PAS, 6, 110))
+            s_ = np.linspace(0.0, 1.0, k)[None, :]
+            dd = d1[:, None] + (d0 - d1)[:, None] * s_
+            px = (ox[:, None] + np.cos(a)[:, None] * dd).ravel()
+            # une retombee legere : sans elle, les jets sont trop reguliers
+            py = (oy[:, None] + np.sin(a)[:, None] * dd - 0.30 * dd * dd).ravel()
+            sx, sy = self.to_px(np.stack([px, py], axis=1), collapse)
+            # tete vive, traine qui s'efface : une etincelle d'intensite egale
+            # sur toute sa longueur ressemble a un trait tire a la regle
+            profil = np.repeat((0.22 + 0.78 * s_ ** 2), n, axis=0).ravel()
+            beam.add(sx, sy, profil * 1.5 * self.parts * (0.30 + force)
+                     * (1.0 - age) ** 2)
+
+    def _onde(self, beam, t, collapse):
+        """Onde de choc : un anneau qui s'ouvre depuis la machine et s'efface."""
+        if self.ring <= 0.01:
+            return
+        pads = FAMILLES.get(self.ring_on, None)
+        vie = 0.62
+        dt = t - self.ev_t
+        m = (dt >= 0.0) & (dt < vie) & (self.ev_f > 0.22)
+        if pads is not None:
+            m &= np.isin(self.ev_pad, pads)
+        idx = np.nonzero(m)[0]
+        if len(idx) == 0:
+            return
+        a = np.linspace(0.0, 2.0 * math.pi, 260)
+        ca, sa = np.cos(a), np.sin(a)
+        for i in idx[-3:]:
+            age = float((t - self.ev_t[i]) / vie)
+            # l'anneau part du bord du chassis : ne plus bas, il traverserait
+            # les pads et passerait pour une rayure sur la machine
+            r = 0.92 + 1.45 * age ** 0.62       # vite au depart, puis ralentit
+            P = np.stack([r * 1.32 * ca, r * 0.76 * sa], axis=1)
+            px, py = self.to_px(P, collapse)
+            beam.add(px, py, 1.7 * self.ring * (0.30 + float(self.ev_f[i]))
+                     * (1.0 - age) ** 1.9)
 
     def _hud(self, beam, t, collapse, alpha):
         if alpha <= 0.01:
@@ -2035,6 +2242,25 @@ class Renderer:
     # simples valeurs, pas des fonctions greffees : le moteur reste ainsi
     # transmissible tel quel aux processus de rendu, y compris sous Windows
     # ou ceux-ci ne sont pas des copies du processus principal.
+    # ---- reactions au son : chacune se cale sur la famille d'instruments de
+    # son choix (voir FAMILLES). Zero partout = la machine seule, comme avant.
+    punch = 0.032        # zoom d'impact : l'image respire sur le coup
+    punch_on = "grosse caisse"
+    shake_amp = 0.0      # secousse : l'image est bousculee sur le coup
+    shake_on = "grosse caisse"
+    parts = 0.0          # etincelles ejectees par la machine
+    parts_on = "caisse claire"
+    parts_speed = 1.0
+    parts_life = 0.55
+    ring = 0.0           # onde de choc : un anneau qui s'ouvre
+    ring_on = "grosse caisse"
+    grid_pulse = 0.0     # la grille du fond s'allume sur le coup
+    grid_on = "grosse caisse"
+    bg_flash = 0.0       # le fond est eclaire par le coup
+    flash_on = "caisse claire"
+    travel = 0.0         # travelling sur le fond (part de l'image parcourue)
+    travel_mode = "avant"
+
     step_phase = None   # instant du premier pas du sequenceur (None = intro)
     drops = None        # instants des paroxysmes du morceau (None = intro)
     drop_dur = 0.22     # duree d'une rafale de glitch, en secondes
@@ -2138,7 +2364,12 @@ class Renderer:
         # le travaillent comme le reste de la dalle.
         img += self.c_bg
         if self.backdrop is not None:
-            img += self.backdrop.at(t)
+            fond = self.backdrop.at(t)
+            if self.bg_flash > 0.01:
+                # le fond est eclaire par le coup, comme par un flash de studio
+                fond = fond * (1.0 + 1.8 * self.bg_flash
+                               * self.hit_env(t, self.flash_on, fall=13.0))
+            img += fond
 
         yy = np.arange(H, dtype=np.float32)[:, None]
         period = max(2.0, H / 360.0)
