@@ -121,6 +121,7 @@ def load_full_track(path, start, duration, sr=SR):
 def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True,
                               seed=7, palette="vert", wobble=0.0, split=1.0,
                               split_px=11.0, split_count=3,
+                              split_on="grosse caisse",
                               snare=1.0, wave_gain=1.10, trail=1.0, screen_title="",
                               wave_win=0.070, wave_smooth=56, wave_trig=0.0,
                               wave_passes=1, wave_punch=0.85,
@@ -137,7 +138,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
-    r.split_count = int(split_count)
+    r.split_count, r.split_on = int(split_count), str(split_on)
     r.snare, r.wave_gain = float(snare), float(wave_gain)
     r.trail, r.screen_title = float(trail), str(screen_title or "")
     r.wave_win, r.wave_trig = float(wave_win), float(wave_trig)
@@ -367,7 +368,10 @@ def add_look_args(ap):
     ap.add_argument("--split-px", type=float, default=11.0,
                     help="ecart des copies, en pixels ramenes a 540p")
     ap.add_argument("--split-count", type=int, default=3,
-                    help="nombre de declenchements dans toute la video")
+                    help="nombre de declenchements dans toute la video "
+                         "(plafonne par la duree : un au plus toutes les 25 s)")
+    ap.add_argument("--split-on", default="grosse caisse", choices=INSTRUMENTS,
+                    help="coups autorises a declencher le dedoublement")
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=1.10,
@@ -427,7 +431,7 @@ def look_kwargs(args):
             "bg_strength": args.bg_strength,
             "bg_clear": args.bg_clear,
             "wobble": args.wobble, "split": args.split, "split_px": args.split_px,
-            "split_count": args.split_count,
+            "split_count": args.split_count, "split_on": args.split_on,
             "snare": args.snare, "wave_gain": args.wave, "trail": args.trail,
             "wave_win": args.wave_win, "wave_smooth": args.wave_smooth,
             "wave_trig": args.wave_trig, "wave_passes": args.wave_passes,

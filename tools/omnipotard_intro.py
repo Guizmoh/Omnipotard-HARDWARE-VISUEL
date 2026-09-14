@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-14.7"
+VERSION = "2026-09-14.8"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1543,8 +1543,22 @@ class Renderer:
         """Les quelques instants ou le trait se dedouble, pour toute la video."""
         if getattr(self, "_split_t", None) is None:
             self._split_t = pick_split_times(
-                self.ev_t, self.ev_f, self.ev_bass, self.dur, self.split_count)
+                self.ev_t, self.ev_f, self.split_mask(), self.dur,
+                self.split_count)
         return self._split_t
+
+    def split_mask(self):
+        """Les coups qui ont le droit de declencher le dedoublement.
+
+        Par defaut la grosse caisse seule. Auparavant tout le grave etait
+        admis, notes de basse comprises — or une ligne de basse tombe souvent
+        sur le meme temps que la caisse claire, et l'effet avait alors l'air
+        de se declencher sur elle.
+        """
+        pads = FAMILLES.get(self.split_on, FAMILLES["grosse caisse"])
+        if pads is None:
+            return np.ones(len(self.ev_pad), dtype=bool)
+        return np.isin(self.ev_pad, pads)
 
     def sub_hit(self, t):
         """Enveloppe du dedoublement : attaque immediate, longue descente.
@@ -2228,6 +2242,7 @@ class Renderer:
     split = 1.0       # dedoublement chromatique du trait sur les gros subs
     split_px = 11.0   # ecart des copies, en pixels ramenes a 540p
     split_count = 3   # combien de fois il se declenche dans toute la video
+    split_on = "grosse caisse"   # sur quels coups il a le droit de partir
     wave_win = CURVE_WIN   # base de temps libre (s), quand wave_trig vaut 0
     wave_trig = 0.0        # balayage declenche : largeur d'ecran, en temps
     wave_passes = 1        # passages de lissage : 3 coupe franchement l'aigu
@@ -2811,18 +2826,29 @@ def _salience(e, fps, idx, ahead=0.02):
     return np.array([e[max(0, i - 1):i + w].max() / base[i] for i in idx])
 
 
-def pick_split_times(ev_t, ev_f, ev_bass, dur, count):
+ECART_SPLIT = 25.0        # secondes minimum entre deux dedoublements
+
+
+def pick_split_times(ev_t, ev_f, eligibles, dur, count):
     """Les instants ou le trait se dedouble, pour toute une video.
 
     Un seuil ne conviendrait pas : selon le mixage il ne se declencherait
-    jamais, ou vingt fois. On classe donc les coups graves par force et on
-    garde les `count` plus gros, en refusant deux instants trop rapproches —
-    l'effet doit rester un evenement, pas une ponctuation.
+    jamais, ou vingt fois. On classe donc les coups retenus par force et on
+    garde les plus gros, en refusant deux instants trop rapproches — l'effet
+    doit rester un evenement, pas une ponctuation.
+
+    Deux garde-fous, et non un seul. L'ecart minimum est d'abord une vraie
+    duree en secondes, pas seulement une fraction du morceau : sur un extrait
+    de vingt secondes, une fraction laissait passer trois declenchements en
+    dix-sept secondes. Le nombre demande est ensuite plafonne par ce que la
+    duree peut contenir a cet ecart-la — « trois fois par video » ne veut rien
+    dire si la video dure quinze secondes.
     """
-    gap = max(1.2, 0.14 * dur)
+    gap = max(ECART_SPLIT, 0.14 * dur)
+    count = min(int(count), 1 + int(dur / max(gap, 1.0)))
     out = []
     for i in np.argsort(-np.asarray(ev_f)):
-        if not ev_bass[i]:
+        if not eligibles[i]:
             continue
         t = float(ev_t[i])
         if any(abs(t - u) < gap for u in out):

@@ -40,7 +40,7 @@ from mpc_performance import (  # noqa: E402
 )
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
-    pick_split_times, VERSION, INSTRUMENTS, TRAVELLINGS,
+    pick_split_times, VERSION, INSTRUMENTS, TRAVELLINGS, FAMILLES,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -134,6 +134,7 @@ def look_from(q):
         "wobble": float(q.get("wobble", 0.0)),
         "split": float(q.get("split", 1.0)),
         "split_count": int(float(q.get("splitCount", 3))),
+        "split_on": _dans(q.get("splitOn"), INSTRUMENTS, "grosse caisse"),
         "snare": float(q.get("snare", 1.0)),
         "wave_gain": float(q.get("wave", 1.10)),
         "wave_win": float(q.get("waveWin", 0.070)),
@@ -260,7 +261,7 @@ class Studio:
         # set_look ne connait que la couleur et le fond ; les deux autres
         # reglages se posent directement sur l'instance
         # wave_smooth passe par une methode : il faut relisser la courbe
-        POSE = ("wobble", "split", "split_px", "split_count", "snare",
+        POSE = ("wobble", "split", "split_px", "split_count", "split_on", "snare",
                 "wave_gain", "wave_win", "wave_trig", "wave_passes",
                 "wave_punch", "trail", "screen_title",
                 "punch", "punch_on", "shake_amp", "shake_on",
@@ -453,8 +454,11 @@ class Handler(BaseHTTPRequestHandler):
                 ev = tr["info"]["_audio"]["events"]
                 t = np.array([e[0] for e in ev])
                 f = np.array([e[2] for e in ev])
-                bass = np.array([e[1] <= 3 for e in ev])
-                st = pick_split_times(t, f, bass, tr["info"]["duration"],
+                pads = FAMILLES.get(_dans(q.get("on"), INSTRUMENTS,
+                                          "grosse caisse"))
+                ok = (np.ones(len(ev), bool) if pads is None
+                      else np.array([e[1] in pads for e in ev]))
+                st = pick_split_times(t, f, ok, tr["info"]["duration"],
                                       int(float(q.get("count", 3))))
                 return self._json({"times": [round(float(x), 2) for x in st]})
 
@@ -691,8 +695,9 @@ PAGE = r"""<!doctype html>
     <input type="range" id="split" min="0" max="2.5" step="0.05" value="1">
     <label for="wobble">ondulation du trace &mdash; <span id="v-wob">0.00</span></label>
     <input type="range" id="wobble" min="0" max="1.5" step="0.05" value="0">
-    <label for="splitCount">nombre de dedoublements dans la video &mdash; <span id="v-sc">3</span></label>
+    <label for="splitCount">dedoublements dans la video &mdash; au plus <span id="v-sc">3</span></label>
     <input type="range" id="splitCount" min="0" max="12" step="1" value="3">
+    <select id="splitOn" class="inst"></select>
     <label for="splitPx">ecart des copies &mdash; <span id="v-spx">11</span> px</label>
     <input type="range" id="splitPx" min="0" max="30" step="1" value="11">
     <label for="snare">eclair jaune sur la caisse claire &mdash; <span id="v-sn">1.00</span></label>
@@ -705,9 +710,14 @@ PAGE = r"""<!doctype html>
     <input type="range" id="trail" min="0" max="2.5" step="0.05" value="1">
     <label for="title">titre affiche sur la dalle</label>
     <input type="text" id="title" maxlength="22" placeholder="nom du fichier">
-    <p class="hint">Sur les coups graves vraiment appuyes — et seulement
-      ceux-la — les trois couches de couleur du trait se separent, puis se
-      recollent quand le coup retombe. Le fond, lui, ne bouge pas.</p>
+    <p class="hint">Sur les coups vraiment appuyes — et seulement ceux-la —
+      les trois couches de couleur du trait se separent, puis se recollent
+      quand le coup retombe. Le fond, lui, ne bouge pas.<br>
+      Le nombre est un plafond, pas une consigne : deux dedoublements ne
+      peuvent pas tomber a moins de 25 secondes l'un de l'autre, et une video
+      courte en recoit donc moins. Par defaut ils ne partent que sur la grosse
+      caisse — la basse, souvent posee sur le meme temps que la caisse claire,
+      donnait l'impression qu'ils se declenchaient sur elle.</p>
   </div>
 
   <div class="card">
@@ -859,6 +869,7 @@ function params() {
     trail: $('#trail').value, title: $('#title').value,
     fallbackTitle: ($('#title').placeholder || ''),
     splitCount: $('#splitCount').value, splitPx: $('#splitPx').value,
+    splitOn: $('#splitOn').value,
     snare: $('#snare').value, wave: $('#wave').value,
     wavePunch: $('#wavePunch').value, backdrop,
     bdStrength: $('#bdStrength').value, bdClear: $('#bdClear').value,
@@ -934,7 +945,7 @@ bind('#ring','#v-ri',2); bind('#gridPulse','#v-gp',2); bind('#bgFlash','#v-bf',2
 $('#travel').oninput = e => {
   $('#v-tv').textContent = Math.round(+e.target.value * 100) + ' %'; shot(); };
 for (const id of ['#travelMode','#punchOn','#shakeOn','#partsOn','#ringOn',
-                  '#gridOn','#flashOn']) $(id).onchange = shot;
+                  '#gridOn','#flashOn','#splitOn']) $(id).onchange = shot;
 
 /* ---- fond : image ou video ---- */
 let backdrop = '';
@@ -972,7 +983,8 @@ $('#scrub').oninput     = e => { $('#v-t').textContent = (+e.target.value).toFix
 $('#toSplit').onclick = async () => {
   if (!track) return;
   const j = await (await fetch('/splits?track=' + track +
-                               '&count=' + $('#splitCount').value)).json();
+                               '&count=' + $('#splitCount').value +
+                               '&on=' + encodeURIComponent($('#splitOn').value))).json();
   const ts = j.times || [];
   if (!ts.length) return setStatus('aucun dedoublement sur ce morceau');
   const t = +$('#scrub').value;
@@ -1070,7 +1082,8 @@ fetch('/config').then(r => r.json())
              + '>' + (sel === '#travelMode' ? v : 'sur : ' + v) + '</option>'
       ).join('');
     };
-    for (const [sel, def] of [['#punchOn', 'grosse caisse'],
+    for (const [sel, def] of [['#splitOn', 'grosse caisse'],
+                              ['#punchOn', 'grosse caisse'],
                               ['#shakeOn', 'grosse caisse'],
                               ['#partsOn', 'caisse claire'],
                               ['#ringOn', 'grosse caisse'],

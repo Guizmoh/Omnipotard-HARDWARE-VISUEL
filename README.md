@@ -487,6 +487,14 @@ claire » veut vraiment dire caisse claire. À zéro, la réaction est éteinte.
 Les instruments disponibles : `grosse caisse`, `basse`, `caisse claire`,
 `percussions`, `charley`, `accords`, `tout`.
 
+Le **dédoublement chromatique** se règle de la même façon (`--split-on`,
+défaut : la grosse caisse). Son nombre est un **plafond, pas une consigne** :
+deux dédoublements ne peuvent pas tomber à moins de 25 secondes l'un de
+l'autre, si bien qu'une vidéo courte en reçoit moins qu'un morceau entier.
+Auparavant le réglage valait « trois fois, quelle que soit la durée » — sur un
+extrait de vingt secondes, les trois se tassaient et couvraient un tiers de la
+vidéo au lieu d'un quarantième.
+
 Tout est dessiné **au faisceau**, comme la machine : les étincelles sont
 échantillonnées à pas constant en unités du monde, donc elles gardent la même
 densité en 4K qu'en 540p, et elles passent par le même halo et les mêmes
