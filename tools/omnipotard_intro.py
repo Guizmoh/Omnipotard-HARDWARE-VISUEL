@@ -103,11 +103,15 @@ def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
     """
     # `seek` sert a l'apercu : sur une video de fond on n'extrait qu'une image,
     # celle de l'instant regarde, au lieu de detailler tout le fichier. On
-    # repli l'instant sur la duree du fond, puisque le rendu le boucle — sans
+    # replie l'instant sur la duree du fond, puisque le rendu le boucle — sans
     # quoi demander la 170e seconde d'une video qui en dure douze ne renvoie
     # rien du tout.
+    #
+    # Une photo, elle, n'a pas de duree : lui demander sa quarantieme seconde
+    # ne renvoie rien non plus. On ne la cherche donc pas la ou elle n'est pas.
     if seek > 0:
-        seek = seek % (media_duration(path) or 1e9)
+        duree = media_duration(path)
+        seek = seek % duree if duree > 0.5 else 0.0
     out = subprocess.run(
         ["ffmpeg", "-v", "error"]
         + (["-ss", "%.3f" % seek] if seek > 0 else [])
@@ -115,13 +119,32 @@ def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
          "-vf", "scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d"
                 % (w, h, w, h),
          "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-        stdout=subprocess.PIPE, check=True).stdout
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if out.returncode or len(out.stdout) < w * h * 3:
+        raise RuntimeError(_fond_illisible(path, out.stderr))
+    out = out.stdout
     img = (np.frombuffer(out, dtype=np.uint8)[:w * h * 3]
            .reshape(h, w, 3).astype(np.float32) / 255.0)
     if blur > 0:
         img = np.stack([gauss(img[:, :, c], blur) for c in range(3)], axis=-1)
     img *= _backdrop_mask(w, h, strength, clear, scale, screen_dim)
     return StillBackdrop(np.ascontiguousarray(img, dtype=np.float32))
+
+
+def _fond_illisible(path, err=b""):
+    """Ce qu'on dit quand ffmpeg ne tire rien d'un fichier de fond.
+
+    Il lui arrive de s'arreter net, mais aussi de finir sans erreur et sans
+    rien produire — un format qu'il ne decode pas (les photos HEIC des
+    telephones, typiquement) ou un fichier tronque. Dans les deux cas, mieux
+    vaut une phrase lisible qu'une ligne de commande de trois cents signes ou
+    un « cannot reshape array of size 0 » surgi beaucoup plus loin.
+    """
+    lignes = (err or b"").decode("utf-8", "replace").strip().splitlines()
+    detail = (" (%s)" % lignes[-1][:120]) if lignes else ""
+    return ("ffmpeg n'a pas pu lire le fond « %s »%s. Si c'est une photo prise "
+            "au telephone, elle est sans doute au format HEIC : reenregistrez-la "
+            "en JPEG ou en PNG." % (os.path.basename(path), detail))
 
 
 def media_duration(path):
@@ -197,11 +220,13 @@ class VideoBackdrop:
                   % (sw, sh, sw, sh))
             if blur > 0:
                 vf += ",gblur=sigma=%.2f" % max(0.4, blur / self.DIV)
-            subprocess.run(
+            r = subprocess.run(
                 ["ffmpeg", "-v", "error", "-y", "-stream_loop", "-1", "-i", path,
                  "-t", "%.3f" % (duration + 1.0 / max(fps, 1)),
                  "-vf", vf, "-r", "%.4f" % fps, "-q:v", "4",
-                 os.path.join(self.dir, "%06d.jpg")], check=True)
+                 os.path.join(self.dir, "%06d.jpg")], stderr=subprocess.PIPE)
+            if r.returncode:
+                raise RuntimeError(_fond_illisible(path, r.stderr))
             open(done, "w").close()
 
         self.files = sorted(f for f in os.listdir(self.dir) if f.endswith(".jpg"))

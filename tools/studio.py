@@ -463,9 +463,11 @@ class Handler(BaseHTTPRequestHandler):
                     f.write(body)
                 try:                        # ffmpeg doit savoir le lire
                     load_backdrop(path, 64, 36)
-                except Exception:           # noqa: BLE001
+                except Exception as e:      # noqa: BLE001
                     os.remove(path)
-                    return self._fail("ffmpeg ne sait pas lire ce fichier")
+                    # on repasse le vrai motif : il nomme le format en cause,
+                    # ce qu'un « ffmpeg ne sait pas lire ce fichier » taisait
+                    return self._fail(e)
                 return self._json({"name": name, "video": is_video(path)})
 
             if u.path == "/render":
