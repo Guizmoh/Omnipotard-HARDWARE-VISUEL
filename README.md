@@ -93,7 +93,7 @@ marquage et grille de haut-parleur en bas.
 ## Rendu
 
 ```bash
-pip install numpy pillow          # pillow seulement pour --stills
+pip install numpy pillow          # pillow : --stills et les fonds animés
 
 # ffmpeg, selon la machine :
 brew install ffmpeg               # macOS
@@ -350,9 +350,10 @@ racine du projet :
 | macOS, Linux | `Lancer-le-studio.command` |
 | Windows | `Lancer-le-studio.bat` |
 
-Il trouve Python, installe `numpy` s'il manque, **télécharge ffmpeg** s'il
-n'est pas là, démarre le studio et **laisse la fenêtre ouverte** si quelque
-chose se passe mal — sans quoi le message d'erreur disparaît avant d'être lu.
+Il trouve Python, installe `numpy` et `pillow` s'ils manquent, **télécharge
+ffmpeg** s'il n'est pas là, démarre le studio et **laisse la fenêtre ouverte**
+si quelque chose se passe mal — sans quoi le message d'erreur disparaît avant
+d'être lu.
 
 Sous Windows, ffmpeg est posé dans le sous-dossier `bin/` du projet plutôt
 que dans le système : pas de droits administrateur, pas de `PATH` à modifier,
@@ -363,7 +364,7 @@ En ligne de commande, c'est :
 ```bash
 git clone https://github.com/Guizmoh/Glitch-visualisateur.git
 cd Glitch-visualisateur
-pip install numpy                 # ffmpeg : voir « Rendu » plus haut
+pip install numpy pillow          # ffmpeg : voir « Rendu » plus haut
 python3 tools/studio.py
 # le navigateur s'ouvre sur http://127.0.0.1:8765
 ```

@@ -16,11 +16,12 @@ if [ -z "$PY" ]; then
     exit 1
 fi
 
-# numpy est la seule dependance a installer ; on la pose si elle manque
-if ! "$PY" -c "import numpy" >/dev/null 2>&1; then
-    echo "Installation de numpy (une seule fois)..."
-    "$PY" -m pip install --quiet numpy || {
-        echo "L'installation a echoue. Essayez :  $PY -m pip install numpy"
+# Deux dependances a poser, une seule fois : numpy pour tout le calcul
+# d'image, pillow pour les fonds animes (les vignettes de la video).
+if ! "$PY" -c "import numpy, PIL" >/dev/null 2>&1; then
+    echo "Installation de numpy et pillow (une seule fois)..."
+    "$PY" -m pip install --quiet numpy pillow || {
+        echo "L'installation a echoue. Essayez :  $PY -m pip install numpy pillow"
         read -r -p "Appuyez sur Entree pour fermer."
         exit 1
     }

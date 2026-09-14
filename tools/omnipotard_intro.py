@@ -170,7 +170,13 @@ class VideoBackdrop:
 
     def __init__(self, path, w, h, fps, duration, strength=0.80, clear=0.45,
                  scale=None, blur=2.2, screen_dim=0.40, cache_dir=None):
-        from PIL import Image                    # noqa: F401 -- verifie tot
+        try:
+            from PIL import Image                # noqa: F401 -- verifie tot
+        except ImportError:
+            raise RuntimeError(
+                "un fond anime a besoin de la bibliotheque pillow. "
+                "A installer une seule fois avec :  pip install pillow  "
+                "(une image fixe en fond, elle, fonctionne sans)")
         self.w, self.h = w, h
         self.mask = _backdrop_mask(w, h, strength, clear, scale, screen_dim)
         self.fps = float(fps)
@@ -1146,6 +1152,11 @@ class Renderer:
     def glitch_at(self, t):
         """Quantite de glitch a l'instant t : coups ponctuels, puis rafales
         continues pendant l'extinction."""
+        if self.drops is not None:
+            # rendu « performance » : une rafale courte sur chaque paroxysme
+            dt = t - self.drops
+            m = (dt >= 0.0) & (dt < self.drop_dur)
+            return float(np.max(1.0 - dt[m] / self.drop_dur)) if np.any(m) else 0.0
         f = self.dur / Timeline.REF
         g = 0.0
         for gt, gd in GLITCHES:
@@ -1324,7 +1335,9 @@ class Renderer:
         return float(np.clip((n - 1) / 3.0, 0.0, 1.0))
 
     def step_index(self, t):
-        return int((t - self.tl.start("groove")) / self.six) % 16
+        t0 = (self.tl.start("groove") if self.step_phase is None
+              else self.step_phase)
+        return int((t - t0) / self.six) % 16
 
     # -- geometrie ecran ---------------------------------------------------
 
@@ -1345,6 +1358,26 @@ class Renderer:
         Q[:, 0] = SCR_C[0] + P[:, 0] * SCR_S
         Q[:, 1] = SCR_C[1] + yc * SCR_S
         return Q, m
+
+    # Tables de deformation cathodique : elles pesent une centaine de
+    # megaoctets en 4K alors qu'elles se deduisent de la seule definition de
+    # l'image. On ne les transmet donc pas aux taches de rendu (voir
+    # __getstate__), qui les refont a l'arrivee en une poignee de secondes.
+    _WARP = ("wfx", "wfy", "wi00", "wi01", "wi10", "wi11", "wmask")
+
+    def __getstate__(self):
+        """Ce qu'on envoie a une tache de rendu.
+
+        Sous Windows les taches ne sont pas des copies du processus principal :
+        elles demarrent vierges et recoivent le moteur serialise. Tout ce qui
+        se recalcule vite n'a pas a faire le voyage.
+        """
+        return {k: v for k, v in self.__dict__.items() if k not in self._WARP}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if self.curve:
+            self._build_warp()
 
     def _build_warp(self):
         W, H = self.W, self.H
@@ -1856,6 +1889,14 @@ class Renderer:
     trail = 1.0       # trainee de la bande, d'autant plus longue qu'il y a
                       # d'instruments qui jouent
     screen_title = ""  # nom du morceau, affiche dans le bandeau de la dalle
+    # Le rendu « performance » (tools/mpc_performance.py) cale le sequenceur
+    # sur le morceau et declenche les glitchs sur ses paroxysmes. Ce sont de
+    # simples valeurs, pas des fonctions greffees : le moteur reste ainsi
+    # transmissible tel quel aux processus de rendu, y compris sous Windows
+    # ou ceux-ci ne sont pas des copies du processus principal.
+    step_phase = None   # instant du premier pas du sequenceur (None = intro)
+    drops = None        # instants des paroxysmes du morceau (None = intro)
+    drop_dur = 0.22     # duree d'une rafale de glitch, en secondes
 
     def set_look(self, palette="vert", bg=None, bg_color=None,
                  bg_strength=1.0, bg_clear=0.55):
@@ -2021,7 +2062,33 @@ class Renderer:
 #  Pipeline
 # ==========================================================================
 
+def pool_context():
+    """Comment demarrer les taches de rendu.
+
+    `fork` duplique le processus en cours : instantane, et la memoire reste
+    partagee tant que personne n'y ecrit. C'est le choix naturel sous Linux et
+    macOS — mais il n'existe pas sous Windows, ou il faut lancer des
+    interpreteurs neufs (`spawn`) et leur transmettre le moteur. La variable
+    d'environnement OMNIPOTARD_MP force l'un ou l'autre, ce qui sert a
+    eprouver le chemin Windows depuis une autre machine.
+    """
+    import multiprocessing as mp
+    forced = os.environ.get("OMNIPOTARD_MP", "").strip().lower()
+    for name in ([forced] if forced else []) + ["fork", "spawn"]:
+        try:
+            return mp.get_context(name)
+        except ValueError:
+            continue
+    return mp.get_context()
+
+
 _R = None
+
+
+def _init_worker(r):
+    """Installe le moteur dans une tache qui demarre vierge (spawn)."""
+    global _R
+    _R = r
 
 
 def _worker(i):
@@ -2152,9 +2219,9 @@ def main():
     t0 = time.time()
     try:
         if args.jobs > 1:
-            import multiprocessing as mp
             chunk = max(args.jobs, 24)
-            with mp.get_context("fork").Pool(args.jobs) as pool:
+            with pool_context().Pool(args.jobs, initializer=_init_worker,
+                                     initargs=(_R,)) as pool:
                 for start in range(0, nframes, chunk):
                     for buf in pool.map(_worker, range(start, min(nframes, start + chunk)), 1):
                         proc.stdin.write(buf)

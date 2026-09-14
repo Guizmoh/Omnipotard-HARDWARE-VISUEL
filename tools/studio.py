@@ -154,6 +154,10 @@ def backdrop_path(name):
 #  Etat : analyses et rendus en cours
 # --------------------------------------------------------------------------
 
+class Depasse(Exception):
+    """Un apercu demande puis remplace par un autre avant d'etre dessine."""
+
+
 class Studio:
     """Garde en memoire ce qui coute cher a recalculer.
 
@@ -169,6 +173,11 @@ class Studio:
         self.renderers = {}       # (id, w, h, curve) -> Renderer
         self.jobs = {}            # id -> etat d'un rendu
         self.render_lock = threading.Lock()
+        # Le moteur garde en memoire est repose avant chaque apercu (couleur,
+        # fond, reglages). Deux apercus menes de front se marcheraient donc
+        # dessus : on n'en dessine qu'un a la fois.
+        self.draw = threading.Lock()
+        self.shot_seq = 0         # numero du dernier apercu demande
 
     # ---- morceaux
     def add_track(self, path, name):
@@ -194,6 +203,19 @@ class Studio:
         couleur et le fond, eux, n'en dependent pas — on les repose sur le
         moteur existant, et bouger un curseur redevient instantane.
         """
+        with self.lock:
+            self.shot_seq += 1
+            mine = self.shot_seq
+        with self.draw:
+            with self.lock:
+                if mine != self.shot_seq:
+                    # Un reglage a bouge pendant qu'on attendait : cette image
+                    # ne sera jamais regardee. La calculer ferait patienter
+                    # celle qui compte, sur une machine modeste d'autant plus.
+                    raise Depasse()
+            return self._still(tid, t, q, w, h)
+
+    def _still(self, tid, t, q, w, h):
         tr = self.track(tid)
         palette, kw = look_from(q)
         key = (tid, w, h, bool(q.get("curve", True)))
@@ -299,19 +321,39 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):                      # silence les logs HTTP
         pass
 
+    def handle_one_request(self):
+        self._begun = False          # une connexion peut servir plusieurs fois
+        return BaseHTTPRequestHandler.handle_one_request(self)
+
     # ---- reponses
+    #
+    # Une reponse part en une seule fois, et une seule. Si l'envoi echoue a
+    # mi-parcours — l'onglet a coupe la connexion parce qu'un reglage a bouge
+    # et que l'apercu precedent ne l'interesse plus — il ne faut surtout pas
+    # en poster une deuxieme derriere : le navigateur recollerait l'image a
+    # moitie envoyee et l'en-tete de la suivante, et afficherait une image
+    # coupee en deux, comme un fichier abime. D'ou ce drapeau.
+    _begun = False
+
     def _send(self, code, ctype, body, extra=None):
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        for k, v in (extra or {}).items():
-            self.send_header(k, v)
-        self.end_headers()
+        if self._begun:
+            return
+        self._begun = True
         try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
-            pass                                          # onglet ferme en cours de route
+        except OSError:
+            # Connexion coupee par le navigateur. Unix appelle cela un tube
+            # brise ou une remise a zero, Windows un abandon (WinError 10053) :
+            # trois exceptions differentes, une seule situation, parfaitement
+            # normale. On ratisse donc large plutot que de nommer chaque cas.
+            pass
 
     def _json(self, obj, code=200):
         self._send(code, "application/json; charset=utf-8",
@@ -365,6 +407,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, "video/mp4", body, {
                     "Content-Disposition": 'attachment; filename="%s"' % job["name"]})
             self._fail("page inconnue", 404)
+        except Depasse:
+            # l'apercu suivant est deja en route : celui-ci n'a plus lieu d'etre
+            self._send(409, "text/plain; charset=utf-8", b"apercu depasse")
         except Exception as e:                            # noqa: BLE001
             traceback.print_exc()
             self._fail(e, 500)

@@ -38,7 +38,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
-    detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF,
+    detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, pool_context,
 )
 
 
@@ -96,22 +96,6 @@ def detect_drops(mono, sr, min_gap=7.0, thresh=0.60, rise=0.16):
     return out
 
 
-def make_glitch_fn(drops, dur=0.22):
-    """Meme langage visuel que l'intro : une rafale courte qui retombe."""
-    d = np.asarray(drops, dtype=np.float64)
-
-    def glitch_at(t):
-        if len(d) == 0:
-            return 0.0
-        dt = t - d
-        m = (dt >= 0.0) & (dt < dur)
-        if not np.any(m):
-            return 0.0
-        return float(np.max(1.0 - dt[m] / dur))
-
-    return glitch_at
-
-
 def load_full_track(path, start, duration, sr=SR):
     """Decode le morceau tel quel (pas de montage, pas de FX synthetises) et
     en extrait le tempo et les coups de batterie."""
@@ -163,8 +147,8 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.tl.seg["groove"] = (-1e9, 1e9)   # pads/enveloppes actifs des t=0
     r.tl.seg["zoom"] = far             # l'ecran de la machine reste visible
     r.tl.seg["out"] = far              # pas d'extinction automatique
-    r.step_index = lambda t: int((t - phi) / r.six) % 16   # phase reelle
-    r.glitch_at = make_glitch_fn(drops)   # glitchs sur les paroxysmes du morceau
+    r.step_phase = float(phi)                     # phase reelle du morceau
+    r.drops = np.asarray(drops, dtype=np.float64)  # glitchs sur les paroxysmes
     return r
 
 
@@ -198,6 +182,17 @@ def frame_performance(r, t, duration):
 
 _R = None
 _DUR = 0.0
+
+
+def _init_worker(r, dur):
+    """Installe le moteur dans une tache qui demarre vierge (spawn).
+
+    Sous Unix les taches heritent de tout ce que le processus principal avait
+    en memoire ; sous Windows elles demarrent d'un interpreteur neuf, et c'est
+    ici qu'on leur donne de quoi travailler.
+    """
+    global _R, _DUR
+    _R, _DUR = r, dur
 
 
 def _worker(i):
@@ -281,9 +276,9 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
     t0 = time.time()
     try:
         if jobs > 1:
-            import multiprocessing as mp
             chunk = max(jobs, 24)
-            with mp.get_context("fork").Pool(jobs) as pool:
+            with pool_context().Pool(jobs, initializer=_init_worker,
+                                     initargs=(_R, _DUR)) as pool:
                 for s0 in range(0, nframes, chunk):
                     idx = range(s0, min(nframes, s0 + chunk))
                     for buf in pool.map(_worker, idx, chunksize=1):

@@ -24,15 +24,16 @@ if not defined PY (
     exit /b 1
 )
 
-REM numpy est la seule bibliotheque a installer ; on la pose si elle manque
-%PY% -c "import numpy" >nul 2>&1
+REM Deux bibliotheques a poser, une seule fois : numpy pour tout le calcul
+REM d'image, pillow pour les fonds animes (les vignettes de la video).
+%PY% -c "import numpy, PIL" >nul 2>&1
 if errorlevel 1 (
-    echo Installation de numpy ^(une seule fois, patientez^)...
-    %PY% -m pip install --quiet numpy
+    echo Installation de numpy et pillow ^(une seule fois, patientez^)...
+    %PY% -m pip install --quiet numpy pillow
     if errorlevel 1 (
         echo.
         echo   L'installation a echoue. Essayez dans une invite de commandes :
-        echo       %PY% -m pip install numpy
+        echo       %PY% -m pip install numpy pillow
         echo.
         pause
         exit /b 1
