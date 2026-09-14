@@ -1298,6 +1298,9 @@ class Renderer:
         grave au lieu du detail du haut du spectre, qui donnait un tremblement
         illisible d'une image a l'autre.
         """
+        if self._mono is None:
+            raise RuntimeError("le lissage de la courbe se regle avant le rendu, "
+                               "pas dans une tache de rendu")
         w = self._mono.astype(np.float64)
         # Trois passages plutot qu'un : une moyenne glissante seule ne descend
         # qu'a 6 dB par octave et laisse passer assez d'aigu pour que le trace
@@ -1491,10 +1494,14 @@ class Renderer:
         """Ce qu'on envoie a une tache de rendu.
 
         Sous Windows les taches ne sont pas des copies du processus principal :
-        elles demarrent vierges et recoivent le moteur serialise. Tout ce qui
-        se recalcule vite n'a pas a faire le voyage.
+        elles demarrent vierges et recoivent le moteur serialise, chacune son
+        exemplaire. Tout ce qui se recalcule vite, ou ne sert qu'ici, reste
+        donc a quai — sur un morceau de quatre minutes en 1080p, cela fait
+        cent cinquante megaoctets de moins par tache.
         """
-        return {k: v for k, v in self.__dict__.items() if k not in self._WARP}
+        etat = {k: v for k, v in self.__dict__.items() if k not in self._WARP}
+        etat["_mono"] = None          # ne sert qu'a relisser la courbe
+        return etat
 
     def __setstate__(self, state):
         self.__dict__.update(state)
@@ -2190,6 +2197,71 @@ class Renderer:
 #  Pipeline
 # ==========================================================================
 
+def available_memory():
+    """Memoire vive encore libre, en megaoctets (0 si on ne sait pas).
+
+    C'est la memoire *disponible* qu'on veut, pas celle qui est installee :
+    sur une machine ou le systeme et le navigateur occupent deja la moitie de
+    la barrette, elle seule dit combien de taches de rendu tiendront. Chaque
+    systeme a son guichet, et aucun ne demande de bibliotheque en plus.
+    """
+    try:
+        if sys.platform.startswith("win"):
+            import ctypes
+
+            class _Etat(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            e = _Etat()
+            e.dwLength = ctypes.sizeof(_Etat)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(e)):
+                return e.ullAvailPhys / 1e6
+            return 0.0
+        with open("/proc/meminfo") as f:                  # Linux
+            for ligne in f:
+                if ligne.startswith("MemAvailable:"):
+                    return int(ligne.split()[1]) / 1024.0
+    except Exception:                                     # noqa: BLE001
+        pass
+    try:                                                  # macOS, BSD
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_AVPHYS_PAGES") / 1e6
+    except Exception:                                     # noqa: BLE001
+        return 0.0
+
+
+def fit_jobs(jobs, w, h, duration, method="fork"):
+    """Ramene le nombre de taches de rendu a ce que la memoire supporte.
+
+    Une tache coute d'autant plus cher que l'image est grande et le morceau
+    long. Sous Unix elles sont des copies du processus principal et se
+    partagent l'essentiel ; sous Windows chacune emporte son exemplaire
+    complet, et en lancer une par coeur sur un portable epuise la memoire
+    avant la fin du premier plan — le rendu s'arrete alors sur un MemoryError,
+    parfois apres une heure de calcul. Mieux vaut quelques taches de moins.
+
+    Les deux estimations viennent de mesures : a definition egale, une tache
+    « spawn » pese environ trois fois une tache « fork ».
+    """
+    mpx = w * h / 1e6
+    if method == "spawn":
+        besoin = 40.0 + 0.20 * duration + 122.0 * mpx     # tout est en double
+    else:
+        besoin = 35.0 + 47.0 * mpx                        # le reste est partage
+    marge = 600.0 + 70.0 * mpx                            # ffmpeg, et le systeme
+    libre = available_memory()
+    if libre <= 0.0:
+        return jobs                        # systeme inconnu : on ne decide rien
+    return max(1, min(jobs, int((libre - marge) / besoin)))
+
+
 def pool_context():
     """Comment demarrer les taches de rendu.
 
@@ -2346,10 +2418,18 @@ def main():
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     t0 = time.time()
     try:
+        ctx = pool_context()
+        if args.jobs > 1:
+            demande = args.jobs
+            args.jobs = fit_jobs(args.jobs, args.width, args.height,
+                                 args.duration, ctx.get_start_method())
+            if args.jobs < demande:
+                print("  memoire disponible limitee : %d taches de rendu au lieu "
+                      "de %d" % (args.jobs, demande), flush=True)
         if args.jobs > 1:
             chunk = max(args.jobs, 24)
-            with pool_context().Pool(args.jobs, initializer=_init_worker,
-                                     initargs=(_R,)) as pool:
+            with ctx.Pool(args.jobs, initializer=_init_worker,
+                          initargs=(_R,)) as pool:
                 for start in range(0, nframes, chunk):
                     for buf in pool.map(_worker, range(start, min(nframes, start + chunk)), 1):
                         proc.stdin.write(buf)

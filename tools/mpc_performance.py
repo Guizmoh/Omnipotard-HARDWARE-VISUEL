@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
     detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, pool_context,
+    fit_jobs,
 )
 
 
@@ -276,9 +277,22 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
     t0 = time.time()
     try:
         if jobs > 1:
+            # Le moteur est construit : la memoire qu'il reste est celle dont
+            # les taches disposeront vraiment.
+            ctx = pool_context()
+            demande, jobs = jobs, fit_jobs(jobs, width, height, dur,
+                                           ctx.get_start_method())
+            info["jobs"] = jobs
+            if jobs < demande:
+                # Ecrit dans la fenetre du studio, qui reste ouverte : un rendu
+                # plus lent que prevu s'explique alors tout seul.
+                print("  memoire disponible limitee : %d taches de rendu au lieu "
+                      "de %d (fermez quelques fenetres pour aller plus vite)"
+                      % (jobs, demande), flush=True)
+        if jobs > 1:
             chunk = max(jobs, 24)
-            with pool_context().Pool(jobs, initializer=_init_worker,
-                                     initargs=(_R, _DUR)) as pool:
+            with ctx.Pool(jobs, initializer=_init_worker,
+                          initargs=(_R, _DUR)) as pool:
                 for s0 in range(0, nframes, chunk):
                     idx = range(s0, min(nframes, s0 + chunk))
                     for buf in pool.map(_worker, idx, chunksize=1):

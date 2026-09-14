@@ -225,7 +225,7 @@ class Studio:
             r = _renderer(tr["info"], w, h, 30, 7, bool(q.get("curve", True)),
                           palette, kw)
             with self.lock:
-                if len(self.renderers) > 4:        # ne pas garder tout l'historique
+                if len(self.renderers) > 2:        # ne pas garder tout l'historique
                     self.renderers.pop(next(iter(self.renderers)))
                 self.renderers[key] = r
         # set_look ne connait que la couleur et le fond ; les deux autres
@@ -281,6 +281,12 @@ class Studio:
     def _run(self, job, tr, q, start, dur):
         with self.render_lock:       # le moteur utilise des globales : un a la fois
             try:
+                # Un moteur d'apercu pese quelques centaines de megaoctets ;
+                # les garder pendant le rendu, c'est autant de place en moins
+                # pour les taches de calcul. On les relache, quitte a
+                # recalculer une image au retour.
+                with self.lock:
+                    self.renderers.clear()
                 job["state"] = "analyse"
                 palette, kw = look_from(q)
                 full = tr["info"]["duration"]
