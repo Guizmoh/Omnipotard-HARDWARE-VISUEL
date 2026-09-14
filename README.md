@@ -512,10 +512,53 @@ python3 tools/mpc_performance.py morceau.mp3 \
 Le coût est faible : toutes réactions allumées, une image 1080p passe de
 503 ms à 529 ms, soit 5 % de plus.
 
-Un dernier réglage, `--glitch`, dose les **glitchs sur les paroxysmes** — ces
-rafales de tranches décalées qui tombent sur les montées du morceau. À 0 ils
+Un réglage, `--glitch`, dose les **glitchs sur les paroxysmes** — ces rafales
+de tranches décalées qui tombent sur les montées du morceau. À 0 ils
 disparaissent complètement, ce qui est utile pour juger le reste : ils sont
 assez violents pour masquer tout ce qu'on cherche à régler.
+
+### Avaries d'image
+
+Les mêmes pannes, mais déclenchées par **ce qui est joué** plutôt que par les
+montées du morceau — et chacune, là encore, calable sur l'instrument de son
+choix.
+
+| réglage | ce que ça fait | option |
+| --- | --- | --- |
+| bandes arrachées | des tranches horizontales partent de travers | `--tranches`, `--tranches-on` |
+| blocs recopiés | des rectangles sont pris ailleurs dans l'image | `--blocs`, `--blocs-on` |
+| décrochage vertical | le tube perd sa synchro, l'image saute | `--roll`, `--roll-on` |
+| image fantôme | une copie décalée et transparente se superpose | `--ghost`, `--ghost-on` |
+| négatif du trait | le cœur du trait se replie vers le sombre | `--invert`, `--invert-on` |
+| bégaiement | l'image gèle pendant que le son continue | `--stut`, `--stut-on` |
+
+Elles s'appliquent à l'image finie, juste avant la déformation du tube — au
+même endroit que les glitchs de paroxysme, ce qui leur donne cet air de signal
+cassé plutôt que d'effet dessiné.
+
+Deux détails qui comptent. Le **négatif** n'est pas un vrai négatif : inverser
+franchement l'image passerait par un gris uniforme à mi-chemin, ce qui donne un
+voile au lieu d'un éclair, et rendrait le fond noir tout blanc. On replie donc
+seulement ce qui dépasse un seuil — le cœur du trait vire au sombre en gardant
+ses bords lumineux, et le fond reste noir. Le **bégaiement**, lui, n'est pas un
+effet appliqué à l'image mais un décalage du temps : la tâche de rendu calcule
+quel instant dessiner, ce qu'elle déduit seule, sans rien savoir des images
+voisines — c'est ce qui permet de le calculer en parallèle.
+
+Ces six-là frappent ou ne font rien : elles gardent un **plancher de 45 %**
+indépendant de la force du coup. Un morceau au mixage sage donne des coups qui
+pèsent 0,3, et un effet strictement proportionnel y resterait invisible quel
+que soit le réglage.
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --glitch 0 \
+    --tranches 1.5 --tranches-on "caisse claire" \
+    --invert 1.8 --invert-on "grosse caisse" \
+    --stut 0.10 --stut-on charley
+```
+
+Leur coût est nul à la mesure : 1080p, toutes allumées, 529 ms par image contre
+544 sans.
 
 ## STUDIO WEB — une page HTML, rien a installer
 

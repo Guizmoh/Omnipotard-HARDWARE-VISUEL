@@ -122,6 +122,12 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               seed=7, palette="vert", wobble=0.0, split=1.0,
                               split_px=11.0, split_count=3,
                               split_on="grosse caisse", glitch=1.0,
+                              tranches=0.0, tranches_on="caisse claire",
+                              roll=0.0, roll_on="grosse caisse",
+                              ghost=0.0, ghost_on="caisse claire",
+                              blocs=0.0, blocs_on="caisse claire",
+                              invert=0.0, invert_on="grosse caisse",
+                              stut=0.0, stut_on="charley",
                               snare=1.0, wave_gain=1.10, trail=1.0, screen_title="",
                               wave_win=0.070, wave_smooth=56, wave_trig=0.0,
                               wave_passes=1, wave_punch=0.85,
@@ -140,6 +146,12 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
     r.glitch = float(glitch)
+    r.tranches, r.tranches_on = float(tranches), str(tranches_on)
+    r.roll, r.roll_on = float(roll), str(roll_on)
+    r.ghost, r.ghost_on = float(ghost), str(ghost_on)
+    r.blocs, r.blocs_on = float(blocs), str(blocs_on)
+    r.invert, r.invert_on = float(invert), str(invert_on)
+    r.stut, r.stut_on = float(stut), str(stut_on)
     r.snare, r.wave_gain = float(snare), float(wave_gain)
     r.trail, r.screen_title = float(trail), str(screen_title or "")
     r.wave_win, r.wave_trig = float(wave_win), float(wave_trig)
@@ -174,6 +186,11 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
 
 def frame_performance(r, t, duration):
     rng = np.random.default_rng(r.seed + int(t * r.fps + 0.5))
+    # Le begaiement fige l'image sur l'instant du dernier coup : tout ce qui
+    # suit est donc calcule a cet instant-la. Le tirage aleatoire, lui, reste
+    # celui de l'image reelle — sans quoi le grain se figerait aussi et l'on
+    # verrait une image arretee plutot qu'une image qui bute.
+    t = r.stutter_time(t)
     # l'image respire sur l'instrument choisi, et peut aussi etre bousculee
     r._zoom = 1.0 + r.punch * r.hit_env(t, r.punch_on, fall=9.0)
     r._cam_z = 1.0                            # jamais de zoom dans l'ecran
@@ -385,6 +402,25 @@ def add_look_args(ap):
                     help="coups autorises a declencher le dedoublement")
     ap.add_argument("--glitch", type=float, default=1.0,
                     help="dosage des glitchs sur les paroxysmes (0 = aucun)")
+    # ---- avaries d'image declenchees par la batterie
+    ap.add_argument("--tranches", type=float, default=0.0,
+                    help="bandes horizontales arrachees sur le coup")
+    ap.add_argument("--tranches-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--roll", type=float, default=0.0,
+                    help="decrochage vertical du tube sur le coup")
+    ap.add_argument("--roll-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--ghost", type=float, default=0.0,
+                    help="image fantome decalee sur le coup")
+    ap.add_argument("--ghost-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--blocs", type=float, default=0.0,
+                    help="blocs recopies ailleurs, facon flux abime")
+    ap.add_argument("--blocs-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--invert", type=float, default=0.0,
+                    help="negatif bref sur le coup")
+    ap.add_argument("--invert-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--stut", type=float, default=0.0,
+                    help="begaiement : duree du gel de l'image, en secondes")
+    ap.add_argument("--stut-on", default="charley", choices=INSTRUMENTS)
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=1.10,
@@ -446,6 +482,12 @@ def look_kwargs(args):
             "wobble": args.wobble, "split": args.split, "split_px": args.split_px,
             "split_count": args.split_count, "split_on": args.split_on,
             "glitch": args.glitch,
+            "tranches": args.tranches, "tranches_on": args.tranches_on,
+            "roll": args.roll, "roll_on": args.roll_on,
+            "ghost": args.ghost, "ghost_on": args.ghost_on,
+            "blocs": args.blocs, "blocs_on": args.blocs_on,
+            "invert": args.invert, "invert_on": args.invert_on,
+            "stut": args.stut, "stut_on": args.stut_on,
             "snare": args.snare, "wave_gain": args.wave, "trail": args.trail,
             "wave_win": args.wave_win, "wave_smooth": args.wave_smooth,
             "wave_trig": args.wave_trig, "wave_passes": args.wave_passes,

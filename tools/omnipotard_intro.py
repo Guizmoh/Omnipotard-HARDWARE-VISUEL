@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-14.9"
+VERSION = "2026-09-14.10"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -59,6 +59,11 @@ BACKGROUNDS = ("noir", "uni", "grille", "points", "scan", "degrade", "bruit")
 
 
 TRAVELLINGS = ("aucun", "avant", "arriere", "gauche", "droite", "haut", "bas")
+
+# Part de l'effet qui ne depend pas de la force du coup. Une avarie d'image
+# doit frapper franchement ou ne rien faire : la doser au prorata d'une force
+# qui vaut 0,3 sur un mixage sage la rendrait invisible a tous les reglages.
+PLANCHER_AVARIE = 0.45
 
 
 def _sample2d(src, xs, ys):
@@ -1508,13 +1513,43 @@ class Renderer:
                 out[int(pad)] = max(out.get(int(pad), 0.0), float(val))
         return out
 
-    def hit_env(self, t, famille, fall=9.0, win=0.55, seuil=0.0):
+    def stutter_time(self, t):
+        """L'instant reellement dessine, quand le begaiement est actif.
+
+        Sur chaque coup retenu, l'image se fige pendant quelques centiemes :
+        le son continue, l'image non. C'est un decalage du temps, pas un effet
+        applique a l'image — d'ou son calcul ici, avant que quoi que ce soit
+        ne soit dessine. Et comme il ne depend que de l'instant demande,
+        chaque tache de rendu le retrouve seule, sans rien connaitre des
+        images voisines.
+        """
+        if self.stut <= 0.001 or len(self.ev_t) == 0:
+            return t
+        pads = FAMILLES.get(self.stut_on, FAMILLES["charley"])
+        dt = t - self.ev_t
+        m = dt >= 0.0
+        if pads is not None:
+            m &= np.isin(self.ev_pad, pads)
+        if not np.any(m):
+            return t
+        dernier = float(np.min(dt[m]))          # le coup le plus recent
+        if dernier >= self.stut:
+            return t
+        return t - dernier                      # on reste sur l'image du coup
+
+    def hit_env(self, t, famille, fall=9.0, win=0.55, seuil=0.0, plancher=0.0):
         """Enveloppe des coups d'une famille d'instruments a l'instant t.
 
         Attaque immediate sur le coup, puis retombee exponentielle : c'est la
         forme que toutes les reactions partagent, seule la vitesse de chute
         change. Renvoyer une valeur continue plutot qu'un declenchement permet
         aux effets de retomber au lieu de clignoter.
+
+        `plancher` releve la part de la force du coup : sur un morceau au
+        mixage sage, les coups pesent 0,3 et un effet proportionnel a la force
+        seule reste invisible quel que soit le reglage. Les avaries d'image,
+        qui doivent frapper ou ne rien faire, s'en servent ; les reactions
+        douces gardent la force nue.
         """
         pads = FAMILLES.get(famille, FAMILLES["grosse caisse"])
         dt = t - self.ev_t
@@ -1525,7 +1560,10 @@ class Renderer:
             m &= np.isin(self.ev_pad, pads)
         if not np.any(m):
             return 0.0
-        return float(np.max(self.ev_f[m] * np.exp(-fall * dt[m])))
+        f = self.ev_f[m]
+        if plancher > 0.0:
+            f = plancher + (1.0 - plancher) * f
+        return float(np.max(f * np.exp(-fall * dt[m])))
 
     def kick_hit(self, t):
         """Enveloppe des grosses caisses seules : sert au zoom de l'image."""
@@ -2334,6 +2372,21 @@ class Renderer:
     flash_on = "caisse claire"
     travel = 0.0         # travelling sur le fond (part de l'image parcourue)
     travel_mode = "avant"
+    # ---- reactions franchement glitchy, sur le coup plutot que sur un
+    # paroxysme : la difference avec `glitch` est la, il se declenche sur ce
+    # qu'on joue et non sur les montees du morceau.
+    tranches = 0.0       # bandes horizontales decalees
+    tranches_on = "caisse claire"
+    roll = 0.0           # decrochage vertical, comme un tube desynchronise
+    roll_on = "grosse caisse"
+    ghost = 0.0          # image fantome, decalee et attardee
+    ghost_on = "caisse claire"
+    blocs = 0.0          # blocs recopies ailleurs, facon flux abime
+    blocs_on = "caisse claire"
+    invert = 0.0         # negatif bref
+    invert_on = "grosse caisse"
+    stut = 0.0           # gel de l'image, en secondes
+    stut_on = "charley"
 
     step_phase = None   # instant du premier pas du sequenceur (None = intro)
     drops = None        # instants des paroxysmes du morceau (None = intro)
@@ -2379,6 +2432,82 @@ class Renderer:
         if x1s > x0s and y1s > y0s:
             out[y0d:y1d, x0d:x1d] = a[y0s:y1s, x0s:x1s]
         return out
+
+    def _reactions_glitch(self, img, t, rng):
+        """Les avaries d'image declenchees par la batterie.
+
+        Elles s'appliquent a l'image finie, juste avant la deformation du
+        tube — c'est la que se logent deja les glitchs de paroxysme, et c'est
+        ce qui leur donne cet air de panne de signal plutot que d'effet
+        dessine. Le tirage est celui de l'image, seme par son numero : deux
+        rendus de la meme video donnent les memes avaries.
+        """
+        H, W = self.H, self.W
+
+        # ---- bandes horizontales arrachees
+        a = self.tranches * self.hit_env(t, self.tranches_on, fall=16.0,
+                                 plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            for _ in range(int(2 + 14 * a)):
+                y0 = int(rng.integers(0, max(1, H - 4)))
+                y1 = min(H, y0 + int(rng.integers(3, max(6, int(H * 0.09 * a) + 5))))
+                off = int(rng.integers(-int(W * 0.09 * a) - 2, int(W * 0.09 * a) + 3))
+                img[y0:y1] = np.roll(img[y0:y1], off, axis=1)
+
+        # ---- blocs recopies d'ailleurs, comme un flux video abime
+        a = self.blocs * self.hit_env(t, self.blocs_on, fall=15.0,
+                              plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            cote = max(8, int(H * 0.055))
+            for _ in range(int(2 + 16 * a)):
+                bh = int(rng.integers(cote // 2, cote * 2))
+                bw = int(rng.integers(cote, cote * 3))
+                y0 = int(rng.integers(0, max(1, H - bh)))
+                x0 = int(rng.integers(0, max(1, W - bw)))
+                ys = int(rng.integers(0, max(1, H - bh)))
+                xs = int(rng.integers(0, max(1, W - bw)))
+                img[y0:y0 + bh, x0:x0 + bw] = img[ys:ys + bh, xs:xs + bw]
+
+        # ---- decrochage vertical : le tube perd sa synchro
+        a = self.roll * self.hit_env(t, self.roll_on, fall=14.0,
+                             plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            k = int(round(H * 0.16 * a * float(rng.uniform(0.5, 1.0))))
+            if k:
+                img[:] = np.roll(img, k, axis=0)
+                # la couture laisse une barre claire, comme sur un vrai tube
+                b = max(1, int(H * 0.004))
+                img[k:k + b] += 0.22 * a
+
+        # ---- image fantome : une copie decalee et attardee
+        a = self.ghost * self.hit_env(t, self.ghost_on, fall=10.0,
+                              plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            dx = int(round(W * 0.035 * a))
+            dy = int(round(H * 0.012 * a))
+            if dx or dy:
+                fant = np.zeros_like(img)
+                x0s, x1s = max(0, -dx), min(W, W - dx)
+                y0s, y1s = max(0, -dy), min(H, H - dy)
+                fant[max(0, dy):min(H, H + dy), max(0, dx):min(W, W + dx)] = \
+                    img[y0s:y1s, x0s:x1s]
+                img += fant * (0.55 * a)
+
+        # ---- negatif du trait (solarisation)
+        a = self.invert * self.hit_env(t, self.invert_on, fall=18.0,
+                                       plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            # Un negatif franc — 1 moins l'image — passe par un gris uniforme
+            # a mi-chemin : au lieu d'un eclair on obtient un voile, et le
+            # fond noir devient blanc. On replie donc seulement ce qui est
+            # au-dessus d'un seuil : le coeur du trait vire au sombre en
+            # gardant ses bords lumineux, et le fond reste noir. Par bandes,
+            # pour ne pas dupliquer l'image entiere.
+            seuil = np.float32(1.0 - 0.72 * min(1.0, a))
+            for y0 in range(0, self.H, self.BANDE):
+                b = img[y0:y0 + self.BANDE]
+                np.minimum(b, 2.0 * seuil - b, out=b)
+        return img
 
     def _split(self, img, amount):
         """Dedoublement chromatique du trait sur les gros coups de sub.
@@ -2458,6 +2587,8 @@ class Renderer:
 
         img += upsample(rng.standard_normal((H // 4, W // 4)).astype(np.float32),
                         4, (H, W))[..., None] * 0.011
+
+        self._reactions_glitch(img, t, rng)
 
         gl = self.glitch_at(t)
         if gl > 0.02:

@@ -136,6 +136,19 @@ def look_from(q):
         "split_count": int(float(q.get("splitCount", 3))),
         "split_on": _dans(q.get("splitOn"), INSTRUMENTS, "grosse caisse"),
         "glitch": float(q.get("glitch", 1.0)),
+        # ---- avaries d'image, declenchees par la batterie
+        "tranches": float(q.get("tranches", 0.0)),
+        "tranches_on": _dans(q.get("tranchesOn"), INSTRUMENTS, "caisse claire"),
+        "roll": float(q.get("roll", 0.0)),
+        "roll_on": _dans(q.get("rollOn"), INSTRUMENTS, "grosse caisse"),
+        "ghost": float(q.get("ghost", 0.0)),
+        "ghost_on": _dans(q.get("ghostOn"), INSTRUMENTS, "caisse claire"),
+        "blocs": float(q.get("blocs", 0.0)),
+        "blocs_on": _dans(q.get("blocsOn"), INSTRUMENTS, "caisse claire"),
+        "invert": float(q.get("invert", 0.0)),
+        "invert_on": _dans(q.get("invertOn"), INSTRUMENTS, "grosse caisse"),
+        "stut": float(q.get("stut", 0.0)),
+        "stut_on": _dans(q.get("stutOn"), INSTRUMENTS, "charley"),
         "snare": float(q.get("snare", 1.0)),
         "wave_gain": float(q.get("wave", 1.10)),
         "wave_win": float(q.get("waveWin", 0.070)),
@@ -268,7 +281,10 @@ class Studio:
                 "punch", "punch_on", "shake_amp", "shake_on",
                 "parts", "parts_on", "parts_speed", "parts_life",
                 "ring", "ring_on", "grid_pulse", "grid_on",
-                "bg_flash", "flash_on")
+                "bg_flash", "flash_on",
+                "tranches", "tranches_on", "roll", "roll_on",
+                "ghost", "ghost_on", "blocs", "blocs_on",
+                "invert", "invert_on", "stut", "stut_on")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode")
         r.set_look(palette, **{k: v for k, v in kw.items() if k not in APART})
@@ -768,6 +784,42 @@ PAGE = r"""<!doctype html>
   </div>
 
   <div class="card">
+    <h2>Avaries d'image</h2>
+    <p class="hint" style="margin-top:0">Les memes pannes que sur les
+      paroxysmes, mais declenchees par ce qui est joue. Elles s'appliquent a
+      l'image finie, juste avant la deformation du tube : d'ou leur air de
+      signal casse plutot que d'effet dessine.</p>
+
+    <label for="tranches">bandes arrachees &mdash; <span id="v-tr">0.00</span></label>
+    <input type="range" id="tranches" min="0" max="2.5" step="0.05" value="0">
+    <select id="tranchesOn" class="inst"></select>
+
+    <label for="blocs">blocs recopies &mdash; <span id="v-bl">0.00</span></label>
+    <input type="range" id="blocs" min="0" max="2.5" step="0.05" value="0">
+    <select id="blocsOn" class="inst"></select>
+
+    <label for="roll">decrochage vertical &mdash; <span id="v-ro">0.00</span></label>
+    <input type="range" id="roll" min="0" max="2" step="0.05" value="0">
+    <select id="rollOn" class="inst"></select>
+
+    <label for="ghost">image fantome &mdash; <span id="v-gh">0.00</span></label>
+    <input type="range" id="ghost" min="0" max="2.5" step="0.05" value="0">
+    <select id="ghostOn" class="inst"></select>
+
+    <label for="invert">negatif du trait &mdash; <span id="v-in">0.00</span></label>
+    <input type="range" id="invert" min="0" max="2.5" step="0.05" value="0">
+    <select id="invertOn" class="inst"></select>
+
+    <label for="stut">begaiement &mdash; l'image gele <span id="v-st">0.00</span> s</label>
+    <input type="range" id="stut" min="0" max="0.3" step="0.01" value="0">
+    <select id="stutOn" class="inst"></select>
+    <p class="hint">Le begaiement fige l'image sur l'instant du coup ; le son,
+      lui, continue. Sur le charley il donne un rythme sacade, sur la grosse
+      caisse un arret net. Au-dela d'un dixieme de seconde la video parait
+      ralentie plutot qu'abimee.</p>
+  </div>
+
+  <div class="card">
     <h2>Rendu</h2>
     <div class="row">
       <div><label for="start">depart (s)</label><input type="number" id="start" value="0" min="0" step="0.1"></div>
@@ -885,6 +937,12 @@ function params() {
     ring: $('#ring').value, ringOn: $('#ringOn').value,
     gridPulse: $('#gridPulse').value, gridOn: $('#gridOn').value,
     bgFlash: $('#bgFlash').value, flashOn: $('#flashOn').value,
+    tranches: $('#tranches').value, tranchesOn: $('#tranchesOn').value,
+    blocs: $('#blocs').value, blocsOn: $('#blocsOn').value,
+    roll: $('#roll').value, rollOn: $('#rollOn').value,
+    ghost: $('#ghost').value, ghostOn: $('#ghostOn').value,
+    invert: $('#invert').value, invertOn: $('#invertOn').value,
+    stut: $('#stut').value, stutOn: $('#stutOn').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
   return p;
@@ -946,10 +1004,13 @@ bind('#glitch','#v-gl',2);
 bind('#punch','#v-pu',3); bind('#shake','#v-sh',2); bind('#parts','#v-pa',2);
 bind('#partsSpeed','#v-pas',2); bind('#partsLife','#v-pal',2);
 bind('#ring','#v-ri',2); bind('#gridPulse','#v-gp',2); bind('#bgFlash','#v-bf',2);
+bind('#tranches','#v-tr',2); bind('#blocs','#v-bl',2); bind('#roll','#v-ro',2);
+bind('#ghost','#v-gh',2); bind('#invert','#v-in',2); bind('#stut','#v-st',2);
 $('#travel').oninput = e => {
   $('#v-tv').textContent = Math.round(+e.target.value * 100) + ' %'; shot(); };
 for (const id of ['#travelMode','#punchOn','#shakeOn','#partsOn','#ringOn',
-                  '#gridOn','#flashOn','#splitOn']) $(id).onchange = shot;
+                  '#gridOn','#flashOn','#splitOn','#tranchesOn','#blocsOn',
+                  '#rollOn','#ghostOn','#invertOn','#stutOn']) $(id).onchange = shot;
 
 /* ---- fond : image ou video ---- */
 let backdrop = '';
@@ -1092,7 +1153,13 @@ fetch('/config').then(r => r.json())
                               ['#partsOn', 'caisse claire'],
                               ['#ringOn', 'grosse caisse'],
                               ['#gridOn', 'grosse caisse'],
-                              ['#flashOn', 'caisse claire']])
+                              ['#flashOn', 'caisse claire'],
+                              ['#tranchesOn', 'caisse claire'],
+                              ['#blocsOn', 'caisse claire'],
+                              ['#rollOn', 'grosse caisse'],
+                              ['#ghostOn', 'caisse claire'],
+                              ['#invertOn', 'grosse caisse'],
+                              ['#stutOn', 'charley']])
       remplir(sel, c.instruments || [], def);
     remplir('#travelMode', c.travellings || [], 'avant');
   })
