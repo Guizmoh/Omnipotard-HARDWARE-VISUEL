@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
     detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, pool_context,
-    fit_jobs, INSTRUMENTS, TRAVELLINGS,
+    fit_jobs, INSTRUMENTS, TRAVELLINGS, python_trop_petit,
 )
 
 
@@ -121,7 +121,7 @@ def load_full_track(path, start, duration, sr=SR):
 def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True,
                               seed=7, palette="vert", wobble=0.0, split=1.0,
                               split_px=11.0, split_count=3,
-                              split_on="grosse caisse",
+                              split_on="grosse caisse", glitch=1.0,
                               snare=1.0, wave_gain=1.10, trail=1.0, screen_title="",
                               wave_win=0.070, wave_smooth=56, wave_trig=0.0,
                               wave_passes=1, wave_punch=0.85,
@@ -139,6 +139,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                  palette=palette, **bgkw)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
+    r.glitch = float(glitch)
     r.snare, r.wave_gain = float(snare), float(wave_gain)
     r.trail, r.screen_title = float(trail), str(screen_title or "")
     r.wave_win, r.wave_trig = float(wave_win), float(wave_trig)
@@ -282,6 +283,10 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
     dur = info["duration"]
     jobs = jobs or os.cpu_count() or 2
 
+    souci = python_trop_petit(width, height)
+    if souci:
+        raise RuntimeError(souci)
+
     _DUR = dur
     _R = _renderer(info, width, height, fps, seed, curve, palette, bgkw)
 
@@ -320,6 +325,12 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
                       "de %d (fermez quelques fenetres pour aller plus vite)"
                       % (jobs, demande), flush=True)
         if jobs > 1:
+            if ctx.get_start_method() == "spawn":
+                # Les taches reconstruisent chacune leurs tables de
+                # deformation, qu'on ne leur transmet pas ; le processus
+                # principal ne dessine plus rien et n'a donc plus besoin des
+                # siennes. Elles pesent 230 Mo en 4K.
+                _R.forget_warp()
             chunk = max(jobs, 24)
             with ctx.Pool(jobs, initializer=_init_worker,
                           initargs=(_R, _DUR)) as pool:
@@ -372,6 +383,8 @@ def add_look_args(ap):
                          "(plafonne par la duree : un au plus toutes les 25 s)")
     ap.add_argument("--split-on", default="grosse caisse", choices=INSTRUMENTS,
                     help="coups autorises a declencher le dedoublement")
+    ap.add_argument("--glitch", type=float, default=1.0,
+                    help="dosage des glitchs sur les paroxysmes (0 = aucun)")
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=1.10,
@@ -432,6 +445,7 @@ def look_kwargs(args):
             "bg_clear": args.bg_clear,
             "wobble": args.wobble, "split": args.split, "split_px": args.split_px,
             "split_count": args.split_count, "split_on": args.split_on,
+            "glitch": args.glitch,
             "snare": args.snare, "wave_gain": args.wave, "trail": args.trail,
             "wave_win": args.wave_win, "wave_smooth": args.wave_smooth,
             "wave_trig": args.wave_trig, "wave_passes": args.wave_passes,

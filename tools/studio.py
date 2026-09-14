@@ -135,6 +135,7 @@ def look_from(q):
         "split": float(q.get("split", 1.0)),
         "split_count": int(float(q.get("splitCount", 3))),
         "split_on": _dans(q.get("splitOn"), INSTRUMENTS, "grosse caisse"),
+        "glitch": float(q.get("glitch", 1.0)),
         "snare": float(q.get("snare", 1.0)),
         "wave_gain": float(q.get("wave", 1.10)),
         "wave_win": float(q.get("waveWin", 0.070)),
@@ -263,7 +264,7 @@ class Studio:
         # wave_smooth passe par une methode : il faut relisser la courbe
         POSE = ("wobble", "split", "split_px", "split_count", "split_on", "snare",
                 "wave_gain", "wave_win", "wave_trig", "wave_passes",
-                "wave_punch", "trail", "screen_title",
+                "wave_punch", "trail", "screen_title", "glitch",
                 "punch", "punch_on", "shake_amp", "shake_on",
                 "parts", "parts_on", "parts_speed", "parts_life",
                 "ring", "ring_on", "grid_pulse", "grid_on",
@@ -708,6 +709,8 @@ PAGE = r"""<!doctype html>
     <input type="range" id="wavePunch" min="0" max="2.5" step="0.05" value="0.85">
     <label for="trail">trainee de la bande &mdash; <span id="v-trail">1.00</span></label>
     <input type="range" id="trail" min="0" max="2.5" step="0.05" value="1">
+    <label for="glitch">glitchs sur les paroxysmes &mdash; <span id="v-gl">1.00</span></label>
+    <input type="range" id="glitch" min="0" max="2" step="0.05" value="1">
     <label for="title">titre affiche sur la dalle</label>
     <input type="text" id="title" maxlength="22" placeholder="nom du fichier">
     <p class="hint">Sur les coups vraiment appuyes — et seulement ceux-la —
@@ -869,7 +872,7 @@ function params() {
     trail: $('#trail').value, title: $('#title').value,
     fallbackTitle: ($('#title').placeholder || ''),
     splitCount: $('#splitCount').value, splitPx: $('#splitPx').value,
-    splitOn: $('#splitOn').value,
+    splitOn: $('#splitOn').value, glitch: $('#glitch').value,
     snare: $('#snare').value, wave: $('#wave').value,
     wavePunch: $('#wavePunch').value, backdrop,
     bdStrength: $('#bdStrength').value, bdClear: $('#bdClear').value,
@@ -939,6 +942,7 @@ const bind = (id, out, dec) => { $(id).oninput = e => {
 bind('#splitCount','#v-sc',0); bind('#splitPx','#v-spx',0);
 bind('#snare','#v-sn',2); bind('#wave','#v-wv',2); bind('#wavePunch','#v-wp',2);
 bind('#bdStrength','#v-bds',2); bind('#bdClear','#v-bdc',2); bind('#screenDim','#v-sd',2);
+bind('#glitch','#v-gl',2);
 bind('#punch','#v-pu',3); bind('#shake','#v-sh',2); bind('#parts','#v-pa',2);
 bind('#partsSpeed','#v-pas',2); bind('#partsLife','#v-pal',2);
 bind('#ring','#v-ri',2); bind('#gridPulse','#v-gp',2); bind('#bgFlash','#v-bf',2);

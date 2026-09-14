@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-14.8"
+VERSION = "2026-09-14.9"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1388,11 +1388,15 @@ class Renderer:
     def glitch_at(self, t):
         """Quantite de glitch a l'instant t : coups ponctuels, puis rafales
         continues pendant l'extinction."""
+        if self.glitch <= 0.001:
+            return 0.0
         if self.drops is not None:
             # rendu « performance » : une rafale courte sur chaque paroxysme
             dt = t - self.drops
             m = (dt >= 0.0) & (dt < self.drop_dur)
-            return float(np.max(1.0 - dt[m] / self.drop_dur)) if np.any(m) else 0.0
+            if not np.any(m):
+                return 0.0
+            return self.glitch * float(np.max(1.0 - dt[m] / self.drop_dur))
         f = self.dur / Timeline.REF
         g = 0.0
         for gt, gd in GLITCHES:
@@ -1403,7 +1407,7 @@ class Renderer:
         if 0.0 <= u < 0.80:
             burst = 0.40 + 0.24 * math.sin(u * 31.0) ** 2
             g = max(g, burst * (1.0 - 0.55 * smoothstep(0.42, 0.80, u)))
-        return g
+        return self.glitch * g
 
     def set_wave_smooth(self, width, passes=None):
         """Lissage de la courbe affichee.
@@ -1635,7 +1639,7 @@ class Renderer:
     # megaoctets en 4K alors qu'elles se deduisent de la seule definition de
     # l'image. On ne les transmet donc pas aux taches de rendu (voir
     # __getstate__), qui les refont a l'arrivee en une poignee de secondes.
-    _WARP = ("wfx", "wfy", "wi00", "wi01", "wi10", "wi11", "wmask")
+    _WARP = ("wfx", "wfy", "wi00", "wmask")
 
     def __getstate__(self):
         """Ce qu'on envoie a une tache de rendu.
@@ -1655,34 +1659,89 @@ class Renderer:
         if self.curve:
             self._build_warp()
 
+    def forget_warp(self):
+        """Relache les tables de deformation.
+
+        Sert au processus principal quand les taches de rendu sont des
+        interpreteurs neufs : elles reconstruisent chacune les leurs, et lui
+        ne dessine plus rien. Deux cent trente megaoctets de moins en 4K, la
+        ou ils manquaient justement.
+        """
+        for k in self._WARP:
+            self.__dict__.pop(k, None)
+
     def _build_warp(self):
+        """Tables de gather de la deformation cathodique.
+
+        Les coordonnees se deduisent d'un vecteur par axe : deployer deux
+        grilles completes en double precision coutait, en 4K, pres de cinq
+        cents megaoctets de tableaux temporaires — et cela dans chacune des
+        taches de rendu, qui les reconstruisent toutes. On diffuse donc les
+        deux vecteurs, en simple precision : le resultat final est un indice
+        de pixel et une fraction, que le float32 porte tres largement.
+        """
         W, H = self.W, self.H
-        yy, xx = np.mgrid[0:H, 0:W]
-        nx = (xx / (W - 1.0)) * 2.0 - 1.0
-        ny = (yy / (H - 1.0)) * 2.0 - 1.0
-        f = 1.0 + 0.055 * (nx * nx + ny * ny)
-        sx = (nx * f * 0.5 + 0.5) * (W - 1.0)
-        sy = (ny * f * 0.5 + 0.5) * (H - 1.0)
-        inside = (sx >= 0) & (sx <= W - 1.001) & (sy >= 0) & (sy <= H - 1.001)
-        sx = np.clip(sx, 0, W - 1.001)
-        sy = np.clip(sy, 0, H - 1.001)
+        nx = ((np.arange(W, dtype=np.float32) / (W - 1.0)) * 2.0 - 1.0)[None, :]
+        ny = ((np.arange(H, dtype=np.float32) / (H - 1.0)) * 2.0 - 1.0)[:, None]
+        f = nx * nx + ny * ny
+        f *= np.float32(0.055)
+        f += np.float32(1.0)                    # (H, W), le seul grand tableau
+        sx = nx * f
+        sx *= np.float32(0.5)
+        sx += np.float32(0.5)
+        sx *= np.float32(W - 1.0)
+        sy = ny * f
+        sy *= np.float32(0.5)
+        sy += np.float32(0.5)
+        sy *= np.float32(H - 1.0)
+        del f
+        dedans = ((sx >= 0) & (sx <= W - 1.001)
+                  & (sy >= 0) & (sy <= H - 1.001))
+        self.wmask = dedans.astype(np.float32)[..., None]
+        del dedans
+        np.clip(sx, 0, W - 1.001, out=sx)
+        np.clip(sy, 0, H - 1.001, out=sy)
         x0 = sx.astype(np.int32)
         y0 = sy.astype(np.int32)
-        self.wfx = (sx - x0).astype(np.float32)[..., None]
-        self.wfy = (sy - y0).astype(np.float32)[..., None]
+        sx -= x0
+        sy -= y0
+        self.wfx = sx[..., None]
+        self.wfy = sy[..., None]
+        # Les trois autres coins se deduisent de celui-ci (+1, +W, +W+1) :
+        # les garder en memoire coutait trois tableaux d'indices pour rien.
         self.wi00 = (y0 * W + x0).ravel()
-        self.wi01 = self.wi00 + 1
-        self.wi10 = self.wi00 + W
-        self.wi11 = self.wi10 + 1
-        self.wmask = inside.astype(np.float32)[..., None]
+
+    BANDE = 192          # lignes traitees d'un coup dans la deformation
 
     def _warp(self, img):
+        """Applique la deformation cathodique, par bandes horizontales.
+
+        Les quatre prelevements bilineaires font chacun la taille de l'image :
+        les mener de front sur toute la hauteur demandait, en 4K, plus d'un
+        demi-gigaoctet de tableaux temporaires par image — dans chaque tache
+        de rendu, et c'est la que les rendus manquaient de memoire. Decoupee
+        en bandes, la meme operation n'en garde qu'une fraction a la fois. Le
+        resultat est identique au pixel pres : on ne change que l'ordre.
+        """
         W, H = self.W, self.H
         flat = img.reshape(-1, 3)
-        fx, fy = self.wfx, self.wfy
-        top = flat[self.wi00].reshape(H, W, 3) * (1 - fx) + flat[self.wi01].reshape(H, W, 3) * fx
-        bot = flat[self.wi10].reshape(H, W, 3) * (1 - fx) + flat[self.wi11].reshape(H, W, 3) * fx
-        return (top * (1 - fy) + bot * fy) * self.wmask
+        out = np.empty((H, W, 3), dtype=np.float32)
+        for y0 in range(0, H, self.BANDE):
+            y1 = min(H, y0 + self.BANDE)
+            d = (y0 * W, y1 * W)
+            fx = self.wfx[y0:y1]
+            fy = self.wfy[y0:y1]
+            i00 = self.wi00[d[0]:d[1]]
+            top = flat[i00].reshape(y1 - y0, W, 3) * (1.0 - fx)
+            top += flat[i00 + 1].reshape(y1 - y0, W, 3) * fx
+            bot = flat[i00 + W].reshape(y1 - y0, W, 3) * (1.0 - fx)
+            bot += flat[i00 + W + 1].reshape(y1 - y0, W, 3) * fx
+            top *= (1.0 - fy)
+            bot *= fy
+            top += bot
+            top *= self.wmask[y0:y1]
+            out[y0:y1] = top
+        return out
 
     # -- couches -----------------------------------------------------------
 
@@ -2279,6 +2338,7 @@ class Renderer:
     step_phase = None   # instant du premier pas du sequenceur (None = intro)
     drops = None        # instants des paroxysmes du morceau (None = intro)
     drop_dur = 0.22     # duree d'une rafale de glitch, en secondes
+    glitch = 1.0        # dosage des glitchs sur les paroxysmes (0 = aucun)
 
     def set_look(self, palette="vert", bg=None, bg_color=None,
                  bg_strength=1.0, bg_clear=0.55):
@@ -2489,6 +2549,21 @@ def available_memory():
         return 0.0
 
 
+def python_trop_petit(w, h):
+    """Message si l'interpreteur ne peut pas tenir une image de cette taille.
+
+    Un Python 32 bits plafonne vers deux gigaoctets par processus, quelle que
+    soit la memoire installee — et c'est la version que propose parfois
+    l'installateur Windows. Aucun reglage ne rattrape cela : autant le dire.
+    """
+    if sys.maxsize > 2 ** 32 or w * h <= 2.3e6:
+        return None
+    return ("Python 32 bits : chaque processus plafonne vers 2 Go, ce qui ne "
+            "suffit pas pour du %dx%d. Reinstallez Python en 64 bits depuis "
+            "python.org (choisir « Windows installer (64-bit) »), ou restez "
+            "en 1920x1080." % (w, h))
+
+
 def fit_jobs(jobs, w, h, duration, method="fork"):
     """Ramene le nombre de taches de rendu a ce que la memoire supporte.
 
@@ -2504,10 +2579,14 @@ def fit_jobs(jobs, w, h, duration, method="fork"):
     """
     mpx = w * h / 1e6
     if method == "spawn":
-        besoin = 40.0 + 0.20 * duration + 122.0 * mpx     # tout est en double
+        besoin = 40.0 + 0.20 * duration + 95.0 * mpx      # tout est en double
     else:
         besoin = 35.0 + 47.0 * mpx                        # le reste est partage
-    marge = 600.0 + 70.0 * mpx                            # ffmpeg, et le systeme
+    # Une estimation trop juste ne se paie pas en lenteur mais en rendu perdu,
+    # parfois apres une heure de calcul : on garde donc une reserve, d'autant
+    # plus large que l'image est grande, car c'est la que l'erreur coute cher.
+    besoin *= 1.30
+    marge = 700.0 + 90.0 * mpx                            # ffmpeg, et le systeme
     libre = available_memory()
     if libre <= 0.0:
         return jobs                        # systeme inconnu : on ne decide rien

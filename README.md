@@ -512,6 +512,11 @@ python3 tools/mpc_performance.py morceau.mp3 \
 Le coût est faible : toutes réactions allumées, une image 1080p passe de
 503 ms à 529 ms, soit 5 % de plus.
 
+Un dernier réglage, `--glitch`, dose les **glitchs sur les paroxysmes** — ces
+rafales de tranches décalées qui tombent sur les montées du morceau. À 0 ils
+disparaissent complètement, ce qui est utile pour juger le reste : ils sont
+assez violents pour masquer tout ce qu'on cherche à régler.
+
 ## STUDIO WEB — une page HTML, rien a installer
 
 `tools/build_web_studio.py` fabrique **un seul fichier HTML autonome** : on
