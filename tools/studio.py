@@ -40,7 +40,7 @@ from mpc_performance import (  # noqa: E402
 )
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
-    pick_split_times,
+    pick_split_times, VERSION,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -50,17 +50,19 @@ def version():
     """Version du code effectivement charge.
 
     Python lit les modules au demarrage : un studio laisse ouvert continue de
-    servir l'ancien moteur meme apres un git pull. Afficher la version evite
-    de chercher longtemps pourquoi une nouveaute « n'est pas la ».
+    servir l'ancien moteur meme apres une mise a jour. Et le dossier est
+    souvent recupere en archive zip, sans historique — sur une machine ou git
+    n'est meme pas installe. D'ou un numero ecrit dans le code lui-meme, que
+    rien ne peut perdre ; l'historique, quand il est la, vient en plus.
     """
     try:
         out = subprocess.run(["git", "-C", ROOT, "log", "-1",
-                              "--format=%h %ad %s", "--date=short"],
+                              "--format=%h %ad", "--date=short"],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                              check=True).stdout.decode().strip()
     except Exception:                                     # noqa: BLE001
-        return "version inconnue"
-    return out[:72]
+        out = ""
+    return ("version %s" % VERSION) + (" (%s)" % out[:40] if out else "")
 # tout ce que le studio fabrique tient dans un seul dossier de travail
 WORKDIR = os.path.join(ROOT, "out", "studio")
 UPLOADS = os.path.join(WORKDIR, "morceaux")
@@ -798,7 +800,10 @@ function shot() {
     }).catch(e => {
       if (n !== shotSeq) return;
       $('#shot').classList.remove('calcul');
-      $('#shoterr').textContent = "L'apercu n'a pas pu etre calcule : " + e.message;
+      // la version est rappelee ici : un message rapporte sans elle ne dit pas
+      // si la correction correspondante est deja installee ou non
+      $('#shoterr').textContent = "L'apercu n'a pas pu etre calcule : "
+        + e.message + "  [" + ($('#ver').textContent || "version inconnue") + "]";
       $('#shoterr').classList.add('on');
     });
   }, 90);

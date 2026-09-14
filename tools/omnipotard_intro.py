@@ -32,6 +32,12 @@ import wave
 
 import numpy as np
 
+# Version du code, affichee par le studio et rappelee dans ses messages
+# d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
+# archive zip, sans historique, et Windows n'a pas git installe d'origine.
+# Sans ce reperage, impossible de savoir si une correction est bien arrivee.
+VERSION = "2026-09-14.6"
+
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
 # En 16/9 la zone visible est x dans [-1.78, 1.78], y dans [-1, 1].

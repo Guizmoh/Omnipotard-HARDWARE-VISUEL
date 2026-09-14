@@ -350,6 +350,20 @@ racine du projet :
 | macOS, Linux | `Lancer-le-studio.command` |
 | Windows | `Lancer-le-studio.bat` |
 
+### Mettre à jour
+
+Double-cliquer sur `Mettre-a-jour.bat` (Windows) ou `Mettre-a-jour.command`
+(macOS, Linux). Le script télécharge la dernière version depuis GitHub et
+remplace le code — **rien à installer, pas besoin de git**. Vos morceaux, vos
+fonds et vos vidéos (dossier `out/`) ainsi que ffmpeg (`bin/`) ne sont pas
+touchés. Fermez la fenêtre du studio avant, et relancez-la après : Python lit
+les modules au démarrage, un studio resté ouvert continue de servir l'ancien
+moteur.
+
+Le studio affiche en bas de page la version qu'il exécute réellement, et la
+rappelle dans ses messages d'erreur — c'est ce qui permet de dire en un coup
+d'œil si une correction est bien arrivée jusqu'à la machine.
+
 Il trouve Python, installe `numpy` et `pillow` s'ils manquent, **télécharge
 ffmpeg** s'il n'est pas là, démarre le studio et **laisse la fenêtre ouverte**
 si quelque chose se passe mal — sans quoi le message d'erreur disparaît avant
