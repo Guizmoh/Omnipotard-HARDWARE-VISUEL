@@ -41,6 +41,7 @@ from mpc_performance import (  # noqa: E402
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
     pick_split_times, VERSION, INSTRUMENTS, TRAVELLINGS, FAMILLES,
+    backdrop_quality,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -149,6 +150,15 @@ def look_from(q):
         "invert_on": _dans(q.get("invertOn"), INSTRUMENTS, "grosse caisse"),
         "stut": float(q.get("stut", 0.0)),
         "stut_on": _dans(q.get("stutOn"), INSTRUMENTS, "charley"),
+        "stut_loop": float(q.get("stutLoop", 0.05)),
+        "scramble": float(q.get("scramble", 0.0)),
+        "scr_len": float(q.get("scrLen", 0.14)),
+        "miroir": float(q.get("miroir", 0.0)),
+        "miroir_on": _dans(q.get("miroirOn"), INSTRUMENTS, "caisse claire"),
+        "ondul": float(q.get("ondul", 0.0)),
+        "ondul_on": _dans(q.get("ondulOn"), INSTRUMENTS, "basse"),
+        "mosaic": float(q.get("mosaic", 0.0)),
+        "mosaic_on": _dans(q.get("mosaicOn"), INSTRUMENTS, "caisse claire"),
         "snare": float(q.get("snare", 1.0)),
         "wave_gain": float(q.get("wave", 1.10)),
         "wave_win": float(q.get("waveWin", 0.070)),
@@ -165,6 +175,7 @@ def look_from(q):
         "backdrop_strength": float(q.get("bdStrength", 0.78)),
         "backdrop_clear": float(q.get("bdClear", 0.40)),
         "screen_dim": float(q.get("screenDim", 0.40)),
+        "backdrop_sharp": float(q.get("bdSharp", 0.37)),
         "travel": float(q.get("travel", 0.0)),
         "travel_mode": _dans(q.get("travelMode"), TRAVELLINGS, "avant"),
         # ---- reactions au son
@@ -285,9 +296,12 @@ class Studio:
                 "bg_flash", "flash_on",
                 "tranches", "tranches_on", "roll", "roll_on",
                 "ghost", "ghost_on", "blocs", "blocs_on",
-                "invert", "invert_on", "stut", "stut_on")
+                "invert", "invert_on", "stut", "stut_on", "stut_loop",
+                "scramble", "scr_len", "miroir", "miroir_on",
+                "ondul", "ondul_on", "mosaic", "mosaic_on")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
-                        "backdrop_clear", "screen_dim", "travel", "travel_mode")
+                        "backdrop_clear", "screen_dim", "travel", "travel_mode",
+                        "backdrop_sharp")
         r.set_look(palette, **{k: v for k, v in kw.items() if k not in APART})
         for k in POSE:
             setattr(r, k, kw[k])
@@ -301,7 +315,7 @@ class Studio:
         bd = kw["backdrop"]
         stamp = (bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
                  kw["screen_dim"], round(float(t), 1),
-                 kw["travel"], kw["travel_mode"])
+                 kw["travel"], kw["travel_mode"], kw["backdrop_sharp"])
         # set_look, plus haut, remet le fond a zero — il fait partie de
         # l'allure. On le repose donc ici a chaque fois, en ne le rechargeant
         # que si un de ses reglages a bouge : sans cela, tout apercu qui ne
@@ -314,7 +328,8 @@ class Studio:
                     bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
                     scale=r.scale, screen_dim=kw["screen_dim"], seek=float(t),
                     travel=kw["travel"], travel_mode=kw["travel_mode"],
-                    dur=max(tr["info"]["duration"], 1e-3))
+                    dur=max(tr["info"]["duration"], 1e-3),
+                    blur=backdrop_quality(kw["backdrop_sharp"])[0])
                 r._bd_stamp = stamp
             r.backdrop = r._bd
         else:
@@ -693,6 +708,8 @@ PAGE = r"""<!doctype html>
       <input type="range" id="bdClear" min="0" max="1" step="0.05" value="0.40">
       <label for="screenDim">opacite de la dalle &mdash; <span id="v-sd">0.40</span></label>
       <input type="range" id="screenDim" min="0" max="1" step="0.05" value="0.40">
+      <label for="bdSharp">nettete du fond &mdash; <span id="v-bdq">0.37</span></label>
+      <input type="range" id="bdSharp" min="0" max="1" step="0.01" value="0.37">
       <label for="travel">travelling &mdash; <span id="v-tv">0 %</span> de l'image parcourue</label>
       <input type="range" id="travel" min="0" max="0.5" step="0.01" value="0">
       <label for="travelMode">sens du travelling</label>
@@ -820,13 +837,36 @@ PAGE = r"""<!doctype html>
     <input type="range" id="invert" min="0" max="2.5" step="0.05" value="0">
     <select id="invertOn" class="inst"></select>
 
-    <label for="stut">begaiement &mdash; l'image gele <span id="v-st">0.00</span> s</label>
-    <input type="range" id="stut" min="0" max="0.3" step="0.01" value="0">
+    <label for="stut">begaiement &mdash; pendant <span id="v-st">0.00</span> s</label>
+    <input type="range" id="stut" min="0" max="0.6" step="0.01" value="0">
     <select id="stutOn" class="inst"></select>
-    <p class="hint">Le begaiement fige l'image sur l'instant du coup ; le son,
-      lui, continue. Sur le charley il donne un rythme sacade, sur la grosse
-      caisse un arret net. Au-dela d'un dixieme de seconde la video parait
-      ralentie plutot qu'abimee.</p>
+    <label for="stutLoop">boucle rejouee &mdash; <span id="v-sl">0.05</span> s</label>
+    <input type="range" id="stutLoop" min="0.01" max="0.3" step="0.01" value="0.05">
+
+    <label for="miroir">miroir &mdash; <span id="v-mi">0.00</span></label>
+    <input type="range" id="miroir" min="0" max="2" step="0.05" value="0">
+    <select id="miroirOn" class="inst"></select>
+
+    <label for="ondul">ondulation liquide &mdash; <span id="v-on">0.00</span></label>
+    <input type="range" id="ondul" min="0" max="2.5" step="0.05" value="0">
+    <select id="ondulOn" class="inst"></select>
+
+    <label for="mosaic">mosaique &mdash; <span id="v-mo">0.00</span></label>
+    <input type="range" id="mosaic" min="0" max="2" step="0.05" value="0">
+    <select id="mosaicOn" class="inst"></select>
+
+    <label for="scramble">tranches de temps brassees &mdash; <span id="v-sc2">0.00</span></label>
+    <input type="range" id="scramble" min="0" max="1" step="0.05" value="0">
+    <label for="scrLen">longueur d'une tranche &mdash; <span id="v-scl">0.14</span> s</label>
+    <input type="range" id="scrLen" min="0.04" max="0.6" step="0.01" value="0.14">
+    <p class="hint">Le <b>begaiement</b> decroche l'image du son : elle rejoue
+      en boucle un bout tres court pris a l'instant du coup. Une boucle plus
+      courte qu'une image donne un gel pur ; deux ou trois images donnent un
+      sursaut repete, bien plus visible.<br>
+      Les <b>tranches brassees</b> ne dependent d'aucun instrument : elles
+      decoupent le temps en blocs reguliers et les rejouent dans le desordre,
+      pendant que le son continue tout droit. Des tranches courtes hachent,
+      des longues desorientent.</p>
   </div>
 
   <div class="card">
@@ -954,6 +994,12 @@ function params() {
     ghost: $('#ghost').value, ghostOn: $('#ghostOn').value,
     invert: $('#invert').value, invertOn: $('#invertOn').value,
     stut: $('#stut').value, stutOn: $('#stutOn').value,
+    stutLoop: $('#stutLoop').value,
+    scramble: $('#scramble').value, scrLen: $('#scrLen').value,
+    miroir: $('#miroir').value, miroirOn: $('#miroirOn').value,
+    ondul: $('#ondul').value, ondulOn: $('#ondulOn').value,
+    mosaic: $('#mosaic').value, mosaicOn: $('#mosaicOn').value,
+    bdSharp: $('#bdSharp').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
   return p;
@@ -1024,11 +1070,15 @@ $('#partsN').oninput = e => {
 bind('#ring','#v-ri',2); bind('#gridPulse','#v-gp',2); bind('#bgFlash','#v-bf',2);
 bind('#tranches','#v-tr',2); bind('#blocs','#v-bl',2); bind('#roll','#v-ro',2);
 bind('#ghost','#v-gh',2); bind('#invert','#v-in',2); bind('#stut','#v-st',2);
+bind('#stutLoop','#v-sl',2); bind('#miroir','#v-mi',2); bind('#ondul','#v-on',2);
+bind('#mosaic','#v-mo',2); bind('#scramble','#v-sc2',2); bind('#scrLen','#v-scl',2);
+bind('#bdSharp','#v-bdq',2);
 $('#travel').oninput = e => {
   $('#v-tv').textContent = Math.round(+e.target.value * 100) + ' %'; shot(); };
 for (const id of ['#travelMode','#punchOn','#shakeOn','#partsOn','#ringOn',
                   '#gridOn','#flashOn','#splitOn','#tranchesOn','#blocsOn',
-                  '#rollOn','#ghostOn','#invertOn','#stutOn']) $(id).onchange = shot;
+                  '#rollOn','#ghostOn','#invertOn','#stutOn','#miroirOn',
+                  '#ondulOn','#mosaicOn']) $(id).onchange = shot;
 
 /* ---- fond : image ou video ---- */
 let backdrop = '';
@@ -1177,7 +1227,10 @@ fetch('/config').then(r => r.json())
                               ['#rollOn', 'grosse caisse'],
                               ['#ghostOn', 'caisse claire'],
                               ['#invertOn', 'grosse caisse'],
-                              ['#stutOn', 'charley']])
+                              ['#stutOn', 'charley'],
+                              ['#miroirOn', 'caisse claire'],
+                              ['#ondulOn', 'basse'],
+                              ['#mosaicOn', 'caisse claire']])
       remplir(sel, c.instruments || [], def);
     remplir('#travelMode', c.travellings || [], 'avant');
   })

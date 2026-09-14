@@ -487,7 +487,15 @@ claire » veut vraiment dire caisse claire. À zéro, la réaction est éteinte.
 Les instruments disponibles : `grosse caisse`, `basse`, `caisse claire`,
 `percussions`, `charley`, `accords`, `tout`.
 
-Le nombre d'**étincelles** (`--parts-n`) va de quelques-unes à plus de trente
+Les **étincelles** naissent du dessin lui-même : chaque braise part d'un point
+pris au hasard sur un trait de la machine, perpendiculairement à lui, comme une
+gerbe sur une meule. La normale pointant des deux côtés du trait, on privilégie
+l'extérieur — une braise lancée vers le centre traverse toute la machine et
+brouille le dessin. Elles partaient auparavant d'un contour abstrait, ce qui
+faisait une couronne posée autour de la machine, sans rapport avec ce qu'elle
+trace.
+
+Leur nombre (`--parts-n`) va de quelques-unes à plus de trente
 mille. Deux mécanismes rendent cette échelle tenable. L'éclat de chaque braise
 baisse en racine du nombre de points réellement posés — mille braises éclairent
 plus que dix, sans faire une tache blanche — et au-delà de quelques centaines,
@@ -558,9 +566,34 @@ image à 3,425 s  →  dessine 3,417 s   (coup suivant, l'image repart)
 Cinq images identiques, puis la vidéo rattrape son retard d'un coup. Ce n'est
 donc pas un ralenti : le temps saute pour revenir au bon endroit.
 
+Un gel pur ne se remarque que si l'image bougeait beaucoup juste avant. D'où
+`--stut-loop` : au lieu de figer, l'image **rejoue en boucle** un bout très
+court pris à l'instant du coup. Avec une boucle de deux ou trois images, on
+obtient un sursaut répété, bien plus visible qu'un arrêt.
+
+### Netteté du fond
+
+Le faisceau est additif : une image nette et claire derrière le trait lui mange
+son contraste. D'où un fond volontairement flou et sous-échantillonné par
+défaut — mais c'est un parti pris, pas une fatalité. `--backdrop-sharp` va de 0
+(fondu, vignettes au quart de la définition) à 1 (net, pleine définition et
+aucun flou), avec un rapport de trente entre les deux sur le détail mesuré. La
+valeur par défaut, 0,37, reproduit exactement l'ancien comportement.
+
+| miroir | l'image se replie sur elle-même | `--miroir`, `--miroir-on` |
+| ondulation liquide | le balayage ondule, la machine fond | `--ondul`, `--ondul-on` |
+| mosaïque | l'image tombe en gros pixels | `--mosaic`, `--mosaic-on` |
+| tranches brassées | le temps est rejoué dans le désordre | `--scramble`, `--scr-len` |
+
 Elles s'appliquent à l'image finie, juste avant la déformation du tube — au
 même endroit que les glitchs de paroxysme, ce qui leur donne cet air de signal
 cassé plutôt que d'effet dessiné.
+
+Les **tranches brassées** ne dépendent d'aucun instrument : elles découpent le
+temps en blocs réguliers et les rejouent dans le désordre, par paquets de huit,
+pendant que le son continue tout droit — le montage haché des disques de
+breakcore. Le tirage est semé par le numéro du paquet, si bien que chaque tâche
+de rendu retrouve le même désordre sans rien savoir des images voisines.
 
 Deux détails qui comptent. Le **négatif** n'est pas un vrai négatif : inverser
 franchement l'image passerait par un gris uniforme à mi-chemin, ce qui donne un

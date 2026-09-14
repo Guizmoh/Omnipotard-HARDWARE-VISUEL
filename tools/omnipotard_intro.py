@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-14.11"
+VERSION = "2026-09-14.12"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -114,6 +114,22 @@ def travel_crop(src, u, amount, mode, w, h):
     xs = np.linspace(x0, x0 + cw - 1.0, w, dtype=np.float32)
     ys = np.linspace(y0, y0 + ch - 1.0, h, dtype=np.float32)
     return _sample2d(src, xs, ys)
+
+
+def backdrop_quality(sharp):
+    """Flou et definition des vignettes, du fond fondu au fond net.
+
+    Le faisceau etant additif, une image nette et claire derriere le trait lui
+    mange son contraste : d'ou un fond volontairement flou et sous-echantillonne
+    par defaut. Mais c'est un parti pris, pas une fatalite — a 1, l'image passe
+    telle quelle, en pleine definition, et reste lisible.
+
+    La valeur par defaut, 0,37, reproduit exactement l'ancien comportement.
+    """
+    sharp = min(max(float(sharp), 0.0), 1.0)
+    blur = 4.2 * (1.0 - sharp) ** 1.4
+    div = (4, 3, 2, 1)[min(3, int(sharp * 4.0))]
+    return blur, div
 
 
 def _backdrop_mask(w, h, strength, clear, scale, screen_dim):
@@ -283,7 +299,7 @@ class VideoBackdrop:
 
     def __init__(self, path, w, h, fps, duration, strength=0.80, clear=0.45,
                  scale=None, blur=2.2, screen_dim=0.40, cache_dir=None,
-                 travel=0.0, travel_mode="avant"):
+                 travel=0.0, travel_mode="avant", div=None):
         try:
             from PIL import Image                # noqa: F401 -- verifie tot
         except ImportError:
@@ -294,6 +310,7 @@ class VideoBackdrop:
         self.w, self.h = w, h
         self.mask = _backdrop_mask(w, h, strength, clear, scale, screen_dim)
         self.fps = float(fps)
+        self.DIV = int(div) if div else VideoBackdrop.DIV
         self.dur = max(float(duration), 1e-3)
         self.travel, self.mode = float(travel), travel_mode
         marge = (1.0 + self.travel) if (self.travel > 1e-4
@@ -351,13 +368,14 @@ class VideoBackdrop:
         return img
 
 
-def make_backdrop(path, w, h, fps=30, duration=0.0, **kw):
+def make_backdrop(path, w, h, fps=30, duration=0.0, sharp=0.37, **kw):
     """Image ou video, selon ce que contient le fichier."""
+    blur, div = backdrop_quality(sharp)
     if duration > 0 and is_video(path):
-        return VideoBackdrop(path, w, h, fps, duration, **kw)
+        return VideoBackdrop(path, w, h, fps, duration, blur=blur, div=div, **kw)
     # une photo a besoin de connaitre la duree du morceau : c'est sur elle que
     # s'etale le travelling
-    return load_backdrop(path, w, h, dur=max(duration, 1e-3), **kw)
+    return load_backdrop(path, w, h, blur=blur, dur=max(duration, 1e-3), **kw)
 
 
 def hex_to_rgb(x):
@@ -1516,12 +1534,16 @@ class Renderer:
     def stutter_time(self, t):
         """L'instant reellement dessine, quand le begaiement est actif.
 
-        Sur chaque coup retenu, l'image se fige pendant quelques centiemes :
-        le son continue, l'image non. C'est un decalage du temps, pas un effet
-        applique a l'image — d'ou son calcul ici, avant que quoi que ce soit
-        ne soit dessine. Et comme il ne depend que de l'instant demande,
-        chaque tache de rendu le retrouve seule, sans rien connaitre des
-        images voisines.
+        Sur chaque coup retenu, l'image cesse de suivre le son : elle rejoue
+        en boucle un bout tres court pris a l'instant du coup. Une boucle
+        plus courte qu'une image donne un gel pur ; une boucle de deux ou
+        trois images donne un sursaut repete, bien plus visible — un gel seul
+        ne se remarque que si l'image bougeait beaucoup juste avant.
+
+        C'est un decalage du temps, pas un effet applique a l'image, d'ou son
+        calcul avant que quoi que ce soit ne soit dessine. Et comme il ne
+        depend que de l'instant demande, chaque tache de rendu le retrouve
+        seule, sans rien connaitre des images voisines.
         """
         if self.stut <= 0.001 or len(self.ev_t) == 0:
             return t
@@ -1535,7 +1557,29 @@ class Renderer:
         dernier = float(np.min(dt[m]))          # le coup le plus recent
         if dernier >= self.stut:
             return t
-        return t - dernier                      # on reste sur l'image du coup
+        boucle = max(1e-4, float(self.stut_loop))
+        return t - dernier + (dernier % boucle)
+
+    def scramble_time(self, t):
+        """Le temps decoupe en tranches courtes, rejouees dans le desordre.
+
+        Le son continue tout droit, l'image saute en avant et en arriere par
+        petits blocs — le montage haché des disques de breakcore. Les tranches
+        sont brassees par paquets de huit, d'un tirage seme par le numero du
+        paquet : chaque tache de rendu retrouve donc le meme desordre sans
+        rien savoir des images voisines.
+        """
+        if self.scramble <= 0.001:
+            return t
+        L = max(0.03, float(self.scr_len))
+        PAQUET = 8
+        i = int(t / L)
+        g, b = divmod(i, PAQUET)
+        r = np.random.default_rng(31337 + g)
+        if r.random() > self.scramble:
+            return t                            # ce paquet-la reste en ordre
+        j = g * PAQUET + int(r.permutation(PAQUET)[b])
+        return min(max(t + (j - i) * L, 0.0), self.dur - 1e-3)
 
     def hit_env(self, t, famille, fall=9.0, win=0.55, seuil=0.0, plancher=0.0):
         """Enveloppe des coups d'une famille d'instruments a l'instant t.
@@ -1832,22 +1876,31 @@ class Renderer:
         BUDGET = 500000
         kmax = max(2, int(BUDGET / max(1, n * len(jets))))
         REF = 14 * 110          # points d'une gerbe au reglage d'origine
+        traits, normales = self._pool_traits()
         for i in jets:
             age = float((t - self.ev_t[i]) / vie)
             force = float(self.ev_f[i])
             r = np.random.default_rng(7919 + int(i))
-            a = r.uniform(0.0, 2.0 * math.pi, n)
             # vitesses tres etalees : un tirage uniforme donne une coquille
             # reguliere, une puissance donne un panache — beaucoup de braises
-            # lentes pres du chassis, quelques-unes qui filent loin.
+            # lentes, quelques-unes qui filent loin.
             v = (0.30 + 1.55 * r.random(n) ** 2) * float(self.parts_speed)
-            # depart juste en dehors du chassis : posees dessus, les etincelles
-            # se confondent avec le dessin de la machine et passent pour du bruit
-            jit = 1.0 + 0.05 * r.standard_normal(n)
-            ox, oy = 1.37 * jit * np.cos(a), 0.71 * jit * np.sin(a)
-            # la direction s'ecarte un peu du rayon : sans cela les braises
-            # restent alignees sur leur point de depart
-            b = a + 0.22 * r.standard_normal(n)
+            # Depart sur le dessin lui-meme : chaque braise nait d'un point
+            # pris au hasard sur un trait de la machine, et part
+            # perpendiculairement a lui — comme une gerbe sur une meule. Un
+            # depart sur un contour abstrait donnait une couronne posee autour
+            # de la machine, sans rapport avec ce qu'elle dessine.
+            sel = r.integers(0, len(traits), n)
+            ox, oy = traits[sel, 0], traits[sel, 1]
+            nx, ny = normales[sel, 0], normales[sel, 1]
+            # la normale pointe d'un cote ou de l'autre du trait ; on
+            # privilegie l'exterieur, une braise lancee vers le centre
+            # traversant toute la machine et brouillant le dessin
+            vers = ox * nx + oy * ny
+            flip = (vers < 0) & (r.random(n) < 0.78)
+            nx = np.where(flip, -nx, nx)
+            ny = np.where(flip, -ny, ny)
+            b = np.arctan2(ny, nx) + 0.30 * r.standard_normal(n)
             # course mesuree : assez pour se detacher du chassis, pas assez
             # pour traverser l'ecran et devenir une rayure
             course = 1.15 * v * (0.45 + force)
@@ -1872,6 +1925,21 @@ class Renderer:
             profil = np.repeat((0.22 + 0.78 * s_ ** 2), n, axis=0).ravel()
             beam.add(sx, sy, profil * 1.5 * eclat * (0.30 + force)
                      * (1.0 - age) ** 2)
+
+    def _pool_traits(self):
+        """Les points du dessin de la machine, avec leur normale.
+
+        C'est de la que partent les etincelles. Le trace est echantillonne
+        tres finement — pres de soixante mille points — et en garder un sur
+        trois suffit largement a tirer des departs au hasard.
+        """
+        if getattr(self, "_pool", None) is None:
+            P = np.vstack([p.P for p in self.mpc])
+            N = np.vstack([p.N for p in self.mpc])
+            pas = max(1, len(P) // 20000)
+            self._pool = (np.ascontiguousarray(P[::pas], dtype=np.float32),
+                          np.ascontiguousarray(N[::pas], dtype=np.float32))
+        return self._pool
 
     def _onde(self, beam, t, collapse):
         """Onde de choc : un anneau qui s'ouvre depuis la machine et s'efface."""
@@ -2409,8 +2477,17 @@ class Renderer:
     blocs_on = "caisse claire"
     invert = 0.0         # negatif bref
     invert_on = "grosse caisse"
-    stut = 0.0           # gel de l'image, en secondes
+    stut = 0.0           # begaiement : duree totale, en secondes
     stut_on = "charley"
+    stut_loop = 0.05     # longueur du bout d'image rejoue en boucle
+    scramble = 0.0       # tranches de temps rejouees dans le desordre
+    scr_len = 0.14       # longueur d'une tranche, en secondes
+    miroir = 0.0         # l'image se replie sur elle-meme
+    miroir_on = "caisse claire"
+    ondul = 0.0          # ondulation liquide du balayage
+    ondul_on = "basse"
+    mosaic = 0.0         # pixelisation brutale
+    mosaic_on = "caisse claire"
 
     step_phase = None   # instant du premier pas du sequenceur (None = intro)
     drops = None        # instants des paroxysmes du morceau (None = intro)
@@ -2516,6 +2593,46 @@ class Renderer:
                 fant[max(0, dy):min(H, H + dy), max(0, dx):min(W, W + dx)] = \
                     img[y0s:y1s, x0s:x1s]
                 img += fant * (0.55 * a)
+
+        # ---- miroir : l'image se replie sur elle-meme
+        a = self.miroir * self.hit_env(t, self.miroir_on, fall=15.0,
+                                       plancher=PLANCHER_AVARIE)
+        if a > 0.30:
+            # tout ou rien : un miroir a moitie applique n'existe pas
+            if int(rng.integers(0, 4)) == 0:
+                d = H // 2                      # une fois sur quatre, en haut
+                img[H - d:] = img[:d][::-1]
+            else:
+                d = W // 2
+                img[:, W - d:] = img[:, :d][:, ::-1]
+
+        # ---- ondulation liquide du balayage
+        a = self.ondul * self.hit_env(t, self.ondul_on, fall=9.0,
+                                      plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            amp = W * 0.055 * a
+            y = np.arange(H, dtype=np.float32)
+            dx = (amp * np.sin(y * (2.0 * math.pi / max(8.0, H * 0.17))
+                               + t * 26.0)).astype(np.int32)
+            # Les lignes se regroupent par decalage : quelques dizaines de
+            # valeurs distinctes seulement, donc quelques dizaines de np.roll
+            # au lieu d'un par ligne — et aucun grand tableau d'indices.
+            for d in np.unique(dx):
+                if d:
+                    sel = np.nonzero(dx == d)[0]
+                    img[sel] = np.roll(img[sel], int(d), axis=1)
+
+        # ---- mosaique : l'image tombe en gros pixels
+        a = self.mosaic * self.hit_env(t, self.mosaic_on, fall=16.0,
+                                       plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            k = int(2 + 46 * a * (H / 1080.0))
+            h2, w2 = H // k, W // k
+            if h2 > 0 and w2 > 0:
+                vue = img[:h2 * k, :w2 * k].reshape(h2, k, w2, k, 3)
+                # la moyenne du bloc est reecrite par diffusion : pas de copie
+                # de l'image, seul le petit tableau des blocs est alloue
+                vue[...] = vue.mean(axis=(1, 3))[:, None, :, None, :]
 
         # ---- negatif du trait (solarisation)
         a = self.invert * self.hit_env(t, self.invert_on, fall=18.0,

@@ -127,7 +127,11 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               ghost=0.0, ghost_on="caisse claire",
                               blocs=0.0, blocs_on="caisse claire",
                               invert=0.0, invert_on="grosse caisse",
-                              stut=0.0, stut_on="charley",
+                              stut=0.0, stut_on="charley", stut_loop=0.05,
+                              scramble=0.0, scr_len=0.14,
+                              miroir=0.0, miroir_on="caisse claire",
+                              ondul=0.0, ondul_on="basse",
+                              mosaic=0.0, mosaic_on="caisse claire",
                               snare=1.0, wave_gain=1.10, trail=1.0, screen_title="",
                               wave_win=0.070, wave_smooth=56, wave_trig=0.0,
                               wave_passes=1, wave_punch=0.85,
@@ -140,7 +144,8 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               bg_flash=0.0, flash_on="caisse claire",
                               travel=0.0, travel_mode="avant",
                               backdrop=None, backdrop_strength=1.00,
-                              backdrop_clear=0.28, screen_dim=0.40, **bgkw):
+                              backdrop_clear=0.28, screen_dim=0.40,
+                              backdrop_sharp=0.37, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
@@ -152,6 +157,11 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.blocs, r.blocs_on = float(blocs), str(blocs_on)
     r.invert, r.invert_on = float(invert), str(invert_on)
     r.stut, r.stut_on = float(stut), str(stut_on)
+    r.stut_loop = float(stut_loop)
+    r.scramble, r.scr_len = float(scramble), float(scr_len)
+    r.miroir, r.miroir_on = float(miroir), str(miroir_on)
+    r.ondul, r.ondul_on = float(ondul), str(ondul_on)
+    r.mosaic, r.mosaic_on = float(mosaic), str(mosaic_on)
     r.snare, r.wave_gain = float(snare), float(wave_gain)
     r.trail, r.screen_title = float(trail), str(screen_title or "")
     r.wave_win, r.wave_trig = float(wave_win), float(wave_trig)
@@ -170,7 +180,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
         r.backdrop = make_backdrop(
             backdrop, w, h, fps, duration, strength=backdrop_strength,
             clear=backdrop_clear, scale=r.scale, screen_dim=screen_dim,
-            travel=r.travel, travel_mode=r.travel_mode)
+            travel=r.travel, travel_mode=r.travel_mode, sharp=backdrop_sharp)
     # La machine est deja entierement deployee et joue en continu : on
     # neutralise tout ce qui, dans le moteur de l'intro, appartient au
     # scenario (reveal, pre-lueur, ecran qui se cache au zoom, extinction
@@ -191,7 +201,7 @@ def frame_performance(r, t, duration):
     # suit est donc calcule a cet instant-la. Le tirage aleatoire, lui, reste
     # celui de l'image reelle — sans quoi le grain se figerait aussi et l'on
     # verrait une image arretee plutot qu'une image qui bute.
-    t = r.stutter_time(t)
+    t = r.scramble_time(r.stutter_time(t))
     # l'image respire sur l'instrument choisi, et peut aussi etre bousculee
     r._zoom = 1.0 + r.punch * r.hit_env(t, r.punch_on, fall=9.0)
     r._cam_z = 1.0                            # jamais de zoom dans l'ecran
@@ -422,6 +432,21 @@ def add_look_args(ap):
     ap.add_argument("--stut", type=float, default=0.0,
                     help="begaiement : duree du gel de l'image, en secondes")
     ap.add_argument("--stut-on", default="charley", choices=INSTRUMENTS)
+    ap.add_argument("--stut-loop", type=float, default=0.05,
+                    help="longueur du bout rejoue en boucle (s)")
+    ap.add_argument("--scramble", type=float, default=0.0,
+                    help="part des tranches de temps rejouees dans le desordre")
+    ap.add_argument("--scr-len", type=float, default=0.14,
+                    help="longueur d'une tranche de temps (s)")
+    ap.add_argument("--miroir", type=float, default=0.0,
+                    help="l'image se replie sur elle-meme sur le coup")
+    ap.add_argument("--miroir-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--ondul", type=float, default=0.0,
+                    help="ondulation liquide du balayage")
+    ap.add_argument("--ondul-on", default="basse", choices=INSTRUMENTS)
+    ap.add_argument("--mosaic", type=float, default=0.0,
+                    help="pixelisation brutale sur le coup")
+    ap.add_argument("--mosaic-on", default="caisse claire", choices=INSTRUMENTS)
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=1.10,
@@ -444,6 +469,8 @@ def add_look_args(ap):
                     help="image de fond (jpg, png, webp...)")
     ap.add_argument("--backdrop-strength", type=float, default=1.00)
     ap.add_argument("--backdrop-clear", type=float, default=0.28)
+    ap.add_argument("--backdrop-sharp", type=float, default=0.37,
+                    help="nettete du fond : 0 = fondu, 1 = net et pleine definition")
     ap.add_argument("--screen-dim", type=float, default=0.40,
                     help="opacite de la dalle devant l'image de fond")
     ap.add_argument("--travel", type=float, default=0.0,
@@ -491,11 +518,17 @@ def look_kwargs(args):
             "blocs": args.blocs, "blocs_on": args.blocs_on,
             "invert": args.invert, "invert_on": args.invert_on,
             "stut": args.stut, "stut_on": args.stut_on,
+            "stut_loop": args.stut_loop,
+            "scramble": args.scramble, "scr_len": args.scr_len,
+            "miroir": args.miroir, "miroir_on": args.miroir_on,
+            "ondul": args.ondul, "ondul_on": args.ondul_on,
+            "mosaic": args.mosaic, "mosaic_on": args.mosaic_on,
             "snare": args.snare, "wave_gain": args.wave, "trail": args.trail,
             "wave_win": args.wave_win, "wave_smooth": args.wave_smooth,
             "wave_trig": args.wave_trig, "wave_passes": args.wave_passes,
             "wave_punch": args.wave_punch,
             "screen_dim": args.screen_dim,
+            "backdrop_sharp": args.backdrop_sharp,
             "travel": args.travel, "travel_mode": args.travel_mode,
             "punch": args.punch, "punch_on": args.punch_on,
             "shake_amp": args.shake, "shake_on": args.shake_on,
