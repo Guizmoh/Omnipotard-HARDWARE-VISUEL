@@ -134,7 +134,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               punch=0.032, punch_on="grosse caisse",
                               shake_amp=0.0, shake_on="grosse caisse",
                               parts=0.0, parts_on="caisse claire",
-                              parts_speed=1.0, parts_life=0.55,
+                              parts_n=14, parts_speed=1.0, parts_life=0.55,
                               ring=0.0, ring_on="grosse caisse",
                               grid_pulse=0.0, grid_on="grosse caisse",
                               bg_flash=0.0, flash_on="caisse claire",
@@ -159,6 +159,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.punch, r.punch_on = float(punch), str(punch_on)
     r.shake_amp, r.shake_on = float(shake_amp), str(shake_on)
     r.parts, r.parts_on = float(parts), str(parts_on)
+    r.parts_n = int(parts_n)
     r.parts_speed, r.parts_life = float(parts_speed), float(parts_life)
     r.ring, r.ring_on = float(ring), str(ring_on)
     r.grid_pulse, r.grid_on = float(grid_pulse), str(grid_on)
@@ -460,6 +461,8 @@ def add_look_args(ap):
     ap.add_argument("--parts", type=float, default=0.0,
                     help="etincelles ejectees a chaque coup")
     ap.add_argument("--parts-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--parts-n", type=int, default=14,
+                    help="nombre d'etincelles par coup (jusqu'a 40000)")
     ap.add_argument("--parts-speed", type=float, default=1.0)
     ap.add_argument("--parts-life", type=float, default=0.55,
                     help="duree de vie d'une etincelle, en secondes")
@@ -497,6 +500,7 @@ def look_kwargs(args):
             "punch": args.punch, "punch_on": args.punch_on,
             "shake_amp": args.shake, "shake_on": args.shake_on,
             "parts": args.parts, "parts_on": args.parts_on,
+            "parts_n": args.parts_n,
             "parts_speed": args.parts_speed, "parts_life": args.parts_life,
             "ring": args.ring, "ring_on": args.ring_on,
             "grid_pulse": args.grid_pulse, "grid_on": args.grid_on,

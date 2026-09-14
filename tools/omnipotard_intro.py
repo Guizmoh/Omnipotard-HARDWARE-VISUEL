@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-14.10"
+VERSION = "2026-09-14.11"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1817,37 +1817,60 @@ class Renderer:
         idx = np.nonzero(m)[0]
         if len(idx) == 0:
             return
-        n = max(3, int(round(14 * self.parts)))
+        n = int(np.clip(self.parts_n, 3, 40000))
+        jets = list(idx[-6:])                   # au plus six gerbes de front
         # Le faisceau pose un point a la fois : pour qu'une etincelle soit un
         # filet continu et non une file de points, on l'echantillonne a pas
         # constant, comme tout le reste du dessin. Le pas etant fixe en unites
         # du monde, la meme etincelle garde sa densite en 4K comme en 540p.
         PAS = 0.0030
-        for i in idx[-6:]:                      # au plus six jets simultanes
+        # Au-dela de quelques centaines d'etincelles, les tracer entieres
+        # coute plus que toute la machine. On tient donc un budget de points
+        # par image : passe un certain nombre, chaque etincelle est ecourtee
+        # plutot que supprimee — et c'est ce qu'on veut, car une gerbe dense
+        # se lit comme une poussiere de braises, pas comme des filets.
+        BUDGET = 500000
+        kmax = max(2, int(BUDGET / max(1, n * len(jets))))
+        REF = 14 * 110          # points d'une gerbe au reglage d'origine
+        for i in jets:
             age = float((t - self.ev_t[i]) / vie)
             force = float(self.ev_f[i])
             r = np.random.default_rng(7919 + int(i))
             a = r.uniform(0.0, 2.0 * math.pi, n)
-            v = (0.55 + 0.90 * r.random(n)) * float(self.parts_speed)
+            # vitesses tres etalees : un tirage uniforme donne une coquille
+            # reguliere, une puissance donne un panache — beaucoup de braises
+            # lentes pres du chassis, quelques-unes qui filent loin.
+            v = (0.30 + 1.55 * r.random(n) ** 2) * float(self.parts_speed)
             # depart juste en dehors du chassis : posees dessus, les etincelles
             # se confondent avec le dessin de la machine et passent pour du bruit
-            ox, oy = 1.37 * np.cos(a), 0.71 * np.sin(a)
+            jit = 1.0 + 0.05 * r.standard_normal(n)
+            ox, oy = 1.37 * jit * np.cos(a), 0.71 * jit * np.sin(a)
+            # la direction s'ecarte un peu du rayon : sans cela les braises
+            # restent alignees sur leur point de depart
+            b = a + 0.22 * r.standard_normal(n)
             # course mesuree : assez pour se detacher du chassis, pas assez
             # pour traverser l'ecran et devenir une rayure
             course = 1.15 * v * (0.45 + force)
             d1 = course * max(0.0, age - 0.18) ** 0.75
             d0 = course * age ** 0.75
-            k = int(np.clip(float(np.max(d0 - d1)) / PAS, 6, 110))
+            k = int(np.clip(float(np.max(d0 - d1)) / PAS, 2, 110))
+            k = max(2, min(k, kmax))
+            # L'eclat de chaque point baisse quand la gerbe s'epaissit, mais
+            # en racine du nombre de points reellement poses : mille braises
+            # doivent eclairer plus que dix, sans faire une tache blanche.
+            # Au reglage d'origine le facteur vaut exactement 1, donc rien ne
+            # change pour qui n'y touche pas.
+            eclat = self.parts * math.sqrt(REF / float(max(n * k, 1)))
             s_ = np.linspace(0.0, 1.0, k)[None, :]
             dd = d1[:, None] + (d0 - d1)[:, None] * s_
-            px = (ox[:, None] + np.cos(a)[:, None] * dd).ravel()
+            px = (ox[:, None] + np.cos(b)[:, None] * dd).ravel()
             # une retombee legere : sans elle, les jets sont trop reguliers
-            py = (oy[:, None] + np.sin(a)[:, None] * dd - 0.30 * dd * dd).ravel()
+            py = (oy[:, None] + np.sin(b)[:, None] * dd - 0.30 * dd * dd).ravel()
             sx, sy = self.to_px(np.stack([px, py], axis=1), collapse)
             # tete vive, traine qui s'efface : une etincelle d'intensite egale
             # sur toute sa longueur ressemble a un trait tire a la regle
             profil = np.repeat((0.22 + 0.78 * s_ ** 2), n, axis=0).ravel()
-            beam.add(sx, sy, profil * 1.5 * self.parts * (0.30 + force)
+            beam.add(sx, sy, profil * 1.5 * eclat * (0.30 + force)
                      * (1.0 - age) ** 2)
 
     def _onde(self, beam, t, collapse):
@@ -2360,8 +2383,9 @@ class Renderer:
     punch_on = "grosse caisse"
     shake_amp = 0.0      # secousse : l'image est bousculee sur le coup
     shake_on = "grosse caisse"
-    parts = 0.0          # etincelles ejectees par la machine
+    parts = 0.0          # eclat des etincelles ejectees par la machine
     parts_on = "caisse claire"
+    parts_n = 14         # combien par coup : de la gerbe au nuage de braises
     parts_speed = 1.0
     parts_life = 0.55
     ring = 0.0           # onde de choc : un anneau qui s'ouvre

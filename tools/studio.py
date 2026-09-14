@@ -174,6 +174,7 @@ def look_from(q):
         "shake_on": _dans(q.get("shakeOn"), INSTRUMENTS, "grosse caisse"),
         "parts": float(q.get("parts", 0.0)),
         "parts_on": _dans(q.get("partsOn"), INSTRUMENTS, "caisse claire"),
+        "parts_n": int(float(q.get("partsN", 14))),
         "parts_speed": float(q.get("partsSpeed", 1.0)),
         "parts_life": float(q.get("partsLife", 0.55)),
         "ring": float(q.get("ring", 0.0)),
@@ -279,7 +280,7 @@ class Studio:
                 "wave_gain", "wave_win", "wave_trig", "wave_passes",
                 "wave_punch", "trail", "screen_title", "glitch",
                 "punch", "punch_on", "shake_amp", "shake_on",
-                "parts", "parts_on", "parts_speed", "parts_life",
+                "parts", "parts_on", "parts_n", "parts_speed", "parts_life",
                 "ring", "ring_on", "grid_pulse", "grid_on",
                 "bg_flash", "flash_on",
                 "tranches", "tranches_on", "roll", "roll_on",
@@ -757,6 +758,8 @@ PAGE = r"""<!doctype html>
     <label for="parts">etincelles ejectees &mdash; <span id="v-pa">0.00</span></label>
     <input type="range" id="parts" min="0" max="3" step="0.05" value="0">
     <select id="partsOn" class="inst"></select>
+    <label for="partsN">nombre par coup &mdash; <span id="v-pan">14</span></label>
+    <input type="range" id="partsN" min="2" max="180" step="1" value="4">
     <div class="row">
       <div>
         <label for="partsSpeed">vitesse &mdash; <span id="v-pas">1.00</span></label>
@@ -780,7 +783,14 @@ PAGE = r"""<!doctype html>
     <input type="range" id="bgFlash" min="0" max="2" step="0.05" value="0">
     <select id="flashOn" class="inst"></select>
     <p class="hint">L'eclat du fond ne se voit que s'il y a une image ou une
-      video derriere la machine.</p>
+      video derriere la machine.<br>
+      Le nombre d'etincelles va de quelques-unes a plus de trente mille. Leur
+      eclat baisse a mesure qu'elles se multiplient — sinon un nuage de
+      braises ferait une tache blanche — et au-dela de quelques centaines le
+      trace de chacune est ecourte pour tenir un budget de points par image :
+      c'est ce qui permet d'en lancer des dizaines de milliers sans que le
+      rendu s'effondre. Pour une vraie explosion, montez aussi la vitesse et
+      la duree.</p>
   </div>
 
   <div class="card">
@@ -933,6 +943,7 @@ function params() {
     punch: $('#punch').value, punchOn: $('#punchOn').value,
     shake: $('#shake').value, shakeOn: $('#shakeOn').value,
     parts: $('#parts').value, partsOn: $('#partsOn').value,
+    partsN: String(Math.round($('#partsN').value * $('#partsN').value)),
     partsSpeed: $('#partsSpeed').value, partsLife: $('#partsLife').value,
     ring: $('#ring').value, ringOn: $('#ringOn').value,
     gridPulse: $('#gridPulse').value, gridOn: $('#gridOn').value,
@@ -1003,6 +1014,13 @@ bind('#bdStrength','#v-bds',2); bind('#bdClear','#v-bdc',2); bind('#screenDim','
 bind('#glitch','#v-gl',2);
 bind('#punch','#v-pu',3); bind('#shake','#v-sh',2); bind('#parts','#v-pa',2);
 bind('#partsSpeed','#v-pas',2); bind('#partsLife','#v-pal',2);
+// Le curseur porte la racine du nombre : lineaire, il aurait passe de 2000 a
+// 30000 sur son dernier tiers et aurait ete inutilisable dans le bas.
+$('#partsN').oninput = e => {
+  const n = Math.round(e.target.value * e.target.value);
+  $('#v-pan').textContent = n >= 1000 ? (n / 1000).toFixed(1) + ' k' : n;
+  shot();
+};
 bind('#ring','#v-ri',2); bind('#gridPulse','#v-gp',2); bind('#bgFlash','#v-bf',2);
 bind('#tranches','#v-tr',2); bind('#blocs','#v-bl',2); bind('#roll','#v-ro',2);
 bind('#ghost','#v-gh',2); bind('#invert','#v-in',2); bind('#stut','#v-st',2);

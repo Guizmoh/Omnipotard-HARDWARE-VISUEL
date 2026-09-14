@@ -479,13 +479,22 @@ claire » veut vraiment dire caisse claire. À zéro, la réaction est éteinte.
 | --- | --- | --- |
 | zoom d'impact | l'image respire sur le coup | `--punch`, `--punch-on` |
 | secousse | l'image est bousculée | `--shake`, `--shake-on` |
-| étincelles | des braises jaillissent du châssis et retombent | `--parts`, `--parts-on`, `--parts-speed`, `--parts-life` |
+| étincelles | des braises jaillissent du châssis et retombent | `--parts`, `--parts-on`, `--parts-n`, `--parts-speed`, `--parts-life` |
 | onde de choc | un anneau s'ouvre depuis la machine | `--ring`, `--ring-on` |
 | pulsation de la grille | la grille du fond s'allume | `--grid-pulse`, `--grid-on` |
 | éclat du fond | la photo est éclairée comme par un flash | `--bg-flash`, `--flash-on` |
 
 Les instruments disponibles : `grosse caisse`, `basse`, `caisse claire`,
 `percussions`, `charley`, `accords`, `tout`.
+
+Le nombre d'**étincelles** (`--parts-n`) va de quelques-unes à plus de trente
+mille. Deux mécanismes rendent cette échelle tenable. L'éclat de chaque braise
+baisse en racine du nombre de points réellement posés — mille braises éclairent
+plus que dix, sans faire une tache blanche — et au-delà de quelques centaines,
+le tracé de chacune est **écourté** plutôt que supprimé, pour tenir un budget
+de points par image. Le coût reste donc borné : en 1080p, passer de 14 à 10 000
+braises ajoute 112 ms par image, et 32 000 n'en coûtent pas davantage. Pour une
+vraie explosion, monter aussi `--parts-speed` et `--parts-life`.
 
 Le **dédoublement chromatique** se règle de la même façon (`--split-on`,
 défaut : la grosse caisse). Son nombre est un **plafond, pas une consigne** :
@@ -531,6 +540,23 @@ choix.
 | image fantôme | une copie décalée et transparente se superpose | `--ghost`, `--ghost-on` |
 | négatif du trait | le cœur du trait se replie vers le sombre | `--invert`, `--invert-on` |
 | bégaiement | l'image gèle pendant que le son continue | `--stut`, `--stut-on` |
+
+Le **bégaiement** demande un mot. Sur chaque coup retenu, l'image se fige sur
+l'instant de ce coup pendant la durée réglée ; le son, lui, ne s'arrête pas.
+Avec un gel de 0,14 s à 30 images par seconde, cela donne :
+
+```
+image à 3,227 s  →  dessine 3,227 s
+image à 3,260 s  →  dessine 3,257 s   (gelée — un coup vient de tomber)
+image à 3,293 s  →  dessine 3,257 s
+image à 3,326 s  →  dessine 3,257 s
+image à 3,359 s  →  dessine 3,257 s
+image à 3,392 s  →  dessine 3,257 s
+image à 3,425 s  →  dessine 3,417 s   (coup suivant, l'image repart)
+```
+
+Cinq images identiques, puis la vidéo rattrape son retard d'un coup. Ce n'est
+donc pas un ralenti : le temps saute pour revenir au bon endroit.
 
 Elles s'appliquent à l'image finie, juste avant la déformation du tube — au
 même endroit que les glitchs de paroxysme, ce qui leur donne cet air de signal
