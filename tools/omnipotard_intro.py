@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-14.12"
+VERSION = "2026-09-14.13"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1560,6 +1560,28 @@ class Renderer:
         boucle = max(1e-4, float(self.stut_loop))
         return t - dernier + (dernier % boucle)
 
+    def tape_time(self, t):
+        """Le temps qui ralentit puis rattrape, comme une bande qui patine.
+
+        Sur le coup, l'image avance de moins en moins vite pendant la fenetre,
+        puis retrouve le son d'un seul coup. Le son, lui, n'a jamais ralenti :
+        c'est ce decalage qui fait l'effet.
+        """
+        if self.tapestop <= 0.001 or len(self.ev_t) == 0:
+            return t
+        pads = FAMILLES.get(self.tapestop_on, FAMILLES["grosse caisse"])
+        fen = float(self.tapestop)
+        dt = t - self.ev_t
+        m = (dt >= 0.0) & (dt < fen)
+        if pads is not None:
+            m &= np.isin(self.ev_pad, pads)
+        if not np.any(m):
+            return t
+        d = float(np.min(dt[m]))
+        u = d / fen
+        # l'avance suit 1-(1-u)^3 : rapide au depart, presque nulle a la fin
+        return t - d + fen * (1.0 - (1.0 - u) ** 3) * 0.5
+
     def scramble_time(self, t):
         """Le temps decoupe en tranches courtes, rejouees dans le desordre.
 
@@ -2488,6 +2510,20 @@ class Renderer:
     ondul_on = "basse"
     mosaic = 0.0         # pixelisation brutale
     mosaic_on = "caisse claire"
+    # ---- breakcore
+    kaleido = 0.0        # l'image repetee en grille
+    kaleido_on = "caisse claire"
+    cisaille = 0.0       # cisaillement diagonal
+    cisaille_on = "caisse claire"
+    coupure = 0.0        # l'image disparait, une image ou deux
+    coupure_on = "grosse caisse"
+    tapestop = 0.0       # le temps ralentit puis rattrape, comme une bande
+    tapestop_on = "grosse caisse"
+    # ---- trip hop, lo-fi : des textures continues, pas des impacts
+    cadence = 0          # images tenues (2 = 15 i/s, 3 = 10 i/s)
+    poussiere = 0.0      # poussiere et rayures de pellicule
+    flottement = 0.0     # la bande flotte : lent va-et-vient de l'image
+    halo_doux = 0.0      # halo laiteux et noirs releves
 
     step_phase = None   # instant du premier pas du sequenceur (None = intro)
     drops = None        # instants des paroxysmes du morceau (None = intro)
@@ -2634,6 +2670,42 @@ class Renderer:
                 # de l'image, seul le petit tableau des blocs est alloue
                 vue[...] = vue.mean(axis=(1, 3))[:, None, :, None, :]
 
+        # ---- kaleidoscope : l'image repetee en grille
+        a = self.kaleido * self.hit_env(t, self.kaleido_on, fall=13.0,
+                                        plancher=PLANCHER_AVARIE)
+        if a > 0.30:
+            nb = 3 if a > 0.85 else 2
+            h2, w2 = H // nb, W // nb
+            if h2 > 1 and w2 > 1:
+                # copie du sous-echantillonnage : on ne peut pas lire l'image
+                # et y ecrire en meme temps sans la brouiller
+                petit = np.ascontiguousarray(img[:h2 * nb:nb, :w2 * nb:nb])
+                for i in range(nb):
+                    for j in range(nb):
+                        bloc = img[i * h2:(i + 1) * h2, j * w2:(j + 1) * w2]
+                        src = petit[:bloc.shape[0], :bloc.shape[1]]
+                        # un carreau sur deux est retourne : c'est ce qui fait
+                        # le kaleidoscope plutot qu'une simple mosaique
+                        bloc[...] = src[::-1, ::-1] if (i + j) % 2 else src
+
+        # ---- cisaillement : l'image penche d'un bloc
+        a = self.cisaille * self.hit_env(t, self.cisaille_on, fall=14.0,
+                                         plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            pente = W * 0.16 * a * (1.0 if int(rng.integers(0, 2)) else -1.0)
+            dx = (np.linspace(-0.5, 0.5, H) * pente).astype(np.int32)
+            for d in np.unique(dx):
+                if d:
+                    sel = np.nonzero(dx == d)[0]
+                    img[sel] = np.roll(img[sel], int(d), axis=1)
+
+        # ---- coupure franche : l'image s'absente
+        # retombee calee sur la cadence : a 1, la coupure dure deux images
+        a = self.coupure * self.hit_env(t, self.coupure_on, fall=11.0,
+                                        plancher=PLANCHER_AVARIE)
+        if a > 0.30:
+            img *= max(0.0, 1.0 - 1.35 * a)
+
         # ---- negatif du trait (solarisation)
         a = self.invert * self.hit_env(t, self.invert_on, fall=18.0,
                                        plancher=PLANCHER_AVARIE)
@@ -2648,7 +2720,60 @@ class Renderer:
             for y0 in range(0, self.H, self.BANDE):
                 b = img[y0:y0 + self.BANDE]
                 np.minimum(b, 2.0 * seuil - b, out=b)
+        self._texture_lofi(img, t, rng)
         return img
+
+    def _texture_lofi(self, img, t, rng):
+        """Les textures continues : celles qui ne frappent pas, mais vieillissent.
+
+        Contrairement aux avaries, elles ne se declenchent sur aucun coup —
+        elles sont la du debut a la fin. C'est ce qui fait la difference entre
+        un accident et une matiere : un grain de pellicule qui n'apparaitrait
+        que sur la caisse claire ne ressemblerait a rien.
+        """
+        H, W = self.H, self.W
+
+        # ---- la bande flotte : lent va-et-vient, comme une cassette fatiguee
+        if self.flottement > 0.01:
+            k = self.flottement
+            dx = int(round(W * 0.012 * k * math.sin(t * 0.83 + 1.1)
+                           + W * 0.005 * k * math.sin(t * 2.37)))
+            dy = int(round(H * 0.008 * k * math.sin(t * 0.61)))
+            if dx:
+                img[:] = np.roll(img, dx, axis=1)
+            if dy:
+                img[:] = np.roll(img, dy, axis=0)
+
+        # ---- halo laiteux et noirs releves
+        if self.halo_doux > 0.01:
+            k = self.halo_doux
+            # Flou calcule en definition reduite puis redeploye, comme le halo
+            # du faisceau : un flou large n'a aucun detail a perdre, et le
+            # faire en pleine definition doublait le temps de calcul d'une
+            # image 1080p a lui seul.
+            petit = downsample(img.mean(axis=2), 4)
+            flou = upsample(gauss(petit, max(1.5, H / 600.0)), 4, (H, W))
+            img *= (1.0 - 0.10 * k)
+            img += flou[..., None] * (0.42 * k)
+            img += 0.035 * k                    # les noirs ne sont plus noirs
+
+        # ---- poussiere et rayures de pellicule
+        if self.poussiere > 0.01:
+            k = self.poussiere
+            for _ in range(int(14 * k) + 2):    # grains clairs
+                y = int(rng.integers(0, H)); x = int(rng.integers(0, W))
+                r = int(rng.integers(1, max(2, int(H * 0.004)) + 1))
+                img[max(0, y - r):y + r, max(0, x - r):x + r] += 0.45 * k
+            if rng.random() < 0.35 * k:          # une rayure verticale
+                x = int(rng.integers(0, W))
+                w = max(1, int(W * 0.0012))
+                y0 = int(rng.integers(0, H // 2))
+                y1 = int(rng.integers(y0 + H // 4, H))
+                img[y0:y1, x:x + w] += float(rng.uniform(0.10, 0.40)) * k
+            if rng.random() < 0.18 * k:          # un cheveu, une poussiere longue
+                y = int(rng.integers(0, H))
+                x0 = int(rng.integers(0, W // 2))
+                img[y:y + 1, x0:x0 + int(W * rng.uniform(0.05, 0.25))] += 0.22 * k
 
     def _split(self, img, amount):
         """Dedoublement chromatique du trait sur les gros coups de sub.

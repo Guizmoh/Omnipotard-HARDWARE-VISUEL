@@ -159,6 +159,18 @@ def look_from(q):
         "ondul_on": _dans(q.get("ondulOn"), INSTRUMENTS, "basse"),
         "mosaic": float(q.get("mosaic", 0.0)),
         "mosaic_on": _dans(q.get("mosaicOn"), INSTRUMENTS, "caisse claire"),
+        "kaleido": float(q.get("kaleido", 0.0)),
+        "kaleido_on": _dans(q.get("kaleidoOn"), INSTRUMENTS, "caisse claire"),
+        "cisaille": float(q.get("cisaille", 0.0)),
+        "cisaille_on": _dans(q.get("cisailleOn"), INSTRUMENTS, "caisse claire"),
+        "coupure": float(q.get("coupure", 0.0)),
+        "coupure_on": _dans(q.get("coupureOn"), INSTRUMENTS, "grosse caisse"),
+        "tapestop": float(q.get("tapestop", 0.0)),
+        "tapestop_on": _dans(q.get("tapestopOn"), INSTRUMENTS, "grosse caisse"),
+        "cadence": int(float(q.get("cadence", 0))),
+        "poussiere": float(q.get("poussiere", 0.0)),
+        "flottement": float(q.get("flottement", 0.0)),
+        "halo_doux": float(q.get("haloDoux", 0.0)),
         "snare": float(q.get("snare", 1.0)),
         "wave_gain": float(q.get("wave", 1.10)),
         "wave_win": float(q.get("waveWin", 0.070)),
@@ -298,7 +310,10 @@ class Studio:
                 "ghost", "ghost_on", "blocs", "blocs_on",
                 "invert", "invert_on", "stut", "stut_on", "stut_loop",
                 "scramble", "scr_len", "miroir", "miroir_on",
-                "ondul", "ondul_on", "mosaic", "mosaic_on")
+                "ondul", "ondul_on", "mosaic", "mosaic_on",
+                "kaleido", "kaleido_on", "cisaille", "cisaille_on",
+                "coupure", "coupure_on", "tapestop", "tapestop_on",
+                "cadence", "poussiere", "flottement", "halo_doux")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
                         "backdrop_sharp")
@@ -855,6 +870,22 @@ PAGE = r"""<!doctype html>
     <input type="range" id="mosaic" min="0" max="2" step="0.05" value="0">
     <select id="mosaicOn" class="inst"></select>
 
+    <label for="kaleido">kaleidoscope &mdash; <span id="v-ka">0.00</span></label>
+    <input type="range" id="kaleido" min="0" max="2" step="0.05" value="0">
+    <select id="kaleidoOn" class="inst"></select>
+
+    <label for="cisaille">cisaillement &mdash; <span id="v-ci">0.00</span></label>
+    <input type="range" id="cisaille" min="0" max="2.5" step="0.05" value="0">
+    <select id="cisailleOn" class="inst"></select>
+
+    <label for="coupure">coupure franche &mdash; <span id="v-co">0.00</span></label>
+    <input type="range" id="coupure" min="0" max="2.5" step="0.05" value="0">
+    <select id="coupureOn" class="inst"></select>
+
+    <label for="tapestop">patinage de bande &mdash; <span id="v-ta">0.00</span> s</label>
+    <input type="range" id="tapestop" min="0" max="0.8" step="0.02" value="0">
+    <select id="tapestopOn" class="inst"></select>
+
     <label for="scramble">tranches de temps brassees &mdash; <span id="v-sc2">0.00</span></label>
     <input type="range" id="scramble" min="0" max="1" step="0.05" value="0">
     <label for="scrLen">longueur d'une tranche &mdash; <span id="v-scl">0.14</span> s</label>
@@ -867,6 +898,31 @@ PAGE = r"""<!doctype html>
       decoupent le temps en blocs reguliers et les rejouent dans le desordre,
       pendant que le son continue tout droit. Des tranches courtes hachent,
       des longues desorientent.</p>
+  </div>
+
+  <div class="card">
+    <h2>Texture &mdash; trip hop, lo-fi</h2>
+    <p class="hint" style="margin-top:0">Celles-ci ne frappent sur rien : elles
+      sont la du debut a la fin. C'est ce qui separe un accident d'une matiere
+      — un grain de pellicule qui n'apparaitrait que sur la caisse claire ne
+      ressemblerait a rien.</p>
+
+    <label for="cadence">cadence tenue &mdash; <span id="v-ca">fluide</span></label>
+    <input type="range" id="cadence" min="0" max="5" step="1" value="0">
+
+    <label for="haloDoux">halo laiteux &mdash; <span id="v-hd">0.00</span></label>
+    <input type="range" id="haloDoux" min="0" max="2" step="0.05" value="0">
+
+    <label for="poussiere">poussiere et rayures &mdash; <span id="v-po">0.00</span></label>
+    <input type="range" id="poussiere" min="0" max="2.5" step="0.05" value="0">
+
+    <label for="flottement">flottement de bande &mdash; <span id="v-fl">0.00</span></label>
+    <input type="range" id="flottement" min="0" max="2.5" step="0.05" value="0">
+    <p class="hint">La <b>cadence tenue</b> garde chaque image deux, trois ou
+      quatre fois : la video passe a 15, 10 ou 7 images par seconde sans rien
+      ralentir. C'est le geste qui donne son air d'animation a un clip lo-fi.
+      Le <b>halo laiteux</b> releve les noirs et etale la lumiere, a l'oppose du
+      contraste franc de l'oscilloscope.</p>
   </div>
 
   <div class="card">
@@ -999,6 +1055,12 @@ function params() {
     miroir: $('#miroir').value, miroirOn: $('#miroirOn').value,
     ondul: $('#ondul').value, ondulOn: $('#ondulOn').value,
     mosaic: $('#mosaic').value, mosaicOn: $('#mosaicOn').value,
+    kaleido: $('#kaleido').value, kaleidoOn: $('#kaleidoOn').value,
+    cisaille: $('#cisaille').value, cisailleOn: $('#cisailleOn').value,
+    coupure: $('#coupure').value, coupureOn: $('#coupureOn').value,
+    tapestop: $('#tapestop').value, tapestopOn: $('#tapestopOn').value,
+    cadence: $('#cadence').value, poussiere: $('#poussiere').value,
+    flottement: $('#flottement').value, haloDoux: $('#haloDoux').value,
     bdSharp: $('#bdSharp').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
@@ -1073,12 +1135,22 @@ bind('#ghost','#v-gh',2); bind('#invert','#v-in',2); bind('#stut','#v-st',2);
 bind('#stutLoop','#v-sl',2); bind('#miroir','#v-mi',2); bind('#ondul','#v-on',2);
 bind('#mosaic','#v-mo',2); bind('#scramble','#v-sc2',2); bind('#scrLen','#v-scl',2);
 bind('#bdSharp','#v-bdq',2);
+bind('#kaleido','#v-ka',2); bind('#cisaille','#v-ci',2);
+bind('#coupure','#v-co',2); bind('#tapestop','#v-ta',2);
+bind('#haloDoux','#v-hd',2); bind('#poussiere','#v-po',2);
+bind('#flottement','#v-fl',2);
+$('#cadence').oninput = e => {
+  const n = +e.target.value;
+  $('#v-ca').textContent = n < 2 ? 'fluide' : Math.round(30 / n) + ' i/s';
+  shot();
+};
 $('#travel').oninput = e => {
   $('#v-tv').textContent = Math.round(+e.target.value * 100) + ' %'; shot(); };
 for (const id of ['#travelMode','#punchOn','#shakeOn','#partsOn','#ringOn',
                   '#gridOn','#flashOn','#splitOn','#tranchesOn','#blocsOn',
                   '#rollOn','#ghostOn','#invertOn','#stutOn','#miroirOn',
-                  '#ondulOn','#mosaicOn']) $(id).onchange = shot;
+                  '#ondulOn','#mosaicOn','#kaleidoOn','#cisailleOn',
+                  '#coupureOn','#tapestopOn']) $(id).onchange = shot;
 
 /* ---- fond : image ou video ---- */
 let backdrop = '';
@@ -1230,7 +1302,11 @@ fetch('/config').then(r => r.json())
                               ['#stutOn', 'charley'],
                               ['#miroirOn', 'caisse claire'],
                               ['#ondulOn', 'basse'],
-                              ['#mosaicOn', 'caisse claire']])
+                              ['#mosaicOn', 'caisse claire'],
+                              ['#kaleidoOn', 'caisse claire'],
+                              ['#cisailleOn', 'caisse claire'],
+                              ['#coupureOn', 'grosse caisse'],
+                              ['#tapestopOn', 'grosse caisse']])
       remplir(sel, c.instruments || [], def);
     remplir('#travelMode', c.travellings || [], 'avant');
   })

@@ -10,6 +10,19 @@ echo.
 echo   Mise a jour du studio Omnipotard.
 echo   Si la fenetre du studio est encore ouverte, fermez-la avant de continuer.
 echo.
+REM Ce fichier doit etre DANS le dossier du projet, a cote de
+REM Lancer-le-studio.bat. Lance ailleurs, il y deverserait tout le projet.
+if not exist "%~dp0tools\omnipotard_intro.py" (
+    echo.
+    echo   Ce fichier doit etre place DANS le dossier du projet,
+    echo   a cote de Lancer-le-studio.bat, puis double-clique de la.
+    echo.
+    echo   Dossier actuel : %~dp0
+    echo.
+    pause
+    exit /b 1
+)
+
 echo   Version actuellement installee :
 findstr /b "VERSION = " tools\omnipotard_intro.py
 echo.

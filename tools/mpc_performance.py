@@ -132,6 +132,12 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               miroir=0.0, miroir_on="caisse claire",
                               ondul=0.0, ondul_on="basse",
                               mosaic=0.0, mosaic_on="caisse claire",
+                              kaleido=0.0, kaleido_on="caisse claire",
+                              cisaille=0.0, cisaille_on="caisse claire",
+                              coupure=0.0, coupure_on="grosse caisse",
+                              tapestop=0.0, tapestop_on="grosse caisse",
+                              cadence=0, poussiere=0.0, flottement=0.0,
+                              halo_doux=0.0,
                               snare=1.0, wave_gain=1.10, trail=1.0, screen_title="",
                               wave_win=0.070, wave_smooth=56, wave_trig=0.0,
                               wave_passes=1, wave_punch=0.85,
@@ -162,6 +168,13 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.miroir, r.miroir_on = float(miroir), str(miroir_on)
     r.ondul, r.ondul_on = float(ondul), str(ondul_on)
     r.mosaic, r.mosaic_on = float(mosaic), str(mosaic_on)
+    r.kaleido, r.kaleido_on = float(kaleido), str(kaleido_on)
+    r.cisaille, r.cisaille_on = float(cisaille), str(cisaille_on)
+    r.coupure, r.coupure_on = float(coupure), str(coupure_on)
+    r.tapestop, r.tapestop_on = float(tapestop), str(tapestop_on)
+    r.cadence = int(cadence)
+    r.poussiere, r.flottement = float(poussiere), float(flottement)
+    r.halo_doux = float(halo_doux)
     r.snare, r.wave_gain = float(snare), float(wave_gain)
     r.trail, r.screen_title = float(trail), str(screen_title or "")
     r.wave_win, r.wave_trig = float(wave_win), float(wave_trig)
@@ -201,7 +214,13 @@ def frame_performance(r, t, duration):
     # suit est donc calcule a cet instant-la. Le tirage aleatoire, lui, reste
     # celui de l'image reelle — sans quoi le grain se figerait aussi et l'on
     # verrait une image arretee plutot qu'une image qui bute.
-    t = r.scramble_time(r.stutter_time(t))
+    # La cadence reduite se pose en premier : elle quantifie l'instant, et
+    # tout ce qui suit travaille sur cet instant-la. C'est ce qui donne a la
+    # video son air d'animation image par image plutot que de ralenti.
+    if r.cadence > 1:
+        pas = float(r.cadence) / r.fps
+        t = int(t / pas) * pas
+    t = r.tape_time(r.scramble_time(r.stutter_time(t)))
     # l'image respire sur l'instrument choisi, et peut aussi etre bousculee
     r._zoom = 1.0 + r.punch * r.hit_env(t, r.punch_on, fall=9.0)
     r._cam_z = 1.0                            # jamais de zoom dans l'ecran
@@ -447,6 +466,27 @@ def add_look_args(ap):
     ap.add_argument("--mosaic", type=float, default=0.0,
                     help="pixelisation brutale sur le coup")
     ap.add_argument("--mosaic-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--kaleido", type=float, default=0.0,
+                    help="l'image repetee en grille sur le coup")
+    ap.add_argument("--kaleido-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--cisaille", type=float, default=0.0,
+                    help="cisaillement diagonal sur le coup")
+    ap.add_argument("--cisaille-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--coupure", type=float, default=0.0,
+                    help="l'image s'absente une image ou deux sur le coup")
+    ap.add_argument("--coupure-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--tapestop", type=float, default=0.0,
+                    help="duree du patinage de bande sur le coup (s)")
+    ap.add_argument("--tapestop-on", default="grosse caisse", choices=INSTRUMENTS)
+    # ---- textures continues
+    ap.add_argument("--cadence", type=int, default=0,
+                    help="images tenues : 2 = 15 i/s, 3 = 10 i/s (0 = fluide)")
+    ap.add_argument("--poussiere", type=float, default=0.0,
+                    help="poussiere et rayures de pellicule")
+    ap.add_argument("--flottement", type=float, default=0.0,
+                    help="la bande flotte : lent va-et-vient de l'image")
+    ap.add_argument("--halo-doux", type=float, default=0.0,
+                    help="halo laiteux et noirs releves")
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=1.10,
@@ -523,6 +563,12 @@ def look_kwargs(args):
             "miroir": args.miroir, "miroir_on": args.miroir_on,
             "ondul": args.ondul, "ondul_on": args.ondul_on,
             "mosaic": args.mosaic, "mosaic_on": args.mosaic_on,
+            "kaleido": args.kaleido, "kaleido_on": args.kaleido_on,
+            "cisaille": args.cisaille, "cisaille_on": args.cisaille_on,
+            "coupure": args.coupure, "coupure_on": args.coupure_on,
+            "tapestop": args.tapestop, "tapestop_on": args.tapestop_on,
+            "cadence": args.cadence, "poussiere": args.poussiere,
+            "flottement": args.flottement, "halo_doux": args.halo_doux,
             "snare": args.snare, "wave_gain": args.wave, "trail": args.trail,
             "wave_win": args.wave_win, "wave_smooth": args.wave_smooth,
             "wave_trig": args.wave_trig, "wave_passes": args.wave_passes,

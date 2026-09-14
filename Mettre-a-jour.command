@@ -9,6 +9,16 @@ cd "$(dirname "$0")" || exit 1
 ZIPURL="https://github.com/Guizmoh/Glitch-visualisateur/archive/refs/heads/claude/omnipotard-intro-video-5bj8zu.zip"
 RACINE="Glitch-visualisateur-claude-omnipotard-intro-video-5bj8zu"
 
+# Ce fichier doit etre DANS le dossier du projet, a cote de
+# Lancer-le-studio.command. Lance ailleurs, il y deverserait tout le projet.
+if [ ! -f tools/omnipotard_intro.py ]; then
+    echo "Ce fichier doit etre place DANS le dossier du projet,"
+    echo "a cote de Lancer-le-studio.command, puis lance de la."
+    echo "Dossier actuel : $(pwd)"
+    read -r -p "Appuyez sur Entree pour fermer."
+    exit 1
+fi
+
 echo "Mise a jour du studio Omnipotard."
 echo "Si la fenetre du studio est encore ouverte, fermez-la."
 echo

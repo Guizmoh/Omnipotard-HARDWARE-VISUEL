@@ -571,6 +571,28 @@ Un gel pur ne se remarque que si l'image bougeait beaucoup juste avant. D'où
 court pris à l'instant du coup. Avec une boucle de deux ou trois images, on
 obtient un sursaut répété, bien plus visible qu'un arrêt.
 
+### Texture — trip hop, lo-fi
+
+Quatre réglages d'une autre nature : ils ne frappent sur rien, ils sont là du
+début à la fin. C'est ce qui sépare un accident d'une matière — un grain de
+pellicule qui n'apparaîtrait que sur la caisse claire ne ressemblerait à rien.
+
+| réglage | ce que ça fait | option |
+| --- | --- | --- |
+| cadence tenue | chaque image gardée 2, 3 ou 4 fois : 15, 10 ou 7 i/s | `--cadence` |
+| halo laiteux | les noirs remontent, la lumière s'étale | `--halo-doux` |
+| poussière et rayures | grains, rayures verticales, cheveux de pellicule | `--poussiere` |
+| flottement de bande | lent va-et-vient de l'image, comme une cassette fatiguée | `--flottement` |
+
+La **cadence tenue** ne ralentit rien : elle quantifie l'instant demandé, si
+bien que la vidéo garde sa durée mais avance par paliers. C'est le geste qui
+donne son air d'animation à un clip lo-fi.
+
+Le **halo laiteux** est calculé en définition réduite puis redéployé, comme le
+halo du faisceau : un flou large n'a aucun détail à perdre, et le faire en
+pleine définition doublait à lui seul le temps de calcul d'une image 1080p.
+Les quatre ensemble coûtent 18 % — 622 ms par image contre 527.
+
 ### Netteté du fond
 
 Le faisceau est additif : une image nette et claire derrière le trait lui mange
@@ -584,6 +606,10 @@ valeur par défaut, 0,37, reproduit exactement l'ancien comportement.
 | ondulation liquide | le balayage ondule, la machine fond | `--ondul`, `--ondul-on` |
 | mosaïque | l'image tombe en gros pixels | `--mosaic`, `--mosaic-on` |
 | tranches brassées | le temps est rejoué dans le désordre | `--scramble`, `--scr-len` |
+| kaléidoscope | l'image répétée en grille, un carreau sur deux retourné | `--kaleido`, `--kaleido-on` |
+| cisaillement | l'image penche d'un bloc | `--cisaille`, `--cisaille-on` |
+| coupure franche | l'image s'absente, deux images durant | `--coupure`, `--coupure-on` |
+| patinage de bande | le temps ralentit puis rattrape d'un coup | `--tapestop`, `--tapestop-on` |
 
 Elles s'appliquent à l'image finie, juste avant la déformation du tube — au
 même endroit que les glitchs de paroxysme, ce qui leur donne cet air de signal
