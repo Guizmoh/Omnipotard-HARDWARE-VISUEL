@@ -616,6 +616,35 @@ lignes — et soixante colonnes par seconde gardées en octets : un morceau de
 quatre minutes tient dans un demi-mégaoctet, ce qui se transmet sans peine aux
 tâches de rendu. Baisser l'amplitude de la courbe sonore pour bien le voir.
 
+### Ce que fait chaque réglage, et à quelle fréquence
+
+Sous chaque curseur du studio, deux lignes : une phrase disant **ce que le
+réglage fait**, et, en vert, **combien de fois il se déclenchera sur le morceau
+chargé**.
+
+Le second chiffre est calculé sur les vrais événements du morceau, pas estimé :
+un effet posé sur le charley part souvent des centaines de fois là où la grosse
+caisse en compte quelques dizaines. Sur le morceau de test :
+
+```
+charley          ~ 615 fois   (152 par minute)
+basse            ~ 225 fois   ( 56 par minute)
+percussions      ~ 193 fois   ( 48 par minute)
+grosse caisse    ~ 125 fois   ( 31 par minute)
+caisse claire    ~  88 fois   ( 22 par minute)
+```
+
+La ligne suit le sélecteur d'instrument : la changer met le compte à jour
+aussitôt. Les réglages qui ne se déclenchent sur rien affichent « en continu »,
+ceux laissés à zéro « éteint ». Le dédoublement annonce son nombre réel après
+plafonnement par la durée, les glitchs le nombre de paroxysmes détectés, et les
+tranches brassées le nombre de blocs concernés.
+
+Les phrases vivent dans le moteur, pas dans la page, et un contrôle vérifie que
+chaque curseur en a une. C'est lui qui a trouvé que l'éclair jaune de la caisse
+claire annonçait la fréquence de la grosse caisse : n'ayant pas de sélecteur,
+il retombait sur la valeur par défaut au lieu de compter ses propres familles.
+
 ### Préréglages
 
 Un point de départ par famille de musique, pas une vérité : tout reste

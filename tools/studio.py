@@ -41,8 +41,8 @@ from mpc_performance import (  # noqa: E402
 )
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
-    pick_split_times, VERSION, INSTRUMENTS, TRAVELLINGS, FAMILLES,
-    backdrop_quality, PRESETS, CHAMPS,
+    VERSION, INSTRUMENTS, TRAVELLINGS, FAMILLES,
+    backdrop_quality, PRESETS, CHAMPS, AIDE, COMPTE, pick_split_times,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -252,6 +252,22 @@ class Studio:
         # dessus : on n'en dessine qu'un a la fois.
         self.draw = threading.Lock()
         self.shot_seq = 0         # numero du dernier apercu demande
+
+    @staticmethod
+    def frappes(info):
+        """Combien de fois chaque famille d'instruments frappe dans le morceau.
+
+        C'est ce qui permet au studio d'annoncer, sous chaque curseur, a quelle
+        frequence l'effet partira : un effet pose sur le charley se declenche
+        souvent des milliers de fois, la ou la grosse caisse en compte
+        quelques centaines. Sans ce chiffre, on regle a l'aveugle.
+        """
+        ev = info["_audio"]["events"]
+        out = {}
+        for nom, pads in FAMILLES.items():
+            out[nom] = len(ev) if pads is None else sum(1 for e in ev
+                                                        if e[1] in pads)
+        return out
 
     # ---- morceaux
     def add_track(self, path, name):
@@ -506,6 +522,7 @@ class Handler(BaseHTTPRequestHandler):
                     "travellings": list(TRAVELLINGS),
                     "presets": {k: {CHAMPS[a]: b for a, b in v.items()}
                                 for k, v in PRESETS.items()},
+                    "aide": AIDE, "compte": COMPTE,
                 })
             if u.path == "/still":
                 q["curve"] = q.get("curve", "1") == "1"
@@ -572,7 +589,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({
                     "track": tid, "name": name,
                     "duration": info["total"], "bpm": info["bpm"],
-                    "hits": info["hits"], "drops": info["drops"]})
+                    "hits": info["hits"], "drops": info["drops"],
+                    "frappes": STUDIO.frappes(info),
+                    "duree": info["duration"]})
 
             if u.path == "/backdrop":
                 os.makedirs(FONDS, exist_ok=True)
@@ -643,7 +662,10 @@ PAGE = r"""<!doctype html>
   .drop:hover,.drop.over{border-color:var(--acc);color:var(--ink)}
   .drop b{color:var(--acc);display:block;margin-bottom:4px;letter-spacing:.08em}
   #shot.calcul{opacity:.35;transition:opacity .2s}
-  select.inst{margin:2px 0 10px;font-size:11px;color:var(--dim)}
+  select.inst{margin:2px 0 4px;font-size:11px;color:var(--dim)}
+  .aide{font-size:11px;line-height:1.5;color:#7c8f88;margin:2px 0 12px}
+  .aide b.freq{display:block;color:var(--acc);font-weight:600;margin-top:2px;
+    letter-spacing:.03em}
   #shoterr{display:none;margin-top:8px;padding:8px 10px;border-radius:6px;
     font-size:12px;line-height:1.45;background:#2a1416;border:1px solid #6b2b30;
     color:#ffb4b4}
@@ -687,9 +709,8 @@ PAGE = r"""<!doctype html>
   <div class="card">
     <h2>Prereglage</h2>
     <select id="preset"></select>
-    <p class="hint">Un point de depart par famille de musique, pas une verite :
-      tout reste bougeable ensuite. Choisir un prereglage repose tous les
-      curseurs ; ceux qu'il ne mentionne pas reviennent a leur valeur d'usine.</p>
+    <p class="hint">Ceux qu'un prereglage ne mentionne pas reviennent a leur
+      valeur d'usine : deux prereglages enchaines ne se melangent donc pas.</p>
   </div>
 
   <div class="card">
@@ -766,11 +787,11 @@ PAGE = r"""<!doctype html>
     <h2>Trait</h2>
     <label for="split">dedoublement du trait sur les gros subs &mdash; <span id="v-split">1.00</span></label>
     <input type="range" id="split" min="0" max="2.5" step="0.05" value="1">
-    <label for="wobble">ondulation du trace &mdash; <span id="v-wob">0.00</span></label>
-    <input type="range" id="wobble" min="0" max="1.5" step="0.05" value="0">
+    <select id="splitOn" class="inst"></select>
     <label for="splitCount">dedoublements dans la video &mdash; au plus <span id="v-sc">3</span></label>
     <input type="range" id="splitCount" min="0" max="12" step="1" value="3">
-    <select id="splitOn" class="inst"></select>
+    <label for="wobble">ondulation du trace &mdash; <span id="v-wob">0.00</span></label>
+    <input type="range" id="wobble" min="0" max="1.5" step="0.05" value="0">
     <label for="splitPx">ecart des copies &mdash; <span id="v-spx">11</span> px</label>
     <input type="range" id="splitPx" min="0" max="30" step="1" value="11">
     <label for="snare">eclair jaune sur la caisse claire &mdash; <span id="v-sn">1.00</span></label>
@@ -839,15 +860,11 @@ PAGE = r"""<!doctype html>
     <label for="bgFlash">eclat du fond &mdash; <span id="v-bf">0.00</span></label>
     <input type="range" id="bgFlash" min="0" max="2" step="0.05" value="0">
     <select id="flashOn" class="inst"></select>
-    <p class="hint">L'eclat du fond ne se voit que s'il y a une image ou une
-      video derriere la machine.<br>
-      Le nombre d'etincelles va de quelques-unes a plus de trente mille. Leur
-      eclat baisse a mesure qu'elles se multiplient — sinon un nuage de
-      braises ferait une tache blanche — et au-dela de quelques centaines le
-      trace de chacune est ecourte pour tenir un budget de points par image :
-      c'est ce qui permet d'en lancer des dizaines de milliers sans que le
-      rendu s'effondre. Pour une vraie explosion, montez aussi la vitesse et
-      la duree.</p>
+    <p class="hint">Pour une vraie explosion d'etincelles, monter le nombre,
+      la vitesse et la duree ensemble. Au-dela de quelques centaines de
+      braises, le trace de chacune est ecourte pour tenir un budget de points
+      par image : c'est ce qui permet d'en lancer des dizaines de milliers
+      sans que le rendu s'effondre.</p>
   </div>
 
   <div class="card">
@@ -1053,6 +1070,10 @@ async function upload(f) {
     const j = await r.json();
     if (j.error) throw new Error(j.error);
     track = j.track; drops = j.drops || []; duration = j.duration;
+    // les frappes du morceau : c'est d'elles que sortent les frequences
+    FRAPPES = {frappes: j.frappes || {}, drops: j.drops || [],
+               duree: j.duree || j.duration || 0};
+    majFrequences();
     $('#m-dur').textContent = fmt(j.duration);
     $('#m-bpm').textContent = j.bpm.toFixed(1) + ' BPM';
     $('#m-hits').textContent = j.hits;
@@ -1124,7 +1145,55 @@ function params() {
   });
   return p;
 }
-let pending = null, PRESETS = {}, USINE = {};
+let pending = null, PRESETS = {}, USINE = {}, AIDE = {}, COMPTE = {}, FRAPPES = null;
+
+/* Combien de fois chaque effet partira sur ce morceau. C'est le chiffre qui
+   manque le plus quand on regle : un effet pose sur le charley se declenche
+   des milliers de fois, la ou la grosse caisse en compte quelques centaines. */
+function majFrequences() {
+  const duree = FRAPPES ? FRAPPES.duree : 0;
+  for (const [id, genre] of Object.entries(COMPTE)) {
+    const cible = $('#f-' + id);
+    if (!cible) continue;
+    const el = $('#' + id);
+    const eteint = el && Math.abs(+el.value) < 1e-9;
+    let txt = '';
+    if (eteint) {
+      txt = 'eteint';
+    } else if (!FRAPPES) {
+      txt = 'deposez un morceau pour connaitre la frequence';
+    } else if (Array.isArray(genre)) {
+      // un effet cable sur des familles fixes, sans selecteur
+      const n = genre.reduce((a, f) => a + ((FRAPPES.frappes || {})[f] || 0), 0);
+      txt = '~ ' + n + ' fois dans le morceau' + parMinute(n, duree)
+          + '  (' + genre.join(' et ') + ')';
+    } else if (genre === 'instrument') {
+      const sel = $('#' + id + 'On');
+      const fam = sel ? sel.value : 'grosse caisse';
+      const n = (FRAPPES.frappes || {})[fam] || 0;
+      txt = '~ ' + n + ' fois dans le morceau' + parMinute(n, duree)
+          + '  (' + fam + ')';
+    } else if (genre === 'split') {
+      const n = Math.min(+$('#splitCount').value,
+                         1 + Math.floor(duree / Math.max(25, 0.14 * duree)));
+      txt = '~ ' + n + ' fois dans le morceau';
+    } else if (genre === 'drops') {
+      const n = (FRAPPES.drops || []).length;
+      txt = '~ ' + n + ' fois dans le morceau  (les montees du morceau)';
+    } else if (genre === 'tranche') {
+      const blocs = Math.floor(duree / Math.max(0.04, +$('#scrLen').value));
+      const part = +$('#scramble').value;
+      txt = '~ ' + Math.round(blocs * part) + ' blocs brasses sur ' + blocs;
+    } else {
+      txt = 'en continu, du debut a la fin';
+    }
+    cible.textContent = txt;
+  }
+}
+function parMinute(n, duree) {
+  if (!duree || n < 2) return '';
+  return ', soit ' + (n / (duree / 60)).toFixed(0) + ' par minute';
+}
 function shot() {
   if (!track) return;
   clearTimeout(pending);
@@ -1169,11 +1238,12 @@ $('#palette').onchange = e => {
 };
 $('#bg').onchange = e => { $('#bgopts').hidden = e.target.value === 'noir'; shot(); };
 for (const id of ['#trait','#bgColor','#curve']) $(id).oninput = shot;
-$('#split').oninput  = e => { $('#v-split').textContent = (+e.target.value).toFixed(2); shot(); };
-$('#wobble').oninput = e => { $('#v-wob').textContent  = (+e.target.value).toFixed(2); shot(); };
-$('#trail').oninput  = e => { $('#v-trail').textContent= (+e.target.value).toFixed(2); shot(); };
+$('#split').oninput  = e => { $('#v-split').textContent = (+e.target.value).toFixed(2); majFrequences(); shot(); };
+$('#wobble').oninput = e => { $('#v-wob').textContent  = (+e.target.value).toFixed(2); majFrequences(); shot(); };
+$('#trail').oninput  = e => { $('#v-trail').textContent= (+e.target.value).toFixed(2); majFrequences(); shot(); };
 const bind = (id, out, dec) => { $(id).oninput = e => {
-  $(out).textContent = dec ? (+e.target.value).toFixed(dec) : e.target.value; shot(); }; };
+  $(out).textContent = dec ? (+e.target.value).toFixed(dec) : e.target.value;
+  majFrequences(); shot(); }; };
 bind('#splitCount','#v-sc',0); bind('#splitPx','#v-spx',0);
 bind('#snare','#v-sn',2); bind('#wave','#v-wv',2); bind('#wavePunch','#v-wp',2);
 bind('#waveSmooth','#v-ws',0);
@@ -1212,7 +1282,8 @@ for (const id of ['#travelMode','#punchOn','#shakeOn','#partsOn','#ringOn',
                   '#gridOn','#flashOn','#splitOn','#tranchesOn','#blocsOn',
                   '#rollOn','#ghostOn','#invertOn','#stutOn','#miroirOn',
                   '#ondulOn','#mosaicOn','#kaleidoOn','#cisailleOn',
-                  '#coupureOn','#tapestopOn']) $(id).onchange = shot;
+                  '#coupureOn','#tapestopOn'])
+  $(id).onchange = () => { majFrequences(); shot(); };
 
 /* ---- fond : image ou video ---- */
 let backdrop = '';
@@ -1372,6 +1443,26 @@ fetch('/config').then(r => r.json())
       remplir(sel, c.instruments || [], def);
     remplir('#travelMode', c.travellings || [], 'avant');
 
+    /* ---- une phrase sous chaque reglage, et sa frequence ---- */
+    AIDE = c.aide || {}; COMPTE = c.compte || {};
+    for (const [id, phrase] of Object.entries(AIDE)) {
+      const el = $('#' + id);
+      if (!el) continue;
+      // Le texte se pose apres le selecteur d'instrument quand celui-ci suit
+      // immediatement le curseur, pour que le bloc « effet + instrument +
+      // explication » reste solidaire. Exiger le voisinage direct evite de
+      // rattacher un selecteur qui se trouve plus bas dans la meme carte.
+      // deux selecteurs ne portent pas le nom de leur curseur suivi de « On »
+      const AUTRE = {gridPulse: 'gridOn', bgFlash: 'flashOn'};
+      const inst = $('#' + (AUTRE[id] || id + 'On'));
+      const apres = (inst && el.nextElementSibling === inst) ? inst : el;
+      const d = document.createElement('div');
+      d.className = 'aide';
+      d.innerHTML = phrase + '<b class="freq" id="f-' + id + '"></b>';
+      apres.parentNode.insertBefore(d, apres.nextSibling);
+    }
+    majFrequences();
+
     /* ---- prereglages : ils reposent tous les curseurs d'un coup ---- */
     PRESETS = c.presets || {};
     $('#preset').innerHTML = Object.keys(PRESETS).map(
@@ -1395,6 +1486,7 @@ fetch('/config').then(r => r.json())
         el.value = (id === 'partsN') ? Math.round(Math.sqrt(+v)) : v;
         el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input'));
       }
+      majFrequences();
       shot();
     };
   })

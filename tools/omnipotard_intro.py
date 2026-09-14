@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-14.14"
+VERSION = "2026-09-14.15"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -149,6 +149,128 @@ PRESETS = {
         "flottement": 0.4, "wave_gain": 0.60, "punch": 0.01,
         "glitch": 0.0, "split": 0.0, "wave_smooth": 110,
     },
+}
+
+# ==========================================================================
+#  Ce que fait chaque reglage, et a quelle frequence
+#
+#  AIDE donne une phrase par curseur, affichee sous lui dans le studio.
+#  COMPTE dit comment estimer le nombre de declenchements par morceau :
+#    "instrument"  autant de fois que l'instrument choisi frappe
+#    "continu"     tout le temps, ce n'est pas un declenchement
+#    "reglage"     un reglage de forme, il ne declenche rien par lui-meme
+#    "split"       les quelques dedoublements, plafonnes par la duree
+#    "drops"       les paroxysmes du morceau
+#    "tranche"     par blocs de temps reguliers
+# ==========================================================================
+
+AIDE = {
+    "preset": "Repose tous les curseurs sur un point de depart. Tout reste "
+              "modifiable ensuite.",
+    "palette": "La teinte du trait. « perso » ouvre un nuancier libre.",
+    "trait": "La couleur du trait quand la palette est « perso ».",
+    "bg": "La texture de la dalle, derriere la machine.",
+    "bgColor": "La couleur de cette texture.",
+    "bgStrength": "Son intensite. Le faisceau etant additif, un fond clair "
+                  "mange le contraste du trait.",
+    "bgClear": "Creuse la texture derriere la machine pour qu'elle s'y detache.",
+    "bdStrength": "La presence de l'image ou de la video de fond.",
+    "bdClear": "Creuse l'image derriere la machine, comme pour la texture.",
+    "screenDim": "L'opacite de la dalle de la MPC. A zero, le fond se voit au "
+                 "travers et l'ecran a l'air en verre.",
+    "bdSharp": "De 0 (fondu, quart de definition) a 1 (net, pleine "
+               "definition). Un fond net mange le contraste du trait.",
+    "travel": "Quelle part de l'image est parcourue du debut a la fin du "
+              "morceau. Vingt pour cent suffisent.",
+    "travelMode": "Le sens du deplacement : on entre dans l'image, on s'en "
+                  "eloigne, ou on la balaye.",
+    "split": "Le trait se separe en trois copies decalees, rouge et bleu, puis "
+             "se recolle. La liste dit quels coups ont le droit de le lancer.",
+    "splitCount": "Combien de fois au plus dans la video. Deux dedoublements "
+                  "ne peuvent pas tomber a moins de 25 secondes.",
+    "splitPx": "L'ecart entre les trois copies, en pixels.",
+    "wobble": "Fait onduler le trace de la machine en permanence. A zero, "
+              "trait net.",
+    "snare": "La caisse claire embrase le trait en jaune et enfle son halo.",
+    "wave": "L'amplitude de la courbe sonore derriere la machine.",
+    "wavePunch": "De combien cette courbe gonfle sur les temps forts.",
+    "waveSmooth": "Lissage de la courbe : large, elle suit le grave et se "
+                  "calme ; etroit, elle tremble au detail.",
+    "trail": "La trainee que laisse la courbe. Elle s'allonge quand plusieurs "
+             "instruments jouent ensemble.",
+    "glitch": "Les rafales de tranches decalees sur les montees du morceau.",
+    "title": "Le nom ecrit sur la dalle. Vide, c'est celui du fichier.",
+    "punch": "L'image respire : un zoom bref sur chaque coup.",
+    "shake": "L'image est bousculee d'un cran sur chaque coup.",
+    "parts": "L'eclat des braises ejectees. Elles naissent des traits memes de "
+             "la machine et partent perpendiculairement.",
+    "partsN": "Combien de braises par coup. Leur eclat baisse a mesure "
+              "qu'elles se multiplient.",
+    "partsSpeed": "Jusqu'ou elles filent avant de s'eteindre.",
+    "partsLife": "Combien de temps elles restent visibles.",
+    "ring": "Un anneau s'ouvre depuis la machine et s'efface.",
+    "gridPulse": "La grille du fond s'allume sur le coup.",
+    "bgFlash": "L'image de fond est eclairee comme par un flash. Sans image de "
+               "fond, rien ne se voit.",
+    "tranches": "Des bandes horizontales de l'image partent de travers.",
+    "blocs": "Des rectangles sont pris ailleurs dans l'image et recopies.",
+    "roll": "Le tube perd sa synchro : l'image saute, avec sa barre de couture.",
+    "ghost": "Une copie decalee et transparente se superpose a l'image.",
+    "invert": "Le coeur du trait se replie vers le sombre en gardant ses bords "
+              "lumineux.",
+    "stut": "L'image decroche du son et rejoue en boucle un bout pris a "
+            "l'instant du coup. Le son, lui, continue.",
+    "stutLoop": "La longueur du bout rejoue. Sous une image, c'est un gel pur ; "
+                "deux ou trois images donnent un sursaut repete.",
+    "miroir": "L'image se replie sur elle-meme, en largeur ou en hauteur.",
+    "ondul": "Le balayage ondule et la machine semble fondre.",
+    "mosaic": "L'image tombe en gros pixels.",
+    "kaleido": "L'image repetee en grille, un carreau sur deux retourne.",
+    "cisaille": "L'image penche d'un bloc, comme cisaillee.",
+    "coupure": "L'image s'absente, deux images durant.",
+    "tapestop": "Le temps ralentit puis rattrape d'un coup, comme une bande "
+                "qui patine.",
+    "scramble": "Le temps decoupe en blocs et rejoue dans le desordre, "
+                "pendant que le son continue tout droit.",
+    "scrLen": "La longueur d'un bloc. Court, ca hache ; long, ca desoriente.",
+    "echo": "La machine telle qu'elle etait il y a quelques centiemes, de plus "
+            "en plus pale, dessinee sous l'image du moment.",
+    "echoN": "Combien d'echos empiles.",
+    "echoDelay": "L'ecart entre deux echos.",
+    "couleurs": "Le trait prend la teinte du dernier instrument frappe : rouge "
+                "la grosse caisse, jaune la caisse claire, cyan le charley, "
+                "violet la basse.",
+    "spectro": "Les trois dernieres secondes du morceau deroulees sur la "
+               "dalle, une ligne par bande de frequences. Baisser l'amplitude "
+               "de la courbe pour bien le voir.",
+    "cadence": "Chaque image gardee plusieurs fois : la video avance par "
+               "paliers sans rien ralentir.",
+    "haloDoux": "Les noirs remontent et la lumiere s'etale, a l'oppose du "
+                "contraste franc de l'oscilloscope.",
+    "poussiere": "Grains, rayures verticales et cheveux de pellicule.",
+    "flottement": "Lent va-et-vient de l'image, comme une cassette fatiguee.",
+    "size": "La definition de la video finale. La 4K demande beaucoup de "
+            "memoire et de temps.",
+    "fps": "Images par seconde. 30 suffit ; 60 adoucit les mouvements rapides.",
+    "scrub": "L'instant du morceau que montre l'apercu.",
+}
+
+COMPTE = {
+    "punch": "instrument", "shake": "instrument", "parts": "instrument",
+    "ring": "instrument", "gridPulse": "instrument", "bgFlash": "instrument",
+    "tranches": "instrument", "blocs": "instrument", "roll": "instrument",
+    "ghost": "instrument", "invert": "instrument", "stut": "instrument",
+    "miroir": "instrument", "ondul": "instrument", "mosaic": "instrument",
+    "kaleido": "instrument", "cisaille": "instrument", "coupure": "instrument",
+    "tapestop": "instrument",
+    "split": "split", "glitch": "drops", "scramble": "tranche",
+    # L'eclair jaune n'a pas de selecteur : il est cable sur la caisse claire
+    # et les percussions. Une liste de familles dit lesquelles compter.
+    "snare": ["caisse claire", "percussions"],
+    "echo": "continu", "couleurs": "continu", "spectro": "continu",
+    "cadence": "continu", "haloDoux": "continu", "poussiere": "continu",
+    "flottement": "continu", "travel": "continu", "wobble": "continu",
+    "trail": "continu", "wave": "continu",
 }
 
 # Le curseur du studio qui porte chaque reglage. Sert a poser un prereglage
