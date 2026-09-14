@@ -593,6 +593,53 @@ halo du faisceau : un flou large n'a aucun détail à perdre, et le faire en
 pleine définition doublait à lui seul le temps de calcul d'une image 1080p.
 Les quatre ensemble coûtent 18 % — 622 ms par image contre 527.
 
+### Écho, couleurs, spectrogramme
+
+**Écho d'images** : la machine telle qu'elle était il y a quelques centièmes,
+de plus en plus pâle, dessinée sous l'image du moment. Les échos s'empilent
+dans le **même faisceau** plutôt que de recalculer des images entières — seul
+le tracé est refait, le halo, les textures et la déformation ne le sont qu'une
+fois. Trois échos coûtent 48 % de plus, là où trois images entières en
+coûteraient 300.
+
+**Couleurs par instrument** : le trait prend la teinte du dernier coup — rouge
+la grosse caisse, jaune la caisse claire, cyan le charley, violet la basse,
+orange les percussions, vert les accords. Le classement se fait sur la
+*fraîcheur* du coup et presque pas sur sa force : classées à la force, les
+familles denses comme le charley gagnaient jusque sur la grosse caisse, dont la
+teinte ne sortait jamais.
+
+**Spectrogramme** : les trois dernières secondes du morceau déroulées sur la
+dalle, une ligne par bande de fréquences, la force en luminosité. Trente bandes
+espacées en octaves — une échelle linéaire tasserait tout le grave sur deux
+lignes — et soixante colonnes par seconde gardées en octets : un morceau de
+quatre minutes tient dans un demi-mégaoctet, ce qui se transmet sans peine aux
+tâches de rendu. Baisser l'amplitude de la courbe sonore pour bien le voir.
+
+### Préréglages
+
+Un point de départ par famille de musique, pas une vérité : tout reste
+bougeable ensuite.
+
+`propre` · `drum and bass` · `dub` · `idm` · `trip hop` · `hip hop` ·
+`breakcore` · `techno` · `ambient`
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --preset idm
+python3 tools/mpc_performance.py morceau.mp3 --preset "trip hop" --palette bleu
+```
+
+Le préréglage n'est qu'un socle : une option donnée explicitement l'emporte sur
+lui, ce qui permet de partir d'`idm` et de ne changer qu'une chose. Dans le
+studio, choisir un préréglage repose **tous** les curseurs — ceux qu'il ne
+mentionne pas reviennent à leur valeur d'usine, sans quoi deux préréglages
+enchaînés se mélangeraient.
+
+Les préréglages sont écrits avec les noms du moteur, et une table dit à quel
+curseur du studio chacun correspond. Un contrôle vérifie que chaque nom existe
+des deux côtés : sans lui, un préréglage poserait des valeurs dans le vide sans
+que rien ne le signale.
+
 ### Netteté du fond
 
 Le faisceau est additif : une image nette et claire derrière le trait lui mange

@@ -40,6 +40,7 @@ from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
     detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, pool_context,
     fit_jobs, INSTRUMENTS, TRAVELLINGS, python_trop_petit,
+    compute_spectro, PRESETS,
 )
 
 
@@ -137,7 +138,8 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               coupure=0.0, coupure_on="grosse caisse",
                               tapestop=0.0, tapestop_on="grosse caisse",
                               cadence=0, poussiere=0.0, flottement=0.0,
-                              halo_doux=0.0,
+                              halo_doux=0.0, echo=0.0, echo_n=3,
+                              echo_delay=0.045, couleurs=0.0, spectro=0.0,
                               snare=1.0, wave_gain=1.10, trail=1.0, screen_title="",
                               wave_win=0.070, wave_smooth=56, wave_trig=0.0,
                               wave_passes=1, wave_punch=0.85,
@@ -175,6 +177,12 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.cadence = int(cadence)
     r.poussiere, r.flottement = float(poussiere), float(flottement)
     r.halo_doux = float(halo_doux)
+    r.echo, r.echo_n = float(echo), int(echo_n)
+    r.echo_delay, r.couleurs = float(echo_delay), float(couleurs)
+    r.spectro = float(spectro)
+    if r.spectro > 0.01:
+        # calcule ici, une fois : les taches de rendu le recevront tout fait
+        r.spec, r.spec_fps = compute_spectro(audio["mono"], audio["sr"])
     r.snare, r.wave_gain = float(snare), float(wave_gain)
     r.trail, r.screen_title = float(trail), str(screen_title or "")
     r.wave_win, r.wave_trig = float(wave_win), float(wave_trig)
@@ -241,6 +249,20 @@ def frame_performance(r, t, duration):
     r._onde(beam, t, 1.0)                     # anneau, sous la machine
     # le fil du morceau passe derriere la machine et s'allume sur les graves
     r._wave_line(beam, t, 1.0, 0.48, None, 999.0, 0.0)
+    # Echos : la machine telle qu'elle etait il y a quelques centiemes, de plus
+    # en plus pale, dessinee sous l'image du moment. On les empile dans le meme
+    # faisceau plutot que de calculer des images entieres — seul le trace est
+    # refait, tout le reste (halo, textures, deformation) ne l'est qu'une fois.
+    if r.echo > 0.01:
+        for k in range(min(int(r.echo_n), 6), 0, -1):
+            te = t - k * r.echo_delay
+            if te < 0.0:
+                continue
+            beam.mul = float(r.echo) ** k
+            r._machine(beam, te, 1.0, 999.0, 0.0,
+                       np.random.default_rng(r.seed + int(te * r.fps + 0.5)),
+                       r.glitch_at(te))
+        beam.mul = 1.0
     r._machine(beam, t, 1.0, 999.0, 0.0, rng, shake)   # sweep_x enorme = deployee
     r._etincelles(beam, t, 1.0)               # etincelles, par-dessus
     field = beam.render()
@@ -301,6 +323,11 @@ def analyze(music, start=0.0, duration=None):
 
 
 def _renderer(info, width, height, fps, seed, curve, palette, bgkw):
+    # Un prereglage peut fixer la palette ; elle arrive alors parmi les autres
+    # reglages et non par son argument, d'ou ce rattrapage. On copie plutot que
+    # de retirer la cle : le dictionnaire appartient a l'appelant.
+    bgkw = dict(bgkw)
+    palette = bgkw.pop("palette", palette)
     return make_performance_renderer(
         width, height, fps, info["duration"], info["_audio"], info["_phi"],
         info["drops"], curve=curve, seed=seed, palette=palette, **bgkw)
@@ -409,6 +436,9 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
 
 def add_look_args(ap):
     """Options de rendu partagees avec le studio."""
+    ap.add_argument("--preset", default=None, choices=sorted(PRESETS),
+                    help="point de depart par famille de musique ; les autres "
+                         "options passees restent prioritaires")
     ap.add_argument("--palette", default="vert", choices=sorted(PALETTES),
                     help="teinte du trait")
     ap.add_argument("--bg", default=None, choices=BACKGROUNDS,
@@ -487,6 +517,15 @@ def add_look_args(ap):
                     help="la bande flotte : lent va-et-vient de l'image")
     ap.add_argument("--halo-doux", type=float, default=0.0,
                     help="halo laiteux et noirs releves")
+    ap.add_argument("--echo", type=float, default=0.0,
+                    help="echos de la machine : force du premier (0 = aucun)")
+    ap.add_argument("--echo-n", type=int, default=3, help="nombre d'echos")
+    ap.add_argument("--echo-delay", type=float, default=0.045,
+                    help="ecart entre deux echos, en secondes")
+    ap.add_argument("--couleurs", type=float, default=0.0,
+                    help="le trait prend la teinte de l'instrument frappe")
+    ap.add_argument("--spectro", type=float, default=0.0,
+                    help="spectrogramme deroulant sur la dalle (0 = aucun)")
     ap.add_argument("--snare", type=float, default=1.0,
                     help="embrasement jaune sur la caisse claire (0 = aucun)")
     ap.add_argument("--wave", type=float, default=1.10,
@@ -545,7 +584,16 @@ def add_look_args(ap):
 
 
 def look_kwargs(args):
-    return {"bg": args.bg,
+    """Les reglages d'allure, prereglage compris.
+
+    Le prereglage n'est qu'un socle : une option donnee explicitement sur la
+    ligne de commande passe apres lui et l'emporte. C'est ce qui permet de
+    partir d'« idm » et de ne changer qu'une chose.
+    """
+    socle = dict(PRESETS.get(getattr(args, "preset", None) or "", {}))
+    donnes = {a.lstrip("-").replace("-", "_")
+              for a in sys.argv[1:] if a.startswith("--")}
+    reglages = {"bg": args.bg,
             "bg_color": hex_to_rgb(args.bg_color) if args.bg_color else None,
             "bg_strength": args.bg_strength,
             "bg_clear": args.bg_clear,
@@ -569,6 +617,9 @@ def look_kwargs(args):
             "tapestop": args.tapestop, "tapestop_on": args.tapestop_on,
             "cadence": args.cadence, "poussiere": args.poussiere,
             "flottement": args.flottement, "halo_doux": args.halo_doux,
+            "echo": args.echo, "echo_n": args.echo_n,
+            "echo_delay": args.echo_delay, "couleurs": args.couleurs,
+            "spectro": args.spectro,
             "snare": args.snare, "wave_gain": args.wave, "trail": args.trail,
             "wave_win": args.wave_win, "wave_smooth": args.wave_smooth,
             "wave_trig": args.wave_trig, "wave_passes": args.wave_passes,
@@ -589,6 +640,18 @@ def look_kwargs(args):
             "backdrop": args.backdrop,
             "backdrop_strength": args.backdrop_strength,
             "backdrop_clear": args.backdrop_clear}
+    # ce que l'utilisateur n'a pas nomme, le prereglage le decide
+    for k, v in socle.items():
+        if k not in donnes:
+            reglages[k] = v
+    # La palette ne voyage pas avec les autres reglages : elle a son propre
+    # argument, que la ligne de commande passe a part. Un prereglage qui la
+    # fixe la depose donc la, sinon elle arriverait deux fois a destination.
+    if "palette" in reglages:
+        if "palette" not in donnes:
+            args.palette = reglages["palette"]
+        del reglages["palette"]
+    return reglages
 
 
 def main():

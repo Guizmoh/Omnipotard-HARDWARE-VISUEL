@@ -37,11 +37,12 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mpc_performance import (  # noqa: E402
     analyze, frame_performance, probe_duration, render_video, _renderer,
+    compute_spectro,
 )
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
     pick_split_times, VERSION, INSTRUMENTS, TRAVELLINGS, FAMILLES,
-    backdrop_quality,
+    backdrop_quality, PRESETS, CHAMPS,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -171,6 +172,11 @@ def look_from(q):
         "poussiere": float(q.get("poussiere", 0.0)),
         "flottement": float(q.get("flottement", 0.0)),
         "halo_doux": float(q.get("haloDoux", 0.0)),
+        "echo": float(q.get("echo", 0.0)),
+        "echo_n": int(float(q.get("echoN", 3))),
+        "echo_delay": float(q.get("echoDelay", 0.045)),
+        "couleurs": float(q.get("couleurs", 0.0)),
+        "spectro": float(q.get("spectro", 0.0)),
         "snare": float(q.get("snare", 1.0)),
         "wave_gain": float(q.get("wave", 1.10)),
         "wave_win": float(q.get("waveWin", 0.070)),
@@ -313,13 +319,20 @@ class Studio:
                 "ondul", "ondul_on", "mosaic", "mosaic_on",
                 "kaleido", "kaleido_on", "cisaille", "cisaille_on",
                 "coupure", "coupure_on", "tapestop", "tapestop_on",
-                "cadence", "poussiere", "flottement", "halo_doux")
+                "cadence", "poussiere", "flottement", "halo_doux",
+                "echo", "echo_n", "echo_delay", "couleurs")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
-                        "backdrop_sharp")
+                        "backdrop_sharp", "spectro")
         r.set_look(palette, **{k: v for k, v in kw.items() if k not in APART})
         for k in POSE:
             setattr(r, k, kw[k])
+        # Le spectrogramme est calcule a partir du son, pas repose comme une
+        # couleur : on ne le refait que lorsqu'on l'allume pour la premiere fois.
+        if kw["spectro"] > 0.01 and getattr(r, "spec", None) is None:
+            r.spec, r.spec_fps = compute_spectro(
+                tr["info"]["_audio"]["mono"], tr["info"]["_audio"]["sr"])
+        r.spectro = kw["spectro"]
         if getattr(r, "_smooth_at", None) != kw["wave_smooth"]:
             r.set_wave_smooth(kw["wave_smooth"])
             r._smooth_at = kw["wave_smooth"]
@@ -491,6 +504,8 @@ class Handler(BaseHTTPRequestHandler):
                     "fonds": list(BACKGROUNDS),
                     "instruments": list(INSTRUMENTS),
                     "travellings": list(TRAVELLINGS),
+                    "presets": {k: {CHAMPS[a]: b for a, b in v.items()}
+                                for k, v in PRESETS.items()},
                 })
             if u.path == "/still":
                 q["curve"] = q.get("curve", "1") == "1"
@@ -670,6 +685,14 @@ PAGE = r"""<!doctype html>
   </div>
 
   <div class="card">
+    <h2>Prereglage</h2>
+    <select id="preset"></select>
+    <p class="hint">Un point de depart par famille de musique, pas une verite :
+      tout reste bougeable ensuite. Choisir un prereglage repose tous les
+      curseurs ; ceux qu'il ne mentionne pas reviennent a leur valeur d'usine.</p>
+  </div>
+
+  <div class="card">
     <h2>Couleur du trait</h2>
     <select id="palette">
       <option value="vert">vert (par defaut)</option>
@@ -756,6 +779,8 @@ PAGE = r"""<!doctype html>
     <input type="range" id="wave" min="0" max="3" step="0.05" value="1.10">
     <label for="wavePunch">gonflement sur le temps fort &mdash; <span id="v-wp">0.85</span></label>
     <input type="range" id="wavePunch" min="0" max="2.5" step="0.05" value="0.85">
+    <label for="waveSmooth">lissage de la courbe &mdash; <span id="v-ws">56</span></label>
+    <input type="range" id="waveSmooth" min="8" max="240" step="4" value="56">
     <label for="trail">trainee de la bande &mdash; <span id="v-trail">1.00</span></label>
     <input type="range" id="trail" min="0" max="2.5" step="0.05" value="1">
     <label for="glitch">glitchs sur les paroxysmes &mdash; <span id="v-gl">1.00</span></label>
@@ -901,6 +926,35 @@ PAGE = r"""<!doctype html>
   </div>
 
   <div class="card">
+    <h2>Echo, couleurs, spectrogramme</h2>
+    <label for="echo">echo d'images &mdash; <span id="v-ec">0.00</span></label>
+    <input type="range" id="echo" min="0" max="0.85" step="0.05" value="0">
+    <div class="row">
+      <div>
+        <label for="echoN">nombre &mdash; <span id="v-ecn">3</span></label>
+        <input type="range" id="echoN" min="1" max="6" step="1" value="3">
+      </div>
+      <div>
+        <label for="echoDelay">ecart &mdash; <span id="v-ecd">0.045</span> s</label>
+        <input type="range" id="echoDelay" min="0.02" max="0.2" step="0.005" value="0.045">
+      </div>
+    </div>
+
+    <label for="couleurs">couleurs par instrument &mdash; <span id="v-cl">0.00</span></label>
+    <input type="range" id="couleurs" min="0" max="2.5" step="0.05" value="0">
+
+    <label for="spectro">spectrogramme sur la dalle &mdash; <span id="v-sp">0.00</span></label>
+    <input type="range" id="spectro" min="0" max="2" step="0.05" value="0">
+    <p class="hint">L'<b>echo</b> redessine la machine telle qu'elle etait il y a
+      quelques centiemes, de plus en plus pale. Les <b>couleurs par instrument</b>
+      donnent au trait la teinte du dernier coup : rouge la grosse caisse, jaune
+      la caisse claire, cyan le charley, violet la basse. Le <b>spectrogramme</b>
+      deroule les trois dernieres secondes du morceau sur la dalle, une ligne
+      par bande de frequences — baissez l'amplitude de la courbe pour bien le
+      voir.</p>
+  </div>
+
+  <div class="card">
     <h2>Texture &mdash; trip hop, lo-fi</h2>
     <p class="hint" style="margin-top:0">Celles-ci ne frappent sur rien : elles
       sont la du debut a la fin. C'est ce qui separe un accident d'une matiere
@@ -1032,6 +1086,7 @@ function params() {
     splitCount: $('#splitCount').value, splitPx: $('#splitPx').value,
     splitOn: $('#splitOn').value, glitch: $('#glitch').value,
     snare: $('#snare').value, wave: $('#wave').value,
+    waveSmooth: $('#waveSmooth').value,
     wavePunch: $('#wavePunch').value, backdrop,
     bdStrength: $('#bdStrength').value, bdClear: $('#bdClear').value,
     screenDim: $('#screenDim').value,
@@ -1059,6 +1114,9 @@ function params() {
     cisaille: $('#cisaille').value, cisailleOn: $('#cisailleOn').value,
     coupure: $('#coupure').value, coupureOn: $('#coupureOn').value,
     tapestop: $('#tapestop').value, tapestopOn: $('#tapestopOn').value,
+    echo: $('#echo').value, echoN: $('#echoN').value,
+    echoDelay: $('#echoDelay').value, couleurs: $('#couleurs').value,
+    spectro: $('#spectro').value,
     cadence: $('#cadence').value, poussiere: $('#poussiere').value,
     flottement: $('#flottement').value, haloDoux: $('#haloDoux').value,
     bdSharp: $('#bdSharp').value,
@@ -1066,7 +1124,7 @@ function params() {
   });
   return p;
 }
-let pending = null;
+let pending = null, PRESETS = {}, USINE = {};
 function shot() {
   if (!track) return;
   clearTimeout(pending);
@@ -1118,6 +1176,7 @@ const bind = (id, out, dec) => { $(id).oninput = e => {
   $(out).textContent = dec ? (+e.target.value).toFixed(dec) : e.target.value; shot(); }; };
 bind('#splitCount','#v-sc',0); bind('#splitPx','#v-spx',0);
 bind('#snare','#v-sn',2); bind('#wave','#v-wv',2); bind('#wavePunch','#v-wp',2);
+bind('#waveSmooth','#v-ws',0);
 bind('#bdStrength','#v-bds',2); bind('#bdClear','#v-bdc',2); bind('#screenDim','#v-sd',2);
 bind('#glitch','#v-gl',2);
 bind('#punch','#v-pu',3); bind('#shake','#v-sh',2); bind('#parts','#v-pa',2);
@@ -1139,6 +1198,9 @@ bind('#kaleido','#v-ka',2); bind('#cisaille','#v-ci',2);
 bind('#coupure','#v-co',2); bind('#tapestop','#v-ta',2);
 bind('#haloDoux','#v-hd',2); bind('#poussiere','#v-po',2);
 bind('#flottement','#v-fl',2);
+bind('#echo','#v-ec',2); bind('#echoN','#v-ecn',0);
+bind('#echoDelay','#v-ecd',3); bind('#couleurs','#v-cl',2);
+bind('#spectro','#v-sp',2);
 $('#cadence').oninput = e => {
   const n = +e.target.value;
   $('#v-ca').textContent = n < 2 ? 'fluide' : Math.round(30 / n) + ' i/s';
@@ -1309,6 +1371,32 @@ fetch('/config').then(r => r.json())
                               ['#tapestopOn', 'grosse caisse']])
       remplir(sel, c.instruments || [], def);
     remplir('#travelMode', c.travellings || [], 'avant');
+
+    /* ---- prereglages : ils reposent tous les curseurs d'un coup ---- */
+    PRESETS = c.presets || {};
+    $('#preset').innerHTML = Object.keys(PRESETS).map(
+      k => '<option value="' + k + '">' + k + '</option>').join('');
+    USINE = {};                       // les valeurs d'usine, pour y revenir
+    for (const el of document.querySelectorAll('input[type=range], select'))
+      if (el.id) USINE[el.id] = el.value;
+    $('#preset').onchange = () => {
+      const p = PRESETS[$('#preset').value] || {};
+      for (const [id, v] of Object.entries(USINE)) {
+        // un prereglage ne dit pas tout : ce qu'il tait revient a l'usine,
+        // sinon deux prereglages enchaines se melangeraient
+        if (id === 'preset' || id === 'bg' || id === 'backdrop') continue;
+        const el = $('#' + id);
+        if (el) { el.value = v; el.dispatchEvent(new Event('input')); }
+      }
+      for (const [id, v] of Object.entries(p)) {
+        const el = $('#' + id);
+        if (!el) { console.warn('prereglage : curseur inconnu', id); continue; }
+        // le nombre d'etincelles est porte par sa racine
+        el.value = (id === 'partsN') ? Math.round(Math.sqrt(+v)) : v;
+        el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input'));
+      }
+      shot();
+    };
   })
   .catch(() => {});
 

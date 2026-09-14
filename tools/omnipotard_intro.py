@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-14.13"
+VERSION = "2026-09-14.14"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -64,6 +64,129 @@ TRAVELLINGS = ("aucun", "avant", "arriere", "gauche", "droite", "haut", "bas")
 # doit frapper franchement ou ne rien faire : la doser au prorata d'une force
 # qui vaut 0,3 sur un mixage sage la rendrait invisible a tous les reglages.
 PLANCHER_AVARIE = 0.45
+
+
+# ==========================================================================
+#  Prereglages
+#
+#  Un point de depart par famille de musique, pas une verite : chaque reglage
+#  reste bougeable ensuite. Ils sont ecrits avec les noms du moteur, et c'est
+#  CHAMPS, plus bas, qui dit a quel curseur du studio chacun correspond.
+# ==========================================================================
+
+PRESETS = {
+    "propre": {},
+
+    "drum and bass": {
+        "punch": 0.09, "punch_on": "grosse caisse",
+        "shake_amp": 0.5, "shake_on": "grosse caisse",
+        "ring": 1.0, "ring_on": "grosse caisse",
+        "parts": 1.2, "parts_n": 600, "parts_on": "caisse claire",
+        "grid_pulse": 1.2, "grid_on": "grosse caisse",
+        "tranches": 0.6, "tranches_on": "caisse claire",
+        "split": 1.2, "split_count": 4, "trail": 1.4, "wave_gain": 1.30,
+        "glitch": 0.6,
+    },
+
+    "dub": {
+        "echo": 0.60, "echo_n": 4, "echo_delay": 0.090,
+        "trail": 2.0, "halo_doux": 0.5, "flottement": 0.5,
+        "wave_gain": 0.90, "punch": 0.05,
+        "ring": 0.8, "ring_on": "grosse caisse",
+        "couleurs": 0.5, "glitch": 0.3, "split": 0.8,
+    },
+
+    "idm": {
+        "spectro": 1.0, "couleurs": 1.1,
+        "miroir": 1.0, "miroir_on": "percussions",
+        "ondul": 0.9, "ondul_on": "basse",
+        "mosaic": 0.8, "mosaic_on": "caisse claire",
+        "stut": 0.18, "stut_loop": 0.05, "stut_on": "charley",
+        "scramble": 0.25, "scr_len": 0.16,
+        "parts": 1.0, "parts_n": 2000, "parts_on": "caisse claire",
+        "split": 1.5, "glitch": 0.8,
+    },
+
+    "trip hop": {
+        "cadence": 3, "halo_doux": 1.1, "poussiere": 1.2, "flottement": 1.0,
+        "trail": 1.8, "wave_gain": 0.80, "punch": 0.03,
+        "palette": "orange", "glitch": 0.0, "split": 0.0,
+        "backdrop_sharp": 0.75,
+    },
+
+    "hip hop": {
+        "punch": 0.08, "punch_on": "grosse caisse",
+        "snare": 1.4, "poussiere": 0.6, "halo_doux": 0.4, "cadence": 2,
+        "trail": 1.2, "ring": 0.6, "ring_on": "grosse caisse",
+        "glitch": 0.2, "split": 0.6, "split_count": 2,
+    },
+
+    "breakcore": {
+        "kaleido": 1.2, "kaleido_on": "caisse claire",
+        "cisaille": 1.1, "cisaille_on": "percussions",
+        "coupure": 1.1, "coupure_on": "grosse caisse",
+        "tapestop": 0.28, "tapestop_on": "grosse caisse",
+        "scramble": 0.50, "scr_len": 0.13,
+        "stut": 0.14, "stut_loop": 0.05, "stut_on": "charley",
+        "tranches": 1.0, "tranches_on": "caisse claire",
+        "invert": 1.0, "invert_on": "grosse caisse",
+        "parts": 1.1, "parts_n": 1500, "parts_on": "caisse claire",
+        "split": 1.4, "glitch": 1.0,
+    },
+
+    "techno": {
+        "punch": 0.07, "punch_on": "grosse caisse",
+        "grid_pulse": 2.0, "grid_on": "grosse caisse",
+        "ring": 1.4, "ring_on": "grosse caisse",
+        "coupure": 0.8, "coupure_on": "grosse caisse",
+        "parts": 0.8, "parts_n": 400, "parts_on": "charley",
+        "couleurs": 0.4, "split": 1.0, "glitch": 0.5, "wave_gain": 1.10,
+    },
+
+    "ambient": {
+        "echo": 0.50, "echo_n": 4, "echo_delay": 0.120,
+        "halo_doux": 1.4, "trail": 2.2, "spectro": 0.8,
+        "flottement": 0.4, "wave_gain": 0.60, "punch": 0.01,
+        "glitch": 0.0, "split": 0.0, "wave_smooth": 110,
+    },
+}
+
+# Le curseur du studio qui porte chaque reglage. Sert a poser un prereglage
+# depuis la page ; un controle automatique verifie que chaque nom existe des
+# deux cotes, faute de quoi un prereglage poserait des valeurs dans le vide.
+CHAMPS = {
+    "palette": "palette", "split": "split", "split_count": "splitCount",
+    "split_on": "splitOn", "wobble": "wobble", "split_px": "splitPx",
+    "snare": "snare", "wave_gain": "wave", "wave_punch": "wavePunch",
+    "wave_smooth": "waveSmooth", "trail": "trail", "glitch": "glitch",
+    "punch": "punch", "punch_on": "punchOn",
+    "shake_amp": "shake", "shake_on": "shakeOn",
+    "parts": "parts", "parts_on": "partsOn", "parts_n": "partsN",
+    "parts_speed": "partsSpeed", "parts_life": "partsLife",
+    "ring": "ring", "ring_on": "ringOn",
+    "grid_pulse": "gridPulse", "grid_on": "gridOn",
+    "bg_flash": "bgFlash", "flash_on": "flashOn",
+    "travel": "travel", "travel_mode": "travelMode",
+    "backdrop_sharp": "bdSharp", "screen_dim": "screenDim",
+    "tranches": "tranches", "tranches_on": "tranchesOn",
+    "blocs": "blocs", "blocs_on": "blocsOn",
+    "roll": "roll", "roll_on": "rollOn",
+    "ghost": "ghost", "ghost_on": "ghostOn",
+    "invert": "invert", "invert_on": "invertOn",
+    "stut": "stut", "stut_on": "stutOn", "stut_loop": "stutLoop",
+    "scramble": "scramble", "scr_len": "scrLen",
+    "miroir": "miroir", "miroir_on": "miroirOn",
+    "ondul": "ondul", "ondul_on": "ondulOn",
+    "mosaic": "mosaic", "mosaic_on": "mosaicOn",
+    "kaleido": "kaleido", "kaleido_on": "kaleidoOn",
+    "cisaille": "cisaille", "cisaille_on": "cisailleOn",
+    "coupure": "coupure", "coupure_on": "coupureOn",
+    "tapestop": "tapestop", "tapestop_on": "tapestopOn",
+    "cadence": "cadence", "poussiere": "poussiere",
+    "flottement": "flottement", "halo_doux": "haloDoux",
+    "echo": "echo", "echo_n": "echoN", "echo_delay": "echoDelay",
+    "couleurs": "couleurs", "spectro": "spectro",
+}
 
 
 def _sample2d(src, xs, ys):
@@ -535,6 +658,7 @@ class Beam:
     def __init__(self, h, w, gain=1.0):
         self.h, self.w = h, w
         self.gain = gain          # normalisation d'intensite selon la definition
+        self.mul = 1.0            # attenuation passagere, pour les echos
         self.idx = []
         self.wts = []
 
@@ -549,7 +673,7 @@ class Beam:
             ww = weight[m]
         else:
             ww = np.full(x.size, float(weight))
-        ww = ww * self.gain
+        ww = ww * (self.gain * self.mul)
         x0 = x.astype(np.int32)
         y0 = y.astype(np.int32)
         fx = x - x0
@@ -992,6 +1116,18 @@ FAMILLES = {
     "tout": None,
 }
 INSTRUMENTS = tuple(FAMILLES)
+
+# Une teinte par famille, pour l'option « couleurs par instrument ». Elles sont
+# choisies bien separees sur le cercle : le faisceau etant additif et passant
+# ensuite dans un halo, deux teintes voisines se melangeraient en une bouillie.
+TEINTES = {
+    "grosse caisse": (1.00, 0.24, 0.20),      # rouge
+    "basse":         (0.62, 0.30, 1.00),      # violet
+    "caisse claire": (1.00, 0.92, 0.36),      # jaune
+    "percussions":   (1.00, 0.56, 0.14),      # orange
+    "charley":       (0.34, 0.95, 1.00),      # cyan
+    "accords":       (0.40, 1.00, 0.52),      # vert
+}
 PAD_BASS = {"A1": 1, "G1": 1, "C2": 2, "D2": 2, "E2": 3}
 PAD_SKANK = (12, 13, 14, 15)
 DECAY_OF = {"kick": 4.5, "rim": 8.0, "hat": 14.0, "perc": 13.0,
@@ -1948,6 +2084,39 @@ class Renderer:
             beam.add(sx, sy, profil * 1.5 * eclat * (0.30 + force)
                      * (1.0 - age) ** 2)
 
+    def _spectro(self, beam, t, collapse, sx0, sx1, sy0, sy1):
+        """Le spectrogramme du morceau, deroule sur la dalle.
+
+        Une ligne par bande, le temps en abscisse, la force en luminosite :
+        les dernieres secondes defilent de droite a gauche. Le faisceau
+        acceptant un poids par point, une ligne suffit a porter toute une
+        bande — inutile de dessiner des barres.
+        """
+        if self.spectro <= 0.01 or self.spec is None:
+            return
+        nb, nt = self.spec.shape
+        i1 = min(nt - 1, int(t * self.spec_fps))
+        i0 = max(0, i1 - int(3.2 * self.spec_fps))
+        if i1 - i0 < 6:
+            return
+        m = 0.055
+        # deux fois plus de points que de colonnes : a une colonne par point le
+        # trait se detachait en pointilles sur une dalle un peu large
+        n = (i1 - i0) * 2
+        x = np.linspace(sx0 + m, sx1 - m, n)
+        u = np.linspace(0.0, i1 - i0 - 1.0, n)
+        src = np.arange(i1 - i0, dtype=np.float64)
+        ybas, yhaut = sy0 + 0.055, sy1 - 0.205
+        for b in range(nb):
+            yy = ybas + (yhaut - ybas) * (b / max(1, nb - 1))
+            w = np.interp(u, src, self.spec[b, i0:i1].astype(np.float64))
+            # les creux doivent etre noirs : sans cette courbe, toutes les
+            # bandes se valent et le spectrogramme n'est qu'un quadrillage
+            w = (w * (1.0 / 255.0)) ** 2.1
+            P = np.stack([x, np.full(n, yy)], axis=1)
+            px, py = self.to_px(P, collapse)
+            beam.add(px, py, w * (1.9 * self.spectro))
+
     def _pool_traits(self):
         """Les points du dessin de la machine, avec leur normale.
 
@@ -2256,6 +2425,7 @@ class Renderer:
                 yc = (sy0 + sy1) * 0.5 - 0.03
                 ys = yc + 0.125 * self.wave_y(u * 1.88, t, amp=1.0)
                 self._dyn(beam, np.stack([xs, ys], axis=1), 1.0, collapse, melt, t)
+                self._spectro(beam, t, collapse, sx0, sx1, sy0, sy1)
                 # bandeau du haut : nom du morceau, comme ecrit sur la dalle
                 if self.screen_title:
                     # le trace est garde d'une image a l'autre, mais il doit
@@ -2524,6 +2694,13 @@ class Renderer:
     poussiere = 0.0      # poussiere et rayures de pellicule
     flottement = 0.0     # la bande flotte : lent va-et-vient de l'image
     halo_doux = 0.0      # halo laiteux et noirs releves
+    echo = 0.0           # images fantomes du passe, en tramee derriere
+    echo_n = 3           # combien d'echos
+    echo_delay = 0.045   # ecart entre deux echos, en secondes
+    couleurs = 0.0       # le trait prend la teinte de l'instrument frappe
+    spectro = 0.0        # spectrogramme deroulant sur la dalle
+    spec = None          # le spectrogramme lui-meme (bandes x temps, en octets)
+    spec_fps = 60.0
 
     step_phase = None   # instant du premier pas du sequenceur (None = intro)
     drops = None        # instants des paroxysmes du morceau (None = intro)
@@ -2823,6 +3000,24 @@ class Renderer:
             fluo = tuple(f * (1.0 - k) + y * k for f, y in zip(fluo, SNARE_RGB))
             halo = tuple(h * (1.0 - k) + y * k for h, y in zip(halo, SNARE_HALO))
             gmul = 0.55 * (1.0 + 1.25 * sn)
+        if self.couleurs > 0.01:
+            # Le trait prend la teinte du dernier instrument frappe. On garde
+            # le plus fort du moment plutot que de melanger les familles : deux
+            # teintes moyennees donnent un gris, et l'oreille, elle, entend
+            # bien un instrument a la fois sur l'attaque.
+            # On classe sur la fraicheur du coup, presque pas sur sa force :
+            # c'est le dernier instrument frappe qui doit donner la couleur.
+            # Classees a la force, les familles denses — le charley — gagnaient
+            # jusque sur la grosse caisse, et sa teinte ne sortait jamais.
+            meilleur, teinte = 0.0, None
+            for fam, col in TEINTES.items():
+                e = self.hit_env(t, fam, fall=14.0, plancher=0.75)
+                if e > meilleur:
+                    meilleur, teinte = e, col
+            if teinte is not None:
+                k = min(0.92, self.couleurs * meilleur)
+                fluo = tuple(f * (1.0 - k) + c * k for f, c in zip(fluo, teinte))
+                halo = tuple(h * (1.0 - k) + c * k for h, c in zip(halo, teinte))
         gc = np.clip(glow, 0, 3.0)
         for c in range(3):
             img[:, :, c] = fluo[c] * base + halo[c] * gc * gmul
@@ -3238,6 +3433,32 @@ def detect_beat(mono, sr):
         if dbl < len(ac) and lags[dbl] < 1.10 and ac[dbl] > 0.62 * ac[best]:
             best = dbl
     return _refine_beat(S, freqs, fps, float(lags[best]))
+
+
+def compute_spectro(mono, sr, bandes=30, fps=60.0, f0=55.0, f1=12000.0):
+    """Un spectrogramme compact, destine a la dalle de la machine.
+
+    Trente bandes espacees en octaves — c'est ainsi qu'on entend, et une
+    echelle lineaire tasserait tout le grave sur deux lignes — et soixante
+    colonnes par seconde, gardees en octets. Un morceau de quatre minutes tient
+    dans un demi-megaoctet, ce qui se transmet sans peine aux taches de rendu.
+    """
+    S, freqs, sfps = _frames(mono, sr)
+    bords = np.geomspace(f0, min(f1, float(freqs[-1])), bandes + 1)
+    B = np.zeros((bandes, S.shape[0]), dtype=np.float32)
+    for i in range(bandes):
+        m = (freqs >= bords[i]) & (freqs < bords[i + 1])
+        if np.any(m):
+            B[i] = S[:, m].sum(axis=1)
+    B = np.log1p(B * 12.0)                    # l'oreille est logarithmique
+    B /= (float(B.max()) or 1.0)
+    n = max(2, int(B.shape[1] * fps / sfps))
+    xi = np.linspace(0.0, B.shape[1] - 1.0, n)
+    src = np.arange(B.shape[1], dtype=np.float64)
+    out = np.empty((bandes, n), dtype=np.uint8)
+    for i in range(bandes):
+        out[i] = np.clip(np.interp(xi, src, B[i]) * 255.0, 0, 255)
+    return out, fps
 
 
 def _refine_beat(S, freqs, fps, coarse):
