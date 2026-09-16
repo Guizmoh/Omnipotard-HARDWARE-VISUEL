@@ -783,6 +783,34 @@ une case par temps. Le studio affiche la cadence obtenue sous le réglage, en
 millisecondes et par minute, calculée sur le tempo du morceau chargé.
 
 
+### Déposer un morceau, une image, une vidéo
+
+Le studio reçoit les fichiers **par blocs, écrits au fur et à mesure sur le
+disque**. Il les gardait auparavant entiers en mémoire le temps de les
+recopier : une vidéo de téléphone de 700 Mo demandait 700 Mo de mémoire vive
+rien que pour arriver, et sur une machine modeste le studio y laissait la vie —
+la page affichait alors `Failed to fetch`, le message que donne un navigateur
+quand la connexion meurt sans réponse. Mesuré : le même dépôt de 719 Mo coûte
+aujourd'hui **2 Mo** de mémoire au studio.
+
+Deux autres choses le disaient mal :
+
+- le serveur répondait en **HTTP/1.0**, donc fermait la connexion aussitôt.
+  Refuser un fichier trop gros pendant que le navigateur l'envoyait encore lui
+  claquait la porte au nez, et « fichier trop gros » devenait `Failed to
+  fetch`. En HTTP/1.1, et en avalant la fin de l'envoi avant de répondre, le
+  vrai message arrive — et le dépôt suivant fonctionne sur la même connexion.
+- la page ne montrait **aucune progression**. Un dépôt de vidéo restait muet
+  une minute entière. Elle affiche maintenant le poids du fichier et son
+  avancement : `envoi du fond machin.mp4 (170 Mo) — 63 %`, puis « le studio
+  examine… ».
+
+Les limites : **220 Mo** pour un morceau, **2 Go** pour une image ou une vidéo
+de fond. Un fichier n'est renommé à son nom définitif qu'une fois complet — un
+envoi interrompu laissait sinon un fichier tronqué que le studio reprenait
+ensuite pour un bon. La vidéo rendue est renvoyée elle aussi par blocs, au lieu
+d'être relue entièrement en mémoire pour être recopiée.
+
 ### Un contrôle de cohérence
 
 ```bash

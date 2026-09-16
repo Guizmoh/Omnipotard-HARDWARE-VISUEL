@@ -70,7 +70,12 @@ WORKDIR = os.path.join(ROOT, "out", "studio")
 UPLOADS = os.path.join(WORKDIR, "morceaux")
 FONDS = os.path.join(WORKDIR, "fonds")        # images et videos de fond
 OUTDIR = WORKDIR
-MAX_UPLOAD = 220 * 1024 * 1024          # un morceau, pas une discotheque
+MO = 1024 * 1024
+MAX_UPLOAD = 220 * MO                   # un morceau, pas une discotheque
+# Une video de telephone pese des centaines de megaoctets, et une video de
+# fond est rarement courte : la limite des morceaux n'a pas de sens pour elle.
+MAX_FOND = 2048 * MO
+BLOC = 1 * MO                           # on lit et on ecrit par blocs
 
 
 # --------------------------------------------------------------------------
@@ -459,9 +464,88 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):                      # silence les logs HTTP
         pass
 
+    # HTTP/1.1 plutot que 1.0 : une reponse envoyee alors que le navigateur
+    # depose encore son fichier lui parvient au lieu de lui claquer la
+    # connexion au nez. C'est ce qui transformait « fichier trop gros » en
+    # « Failed to fetch », un message qui ne dit rien a personne.
+    protocol_version = "HTTP/1.1"
+
     def handle_one_request(self):
         self._begun = False          # une connexion peut servir plusieurs fois
-        return BaseHTTPRequestHandler.handle_one_request(self)
+        self._reste = 0              # ce qui n'a pas encore ete lu du corps
+        try:
+            return BaseHTTPRequestHandler.handle_one_request(self)
+        finally:
+            self._vider()
+
+    _reste = 0
+
+    def _vider(self):
+        """Avale la fin du corps quand on n'en a pas voulu.
+
+        La connexion resservira pour la requete suivante : y laisser la fin
+        d'un envoi ferait lire ces octets-la comme une nouvelle requete.
+        """
+        try:
+            while self._reste > 0:
+                bloc = self.rfile.read(min(BLOC, self._reste))
+                if not bloc:
+                    break
+                self._reste -= len(bloc)
+        except OSError:
+            self._reste = 0
+
+    def _recevoir(self, path, limite):
+        """Ecrit le fichier depose sur le disque, bloc par bloc.
+
+        Tout garder en memoire le temps de l'ecrire demandait autant de
+        memoire que le fichier pesait : une video de telephone suffisait a
+        mettre a genoux une machine modeste, et le studio mourait au milieu
+        de l'envoi — cote page, un « Failed to fetch » sans explication.
+
+        Renvoie faux si le fichier depasse la limite. Dans ce cas on avale
+        quand meme tout ce que le navigateur envoie avant de repondre :
+        repondre au milieu d'un envoi coupe la connexion, et le message
+        n'arrive jamais jusqu'a la page.
+        """
+        self._reste = int(self.headers.get("Content-Length") or 0)
+        trop = self._reste > limite
+        # On ecrit a cote, et on ne donne son nom au fichier qu'une fois
+        # complet : un envoi coupe en chemin laissait sinon un fichier
+        # tronque que le studio reprenait ensuite pour un bon.
+        moitie = path + ".en-cours"
+        f = None if trop else open(moitie, "wb")
+        souci = None
+        try:
+            while self._reste > 0:
+                bloc = self.rfile.read(min(BLOC, self._reste))
+                if not bloc:
+                    raise RuntimeError("l'envoi s'est interrompu en chemin")
+                self._reste -= len(bloc)
+                if f and souci is None:
+                    try:
+                        f.write(bloc)
+                    except OSError as e:      # disque plein, par exemple
+                        souci = e
+        finally:
+            if f:
+                f.close()
+                if souci is None and self._reste == 0:
+                    os.replace(moitie, path)
+                elif os.path.exists(moitie):
+                    os.remove(moitie)
+        if souci is not None:
+            raise souci
+        return not trop
+
+    def _corps(self):
+        """Le corps d'une requete de reglages — court, donc lu d'un coup."""
+        self._reste = int(self.headers.get("Content-Length") or 0)
+        if self._reste > 4 * MO:
+            return None
+        corps = self.rfile.read(self._reste)
+        self._reste = 0
+        return corps
 
     # ---- reponses
     #
@@ -491,6 +575,33 @@ class Handler(BaseHTTPRequestHandler):
             # brise ou une remise a zero, Windows un abandon (WinError 10053) :
             # trois exceptions differentes, une seule situation, parfaitement
             # normale. On ratisse donc large plutot que de nommer chaque cas.
+            pass
+
+    def _fichier(self, path, ctype, extra=None):
+        """Envoie un fichier par blocs.
+
+        Une video rendue pese des centaines de megaoctets : la charger
+        entierement pour la remettre au navigateur demandait cette memoire
+        une deuxieme fois, juste pour la recopier.
+        """
+        if self._begun:
+            return
+        self._begun = True
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(os.path.getsize(path)))
+            self.send_header("Cache-Control", "no-store")
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            with open(path, "rb") as f:
+                while True:
+                    bloc = f.read(BLOC)
+                    if not bloc:
+                        break
+                    self.wfile.write(bloc)
+        except OSError:
             pass
 
     def _json(self, obj, code=200):
@@ -563,9 +674,7 @@ class Handler(BaseHTTPRequestHandler):
                     job = STUDIO.jobs.get(q.get("id"))
                 if not job or job["state"] != "fini":
                     return self._fail("rendu non termine", 404)
-                with open(job["out"], "rb") as f:
-                    body = f.read()
-                return self._send(200, "video/mp4", body, {
+                return self._fichier(job["out"], "video/mp4", {
                     "Content-Disposition": 'attachment; filename="%s"' % job["name"]})
             self._fail("page inconnue", 404)
         except Depasse:
@@ -579,18 +688,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path)
         try:
-            n = int(self.headers.get("Content-Length") or 0)
-            if n > MAX_UPLOAD:
-                return self._fail("fichier trop gros (%d Mo max)"
-                                  % (MAX_UPLOAD // (1024 * 1024)), 413)
-            body = self.rfile.read(n)
-
             if u.path == "/upload":
                 os.makedirs(UPLOADS, exist_ok=True)
                 name = safe_name(self.headers.get("X-Filename"))
                 path = os.path.join(UPLOADS, name)
-                with open(path, "wb") as f:
-                    f.write(body)
+                if not self._recevoir(path, MAX_UPLOAD):
+                    return self._fail("morceau trop gros (%d Mo au plus)"
+                                      % (MAX_UPLOAD // MO), 413)
                 try:
                     probe_duration(path)
                 except Exception:                         # noqa: BLE001
@@ -608,8 +712,11 @@ class Handler(BaseHTTPRequestHandler):
                 os.makedirs(FONDS, exist_ok=True)
                 name = safe_name(self.headers.get("X-Filename"))
                 path = os.path.join(FONDS, name)
-                with open(path, "wb") as f:
-                    f.write(body)
+                if not self._recevoir(path, MAX_FOND):
+                    return self._fail("fond trop gros (%d Mo au plus). Une "
+                                      "video plus courte, ou exportee moins "
+                                      "lourde, fera le meme effet."
+                                      % (MAX_FOND // MO), 413)
                 try:                        # ffmpeg doit savoir le lire
                     load_backdrop(path, 64, 36)
                 except Exception as e:      # noqa: BLE001
@@ -620,11 +727,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"name": name, "video": is_video(path)})
 
             if u.path == "/render":
-                return self._json(STUDIO.start_job(json.loads(body or b"{}")))
+                corps = self._corps()
+                if corps is None:
+                    return self._fail("reglages illisibles", 413)
+                return self._json(STUDIO.start_job(json.loads(corps or b"{}")))
 
             self._fail("page inconnue", 404)
         except Exception as e:                            # noqa: BLE001
             traceback.print_exc()
+            # le corps restant est avale avant la reponse, sans quoi elle
+            # n'arriverait pas jusqu'a la page
+            self._vider()
             self._fail(e, 500)
 
 
@@ -1083,13 +1196,9 @@ drop.ondrop = e => {
 file.onchange = () => file.files[0] && upload(file.files[0]);
 
 async function upload(f) {
-  setStatus('lecture et analyse de ' + f.name + '…');
   $('#go').disabled = true;
   try {
-    const r = await fetch('/upload', {method:'POST', body:f,
-      headers:{'X-Filename': f.name}});
-    const j = await r.json();
-    if (j.error) throw new Error(j.error);
+    const j = await deposer('/upload', f, 'du morceau');
     track = j.track; drops = j.drops || []; duration = j.duration;
     // les frappes du morceau : c'est d'elles que sortent les frequences
     FRAPPES = {frappes: j.frappes || {}, drops: j.drops || [],
@@ -1332,13 +1441,45 @@ bdfile.onchange = () => bdfile.files[0] && sendBackdrop(bdfile.files[0]);
 $('#bdclear').onclick = () => { backdrop = ''; $('#bdopts').hidden = true;
   $('#bdname').textContent = 'Deposer une image ou une video'; shot(); };
 
+/* Un depot de fichier, avec sa progression.
+
+   fetch() ne sait pas dire ou en est un envoi : sur une video de telephone,
+   qui pese des centaines de megaoctets, la page restait muette une minute
+   entiere puis affichait « Failed to fetch » sans rien expliquer. XHR, lui,
+   rend compte de l'envoi au fur et a mesure, et distingue une reponse du
+   studio d'une connexion perdue. */
+function poids(n) { return (n / 1048576).toFixed(n > 10485760 ? 0 : 1) + ' Mo'; }
+
+function deposer(url, f, quoi) {
+  return new Promise((bon, mauvais) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', url);
+    x.setRequestHeader('X-Filename', f.name);
+    x.upload.onprogress = e => {
+      const pc = e.lengthComputable ? Math.round(e.loaded / e.total * 100) : 0;
+      setStatus('envoi ' + quoi + ' ' + f.name + ' (' + poids(f.size) + ') — '
+                + pc + ' %');
+    };
+    x.upload.onload = () => setStatus('le studio examine ' + f.name + '\u2026');
+    x.onload = () => {
+      let j = null;
+      try { j = JSON.parse(x.responseText); } catch (e) { j = null; }
+      if (j && j.error) mauvais(new Error(j.error));
+      else if (!j) mauvais(new Error('le studio a repondu ' + x.status
+                                     + ' sans explication'));
+      else bon(j);
+    };
+    x.onerror = () => mauvais(new Error(
+      'le studio n\'a pas repondu pendant l\'envoi (' + poids(f.size) + '). '
+      + 'Le message exact est ecrit dans la fenetre noire du studio.'));
+    x.onabort = () => mauvais(new Error('envoi interrompu'));
+    x.send(f);
+  });
+}
+
 async function sendBackdrop(f) {
-  setStatus('envoi du fond ' + f.name + '\u2026');
   try {
-    const r = await fetch('/backdrop', {method:'POST', body:f,
-                                        headers:{'X-Filename': f.name}});
-    const j = await r.json();
-    if (j.error) throw new Error(j.error);
+    const j = await deposer('/backdrop', f, 'du fond');
     backdrop = j.name;
     $('#bdname').textContent = j.name + (j.video ? ' (video)' : '');
     $('#bdopts').hidden = false;
