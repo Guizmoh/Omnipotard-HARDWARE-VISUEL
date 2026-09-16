@@ -534,6 +534,54 @@ de tranches décalées qui tombent sur les montées du morceau. À 0 ils
 disparaissent complètement, ce qui est utile pour juger le reste : ils sont
 assez violents pour masquer tout ce qu'on cherche à régler.
 
+### Sur quoi un effet se déclenche
+
+Six familles d'instruments, cela laisse vite deux effets tomber sur le même
+coup. Les listes proposent donc quatre sortes de déclencheurs — **41 en tout**,
+groupés dans le menu :
+
+| groupe | ce que c'est |
+| --- | --- |
+| **Instruments** (7) | grosse caisse, basse, caisse claire, percussions, charley, accords, tout |
+| **Bandes de fréquences** (7) | sous-basses (20-60 Hz), graves (60-160), bas médium (160-400), médium (400-1000), haut médium (1000-2500), aigus (2500-6000), très aigus (6000-15000) |
+| **Hasard** (3) | rare, moyen, dense |
+| **Un coup sur deux** (24) | pour chaque famille : `1 sur 2`, `l'autre sur 2`, `1 sur 3`, `1 sur 4` |
+
+Les **bandes** écoutent une hauteur, pas un instrument. Elles ne passent par
+aucune reconnaissance de batterie : ce qui monte dans la bande déclenche, que
+ce soit une peau, une voix ou une nappe. C'est ce qui les rend utiles à côté
+des familles plutôt que redondantes avec elles — sur le morceau de test,
+`grosse caisse` et `graves` ne tombent **jamais** ensemble (0 % de recouvrement
+sur douze secondes), alors que `caisse claire` et `bas médium` se recouvrent à
+90 %, ce qui est normal : la caisse claire *est* dans cette bande.
+
+Le **hasard** est tiré au sort mais posé sur la double-croche du morceau : un
+vrai hasard continu tomberait à contretemps et aurait l'air d'un défaut ; calé
+sur la grille, il a l'air joué. Le tirage est semé, donc deux rendus du même
+morceau donnent exactement les mêmes coups — ce dont le calcul en parallèle a
+besoin.
+
+Les **parts** répondent directement au problème « si je mets plus d'effets,
+tout va tomber en même temps ». Deux effets, l'un sur `caisse claire · 1 sur 2`
+et l'autre sur `caisse claire · l'autre sur 2`, alternent : mesuré, 0 % de
+recouvrement. Le rang se compte parmi les coups retenus, dans l'ordre du
+morceau.
+
+Tout cela passe par les mêmes événements que la batterie, avec des numéros de
+pad qui n'existent pas sur la machine : rien n'y rallume un pad, et rien n'entre
+dans la densité qui règle la longueur de la traînée. « tout » ne veut d'ailleurs
+dire que les seize vrais pads — sinon, le régler ferait partir l'effet des
+dizaines de fois par seconde.
+
+Le coût est nul à la mesure : la détection des sept bandes prend 0,02 s sur
+soixante secondes d'audio, et le nombre d'événements passant de 1 245 à 6 668
+sur un morceau entier fait passer un test de déclenchement de 9 à 11
+microsecondes — cinquante microsecondes par image, sur 127.
+
+Le studio annonce sous chaque curseur combien de fois le déclencheur choisi
+partira, parts comprises : `caisse claire` compte 88 coups, `caisse claire ·
+l'autre sur 2` en annonce 44.
+
 ### Avaries d'image
 
 Les mêmes pannes, mais déclenchées par **ce qui est joué** plutôt que par les

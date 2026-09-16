@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-16.18"
+VERSION = "2026-09-16.19"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1266,6 +1266,8 @@ PAD_OF = {"kick": 0, "rim": 5, "hat": 10, "perc": 6}
 # Les familles sur lesquelles chaque effet peut se caler. C'est la meme liste
 # partout : une fois la batterie reconnue, pointer une reaction sur la caisse
 # claire plutot que sur la grosse caisse ne demande qu'un nom.
+PADS_REELS = 16           # au-dela, ce sont des declencheurs sans pad
+
 FAMILLES = {
     "grosse caisse": (0,),
     "basse": (1, 2, 3),
@@ -1273,9 +1275,145 @@ FAMILLES = {
     "percussions": (6,),
     "charley": (10, 11),
     "accords": (12, 13, 14, 15),
-    "tout": None,
+    # « tout » ne veut dire que les vrais coups de la machine : les
+    # declencheurs virtuels ci-dessous n'y entrent pas, sans quoi les regler
+    # sur « tout » ferait partir l'effet des dizaines de fois par seconde.
+    "tout": tuple(range(PADS_REELS)),
 }
 INSTRUMENTS = tuple(FAMILLES)
+
+
+# ==========================================================================
+#  Declencheurs
+#
+#  Un effet ne se cale pas forcement sur un instrument. Six familles, cela
+#  laisse vite deux effets tomber sur le meme coup ; ces trois familles-ci
+#  donnent de quoi les separer :
+#
+#  - les **bandes de frequences**, qui ecoutent une hauteur et non un
+#    instrument. Elles ne dependent pas de la reconnaissance de batterie et
+#    attrapent donc aussi ce qui n'est pas percussif : une nappe qui monte,
+#    une voix, un souffle de cymbale.
+#  - le **hasard**, tire au sort mais pose sur la grille du morceau : jamais
+#    a contretemps, jamais deux fois pareil.
+#  - les **parts** (« un coup sur deux », « l'autre sur deux ») : deux effets
+#    poses sur la meme caisse claire alternent au lieu de tomber ensemble.
+#
+#  Les trois passent par les memes evenements que la batterie, avec des
+#  numeros de pad qui n'existent pas sur la machine : rien de tout cela ne
+#  rallume un pad ni ne compte dans la densite du morceau.
+# ==========================================================================
+
+PAD_BANDE = 100
+# nom, debut et fin en Hz, lissage (s), ecart minimal entre deux coups (s)
+BANDES = (
+    ("sous-basses",    20,    60, 0.050, 0.16),
+    ("graves",         60,   160, 0.045, 0.14),
+    ("bas medium",    160,   400, 0.020, 0.10),
+    ("medium",        400,  1000, 0.015, 0.09),
+    ("haut medium",  1000,  2500, 0.010, 0.07),
+    ("aigus",        2500,  6000, 0.008, 0.06),
+    ("tres aigus",   6000, 15000, 0.008, 0.05),
+)
+BANDE_QUOI = {
+    "sous-basses": "ce qui se sent plus qu'il ne s'entend",
+    "graves": "la grosse caisse et le corps de la basse",
+    "bas medium": "les toms, la caisse claire, le grave des voix",
+    "medium": "le corps des voix et des accords",
+    "haut medium": "l'attaque des sons, ce qui les rend clairs",
+    "aigus": "les charleys, le grain, les consonnes",
+    "tres aigus": "l'air, les cymbales, le souffle",
+}
+
+PAD_HASARD = 120
+# nom, part des pas du sequenceur qui sont tires
+HASARDS = (("hasard rare", 0.06), ("hasard moyen", 0.18),
+           ("hasard dense", 0.45))
+
+for _k, (_nom, _lo, _hi, _sm, _gap) in enumerate(BANDES):
+    FAMILLES[_nom] = (PAD_BANDE + _k,)
+for _k, (_nom, _p) in enumerate(HASARDS):
+    FAMILLES[_nom] = (PAD_HASARD + _k,)
+
+# Une part se note apres le nom : « caisse claire · 1 sur 2 ». Deux effets
+# poses l'un sur « 1 sur 2 » et l'autre sur « l'autre sur 2 » ne peuvent
+# jamais partir en meme temps.
+SEPARATEUR = " \u00b7 "
+PARTS = {
+    "1 sur 2": (2, 0),
+    "l'autre sur 2": (2, 1),
+    "1 sur 3": (3, 0),
+    "1 sur 4": (4, 0),
+}
+# Les familles auxquelles on propose les parts : les bandes et le hasard ont
+# deja de quoi se separer, et la liste resterait lisible.
+PARTAGEES = ("grosse caisse", "basse", "caisse claire", "percussions",
+             "charley", "accords")
+
+
+def decoupe_declencheur(nom):
+    """« caisse claire · 1 sur 2 » -> (« caisse claire », 2, 0)."""
+    nom = str(nom or "")
+    if SEPARATEUR in nom:
+        base, part = nom.split(SEPARATEUR, 1)
+        div, reste = PARTS.get(part, (1, 0))
+        return base, div, reste
+    return nom, 1, 0
+
+
+def groupes_declencheurs():
+    """La liste complete, groupee comme la page l'affiche."""
+    return [
+        ("Instruments", list(INSTRUMENTS)),
+        ("Bandes de frequences (une hauteur, pas un instrument)",
+         [n for n, _, _, _, _ in BANDES]),
+        ("Hasard, pose sur la grille du morceau", [n for n, _ in HASARDS]),
+        ("Un coup sur deux, pour que deux effets ne tombent pas ensemble",
+         [f + SEPARATEUR + p for f in PARTAGEES for p in PARTS]),
+    ]
+
+
+DECLENCHEURS = tuple(n for _, noms in groupes_declencheurs() for n in noms)
+
+
+def compte_frappes(ev_pad):
+    """Combien de coups chaque declencheur compte dans le morceau.
+
+    C'est ce chiffre que le studio affiche sous chaque curseur. Il est
+    calcule sur les vrais evenements, parts comprises : « un coup sur trois »
+    annonce bien le tiers.
+    """
+    ev_pad = np.asarray(ev_pad)
+    out = {}
+    for nom in DECLENCHEURS:
+        base, div, reste = decoupe_declencheur(nom)
+        pads = FAMILLES.get(base)
+        sel = (np.ones(len(ev_pad), bool) if pads is None
+               else np.isin(ev_pad, pads))
+        n = int(sel.sum())
+        out[nom] = n if div <= 1 else len(range(reste, n, div))
+    return out
+
+
+def hasard_events(dur, beat, phi, seed=7):
+    """Des coups tires au sort, mais poses sur la grille du morceau.
+
+    Un vrai hasard continu tomberait a contretemps et aurait l'air d'un
+    defaut ; cale sur la double-croche, il a l'air joue. Le tirage est seme,
+    donc deux rendus du meme morceau donnent exactement les memes coups —
+    ce dont le calcul en parallele a besoin.
+    """
+    rng = np.random.default_rng(int(seed) + 991)
+    pas = max(0.02, float(beat) / 4.0)
+    n = max(1, int(float(dur) / pas))
+    out = []
+    for k, (_nom, part) in enumerate(HASARDS):
+        tirage = rng.random(n)
+        forces = rng.uniform(0.45, 1.0, n)
+        for i in np.nonzero(tirage < part)[0]:
+            out.append((float(phi + i * pas), PAD_HASARD + k,
+                        float(forces[i]), 10.0))
+    return out
 
 # Une teinte par famille, pour l'option « couleurs par instrument ». Elles sont
 # choisies bien separees sur le cercle : le faisceau etant additif et passant
@@ -1690,6 +1828,10 @@ class Renderer:
         self.ev_f = np.array([e[2] for e in ev], dtype=np.float64)
         self.ev_d = np.array([e[3] for e in ev], dtype=np.float64)
         self.ev_bass = self.ev_pad <= 3          # grosse caisse et notes de basse
+        # les declencheurs sans pad (bandes, hasard) ne rallument rien sur la
+        # machine et ne comptent pas dans la densite du morceau
+        self.ev_reel = self.ev_pad < PADS_REELS
+        self._masques = {}
 
         # ---- geometrie
         self.mpc = build_mpc()
@@ -1827,7 +1969,7 @@ class Renderer:
 
     def pad_flashes(self, t):
         dt = t - self.ev_t
-        m = (dt >= 0.0) & (dt < 1.6)
+        m = (dt >= 0.0) & (dt < 1.6) & self.ev_reel
         out = {}
         if not np.any(m):
             return out
@@ -1853,11 +1995,8 @@ class Renderer:
         """
         if self.stut <= 0.001 or len(self.ev_t) == 0:
             return t
-        pads = FAMILLES.get(self.stut_on, FAMILLES["charley"])
         dt = t - self.ev_t
-        m = dt >= 0.0
-        if pads is not None:
-            m &= np.isin(self.ev_pad, pads)
+        m = (dt >= 0.0) & self._masque(self.stut_on, "charley")
         if not np.any(m):
             return t
         dernier = float(np.min(dt[m]))          # le coup le plus recent
@@ -1875,12 +2014,9 @@ class Renderer:
         """
         if self.tapestop <= 0.001 or len(self.ev_t) == 0:
             return t
-        pads = FAMILLES.get(self.tapestop_on, FAMILLES["grosse caisse"])
         fen = float(self.tapestop)
         dt = t - self.ev_t
-        m = (dt >= 0.0) & (dt < fen)
-        if pads is not None:
-            m &= np.isin(self.ev_pad, pads)
+        m = (dt >= 0.0) & (dt < fen) & self._masque(self.tapestop_on)
         if not np.any(m):
             return t
         d = float(np.min(dt[m]))
@@ -1909,6 +2045,30 @@ class Renderer:
         j = g * PAQUET + int(r.permutation(PAQUET)[b])
         return min(max(t + (j - i) * L, 0.0), self.dur - 1e-3)
 
+    def _masque(self, nom, defaut="grosse caisse"):
+        """Les evenements que ce declencheur retient, une fois pour toutes.
+
+        Un nom dit deux choses : sur quoi se caler — une famille, une bande
+        de frequences, le hasard — et quelle part en garder. Les deux se
+        resolvent ici, pour que tous les effets les lisent pareil.
+        """
+        m = self._masques.get(nom)
+        if m is not None:
+            return m
+        base, div, reste = decoupe_declencheur(nom)
+        pads = FAMILLES.get(base, FAMILLES.get(defaut))
+        m = (np.ones(len(self.ev_pad), bool) if pads is None
+             else np.isin(self.ev_pad, pads))
+        if div > 1:
+            # le rang se compte parmi les coups retenus, dans l'ordre du
+            # morceau : « l'autre sur deux » tombe donc bien entre les
+            # coups de « un sur deux »
+            rang = np.full(len(self.ev_pad), -1, dtype=np.int64)
+            rang[m] = np.arange(int(m.sum()))
+            m &= (rang % div) == reste
+        self._masques[nom] = m
+        return m
+
     def hit_env(self, t, famille, fall=9.0, win=0.55, seuil=0.0, plancher=0.0):
         """Enveloppe des coups d'une famille d'instruments a l'instant t.
 
@@ -1923,13 +2083,10 @@ class Renderer:
         qui doivent frapper ou ne rien faire, s'en servent ; les reactions
         douces gardent la force nue.
         """
-        pads = FAMILLES.get(famille, FAMILLES["grosse caisse"])
         dt = t - self.ev_t
-        m = (dt >= 0.0) & (dt < win)
+        m = (dt >= 0.0) & (dt < win) & self._masque(famille)
         if seuil > 0.0:
             m &= self.ev_f >= seuil
-        if pads is not None:
-            m &= np.isin(self.ev_pad, pads)
         if not np.any(m):
             return 0.0
         f = self.ev_f[m]
@@ -1969,10 +2126,7 @@ class Renderer:
         sur le meme temps que la caisse claire, et l'effet avait alors l'air
         de se declencher sur elle.
         """
-        pads = FAMILLES.get(self.split_on, FAMILLES["grosse caisse"])
-        if pads is None:
-            return np.ones(len(self.ev_pad), dtype=bool)
-        return np.isin(self.ev_pad, pads)
+        return self._masque(self.split_on)
 
     def sub_hit(self, t):
         """Enveloppe du dedoublement : attaque immediate, longue descente.
@@ -2014,7 +2168,7 @@ class Renderer:
         laisse un trait net, un passage charge le fait bavez derriere lui.
         """
         dt = t - self.ev_t
-        m = (dt >= 0.0) & (dt < win)
+        m = (dt >= 0.0) & (dt < win) & self.ev_reel
         if not np.any(m):
             return 0.0
         n = len(np.unique(self.ev_pad[m]))
@@ -2188,12 +2342,10 @@ class Renderer:
         """
         if self.parts <= 0.01:
             return
-        pads = FAMILLES.get(self.parts_on, None)
         vie = max(0.12, float(self.parts_life))
         dt = t - self.ev_t
-        m = (dt >= 0.0) & (dt < vie) & (self.ev_f > 0.16)
-        if pads is not None:
-            m &= np.isin(self.ev_pad, pads)
+        m = ((dt >= 0.0) & (dt < vie) & (self.ev_f > 0.16)
+             & self._masque(self.parts_on, "caisse claire"))
         idx = np.nonzero(m)[0]
         if len(idx) == 0:
             return
@@ -2314,12 +2466,10 @@ class Renderer:
         """Onde de choc : un anneau qui s'ouvre depuis la machine et s'efface."""
         if self.ring <= 0.01:
             return
-        pads = FAMILLES.get(self.ring_on, None)
         vie = 0.62
         dt = t - self.ev_t
-        m = (dt >= 0.0) & (dt < vie) & (self.ev_f > 0.22)
-        if pads is not None:
-            m &= np.isin(self.ev_pad, pads)
+        m = ((dt >= 0.0) & (dt < vie) & (self.ev_f > 0.22)
+             & self._masque(self.ring_on))
         idx = np.nonzero(m)[0]
         if len(idx) == 0:
             return
@@ -3822,6 +3972,22 @@ def detect_hits(mono, sr):
         f = float(np.clip(v / 5.0, 0.30, 1.0))
         ev.append((i / fps + lag, (10, 11)[k % 2], f, DECAY_OF["hat"]))
         k += 1
+
+    # ---- bandes de frequences : des declencheurs qui ecoutent une hauteur
+    #
+    # Ils ne passent par aucune reconnaissance d'instrument : ce qui monte
+    # dans la bande part, que ce soit une peau, une voix ou une nappe. C'est
+    # ce qui les rend utiles a cote de la batterie, pas redondants avec elle.
+    for b, (nom, blo, bhi, sm, gap) in enumerate(BANDES):
+        if blo >= nyq:
+            continue
+        e = _env(S, freqs, blo, min(bhi, nyq), smooth=max(2, int(fps * sm)))
+        if not e.any():
+            continue
+        idx = _attacks(e, fps, gap, 2.0)
+        for i, v in zip(idx, _salience(e, fps, idx)):
+            f = float(np.clip(v / 5.0, 0.30, 1.0))
+            ev.append((i / fps + lag, PAD_BANDE + b, f, 11.0))
 
     ev.sort()
     return ev

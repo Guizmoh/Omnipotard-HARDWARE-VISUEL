@@ -39,7 +39,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
     detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, pool_context,
-    fit_jobs, INSTRUMENTS, TRAVELLINGS, python_trop_petit,
+    fit_jobs, DECLENCHEURS, hasard_events, TRAVELLINGS,
+    python_trop_petit,
     compute_spectro, PRESETS, QUALITES,
 )
 
@@ -109,12 +110,18 @@ def load_full_track(path, start, duration, sr=SR):
     mono = mix.mean(axis=1)
     beat = detect_beat(mono, sr)
     events = detect_hits(mono, sr)
+    phi = estimate_phase(events, beat / 4.0)
+    # Les declencheurs « hasard » sont fabriques ici plutot que dans le
+    # moteur : ainsi le studio peut annoncer leur nombre sous le curseur,
+    # comme pour un vrai instrument, et chaque tache de rendu les retrouve
+    # sans se concerter.
+    events = sorted(events + hasard_events(duration, beat, phi))
     # les paroxysmes se lisent sur le signal brut : le fondu d'ouverture
     # ressemblerait sinon a une montee en puissance et ferait un faux glitch.
     drops = detect_drops(st.mean(axis=1), sr)
     audio = {"stereo": (mix * 32767).astype("<i2"), "mono": mono.astype(np.float32),
              "events": events, "sr": sr, "beat": beat}
-    return audio, estimate_phase(events, beat / 4.0), drops
+    return audio, phi, drops
 
 
 
@@ -495,7 +502,7 @@ def add_look_args(ap):
     ap.add_argument("--split-count", type=int, default=3,
                     help="nombre de declenchements dans toute la video "
                          "(plafonne par la duree : un au plus toutes les 25 s)")
-    ap.add_argument("--split-on", default="grosse caisse", choices=INSTRUMENTS,
+    ap.add_argument("--split-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI",
                     help="coups autorises a declencher le dedoublement")
     ap.add_argument("--taille", type=float, default=1.0,
                     help="taille de la machine dans l'image : 1 = d'origine, "
@@ -514,22 +521,22 @@ def add_look_args(ap):
     # ---- avaries d'image declenchees par la batterie
     ap.add_argument("--tranches", type=float, default=0.0,
                     help="bandes horizontales arrachees sur le coup")
-    ap.add_argument("--tranches-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--tranches-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--roll", type=float, default=0.0,
                     help="decrochage vertical du tube sur le coup")
-    ap.add_argument("--roll-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--roll-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--ghost", type=float, default=0.0,
                     help="image fantome decalee sur le coup")
-    ap.add_argument("--ghost-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--ghost-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--blocs", type=float, default=0.0,
                     help="blocs recopies ailleurs, facon flux abime")
-    ap.add_argument("--blocs-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--blocs-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--invert", type=float, default=0.0,
                     help="negatif bref sur le coup")
-    ap.add_argument("--invert-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--invert-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--stut", type=float, default=0.0,
                     help="begaiement : duree du gel de l'image, en secondes")
-    ap.add_argument("--stut-on", default="charley", choices=INSTRUMENTS)
+    ap.add_argument("--stut-on", default="charley", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--stut-loop", type=float, default=0.05,
                     help="longueur du bout rejoue en boucle (s)")
     ap.add_argument("--scramble", type=float, default=0.0,
@@ -538,25 +545,25 @@ def add_look_args(ap):
                     help="longueur d'une tranche de temps (s)")
     ap.add_argument("--miroir", type=float, default=0.0,
                     help="l'image se replie sur elle-meme sur le coup")
-    ap.add_argument("--miroir-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--miroir-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--ondul", type=float, default=0.0,
                     help="ondulation liquide du balayage")
-    ap.add_argument("--ondul-on", default="basse", choices=INSTRUMENTS)
+    ap.add_argument("--ondul-on", default="basse", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--mosaic", type=float, default=0.0,
                     help="pixelisation brutale sur le coup")
-    ap.add_argument("--mosaic-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--mosaic-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--kaleido", type=float, default=0.0,
                     help="l'image repetee en grille sur le coup")
-    ap.add_argument("--kaleido-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--kaleido-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--cisaille", type=float, default=0.0,
                     help="cisaillement diagonal sur le coup")
-    ap.add_argument("--cisaille-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--cisaille-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--coupure", type=float, default=0.0,
                     help="l'image s'absente une image ou deux sur le coup")
-    ap.add_argument("--coupure-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--coupure-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--tapestop", type=float, default=0.0,
                     help="duree du patinage de bande sur le coup (s)")
-    ap.add_argument("--tapestop-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--tapestop-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
     # ---- textures continues
     ap.add_argument("--cadence", type=int, default=0,
                     help="images tenues : 2 = 15 i/s, 3 = 10 i/s (0 = fluide)")
@@ -609,13 +616,13 @@ def add_look_args(ap):
     # ---- reactions au son : chacune se cale sur l'instrument de son choix
     ap.add_argument("--punch", type=float, default=0.032,
                     help="zoom d'impact sur chaque coup")
-    ap.add_argument("--punch-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--punch-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--shake", type=float, default=0.0,
                     help="secousse de l'image sur chaque coup")
-    ap.add_argument("--shake-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--shake-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--parts", type=float, default=0.0,
                     help="etincelles ejectees a chaque coup")
-    ap.add_argument("--parts-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--parts-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--parts-n", type=int, default=14,
                     help="nombre d'etincelles par coup (jusqu'a 40000)")
     ap.add_argument("--parts-speed", type=float, default=1.0)
@@ -623,13 +630,13 @@ def add_look_args(ap):
                     help="duree de vie d'une etincelle, en secondes")
     ap.add_argument("--ring", type=float, default=0.0,
                     help="onde de choc : un anneau qui s'ouvre sur le coup")
-    ap.add_argument("--ring-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--ring-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--grid-pulse", type=float, default=0.0,
                     help="la grille du fond s'allume sur le coup")
-    ap.add_argument("--grid-on", default="grosse caisse", choices=INSTRUMENTS)
+    ap.add_argument("--grid-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
     ap.add_argument("--bg-flash", type=float, default=0.0,
                     help="l'image de fond est eclairee par le coup")
-    ap.add_argument("--flash-on", default="caisse claire", choices=INSTRUMENTS)
+    ap.add_argument("--flash-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
 
 
 def look_kwargs(args):

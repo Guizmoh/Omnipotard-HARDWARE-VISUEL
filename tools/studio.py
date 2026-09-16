@@ -41,7 +41,8 @@ from mpc_performance import (  # noqa: E402
 )
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
-    VERSION, INSTRUMENTS, TRAVELLINGS, FAMILLES,
+    VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs,
+    compte_frappes, TRAVELLINGS, FAMILLES,
     backdrop_quality, PRESETS, CHAMPS, AIDE, COMPTE, QUALITES, pick_split_times,
 )
 
@@ -141,7 +142,7 @@ def look_from(q):
         "wobble": float(q.get("wobble", 0.0)),
         "split": float(q.get("split", 1.0)),
         "split_count": int(float(q.get("splitCount", 3))),
-        "split_on": _dans(q.get("splitOn"), INSTRUMENTS, "grosse caisse"),
+        "split_on": _dans(q.get("splitOn"), DECLENCHEURS, "grosse caisse"),
         "glitch": float(q.get("glitch", 1.0)),
         "nettete": float(q.get("nettete", 1.0)),
         "taille": float(q.get("taille", 1.0)),
@@ -149,34 +150,34 @@ def look_from(q):
         "step_div": float(q.get("stepDiv", 2.0)),
         # ---- avaries d'image, declenchees par la batterie
         "tranches": float(q.get("tranches", 0.0)),
-        "tranches_on": _dans(q.get("tranchesOn"), INSTRUMENTS, "caisse claire"),
+        "tranches_on": _dans(q.get("tranchesOn"), DECLENCHEURS, "caisse claire"),
         "roll": float(q.get("roll", 0.0)),
-        "roll_on": _dans(q.get("rollOn"), INSTRUMENTS, "grosse caisse"),
+        "roll_on": _dans(q.get("rollOn"), DECLENCHEURS, "grosse caisse"),
         "ghost": float(q.get("ghost", 0.0)),
-        "ghost_on": _dans(q.get("ghostOn"), INSTRUMENTS, "caisse claire"),
+        "ghost_on": _dans(q.get("ghostOn"), DECLENCHEURS, "caisse claire"),
         "blocs": float(q.get("blocs", 0.0)),
-        "blocs_on": _dans(q.get("blocsOn"), INSTRUMENTS, "caisse claire"),
+        "blocs_on": _dans(q.get("blocsOn"), DECLENCHEURS, "caisse claire"),
         "invert": float(q.get("invert", 0.0)),
-        "invert_on": _dans(q.get("invertOn"), INSTRUMENTS, "grosse caisse"),
+        "invert_on": _dans(q.get("invertOn"), DECLENCHEURS, "grosse caisse"),
         "stut": float(q.get("stut", 0.0)),
-        "stut_on": _dans(q.get("stutOn"), INSTRUMENTS, "charley"),
+        "stut_on": _dans(q.get("stutOn"), DECLENCHEURS, "charley"),
         "stut_loop": float(q.get("stutLoop", 0.05)),
         "scramble": float(q.get("scramble", 0.0)),
         "scr_len": float(q.get("scrLen", 0.14)),
         "miroir": float(q.get("miroir", 0.0)),
-        "miroir_on": _dans(q.get("miroirOn"), INSTRUMENTS, "caisse claire"),
+        "miroir_on": _dans(q.get("miroirOn"), DECLENCHEURS, "caisse claire"),
         "ondul": float(q.get("ondul", 0.0)),
-        "ondul_on": _dans(q.get("ondulOn"), INSTRUMENTS, "basse"),
+        "ondul_on": _dans(q.get("ondulOn"), DECLENCHEURS, "basse"),
         "mosaic": float(q.get("mosaic", 0.0)),
-        "mosaic_on": _dans(q.get("mosaicOn"), INSTRUMENTS, "caisse claire"),
+        "mosaic_on": _dans(q.get("mosaicOn"), DECLENCHEURS, "caisse claire"),
         "kaleido": float(q.get("kaleido", 0.0)),
-        "kaleido_on": _dans(q.get("kaleidoOn"), INSTRUMENTS, "caisse claire"),
+        "kaleido_on": _dans(q.get("kaleidoOn"), DECLENCHEURS, "caisse claire"),
         "cisaille": float(q.get("cisaille", 0.0)),
-        "cisaille_on": _dans(q.get("cisailleOn"), INSTRUMENTS, "caisse claire"),
+        "cisaille_on": _dans(q.get("cisailleOn"), DECLENCHEURS, "caisse claire"),
         "coupure": float(q.get("coupure", 0.0)),
-        "coupure_on": _dans(q.get("coupureOn"), INSTRUMENTS, "grosse caisse"),
+        "coupure_on": _dans(q.get("coupureOn"), DECLENCHEURS, "grosse caisse"),
         "tapestop": float(q.get("tapestop", 0.0)),
-        "tapestop_on": _dans(q.get("tapestopOn"), INSTRUMENTS, "grosse caisse"),
+        "tapestop_on": _dans(q.get("tapestopOn"), DECLENCHEURS, "grosse caisse"),
         "cadence": int(float(q.get("cadence", 0))),
         "poussiere": float(q.get("poussiere", 0.0)),
         "flottement": float(q.get("flottement", 0.0)),
@@ -207,20 +208,20 @@ def look_from(q):
         "travel_mode": _dans(q.get("travelMode"), TRAVELLINGS, "avant"),
         # ---- reactions au son
         "punch": float(q.get("punch", 0.032)),
-        "punch_on": _dans(q.get("punchOn"), INSTRUMENTS, "grosse caisse"),
+        "punch_on": _dans(q.get("punchOn"), DECLENCHEURS, "grosse caisse"),
         "shake_amp": float(q.get("shake", 0.0)),
-        "shake_on": _dans(q.get("shakeOn"), INSTRUMENTS, "grosse caisse"),
+        "shake_on": _dans(q.get("shakeOn"), DECLENCHEURS, "grosse caisse"),
         "parts": float(q.get("parts", 0.0)),
-        "parts_on": _dans(q.get("partsOn"), INSTRUMENTS, "caisse claire"),
+        "parts_on": _dans(q.get("partsOn"), DECLENCHEURS, "caisse claire"),
         "parts_n": int(float(q.get("partsN", 14))),
         "parts_speed": float(q.get("partsSpeed", 1.0)),
         "parts_life": float(q.get("partsLife", 0.55)),
         "ring": float(q.get("ring", 0.0)),
-        "ring_on": _dans(q.get("ringOn"), INSTRUMENTS, "grosse caisse"),
+        "ring_on": _dans(q.get("ringOn"), DECLENCHEURS, "grosse caisse"),
         "grid_pulse": float(q.get("gridPulse", 0.0)),
-        "grid_on": _dans(q.get("gridOn"), INSTRUMENTS, "grosse caisse"),
+        "grid_on": _dans(q.get("gridOn"), DECLENCHEURS, "grosse caisse"),
         "bg_flash": float(q.get("bgFlash", 0.0)),
-        "flash_on": _dans(q.get("flashOn"), INSTRUMENTS, "caisse claire"),
+        "flash_on": _dans(q.get("flashOn"), DECLENCHEURS, "caisse claire"),
     }
 
 
@@ -271,12 +272,7 @@ class Studio:
         souvent des milliers de fois, la ou la grosse caisse en compte
         quelques centaines. Sans ce chiffre, on regle a l'aveugle.
         """
-        ev = info["_audio"]["events"]
-        out = {}
-        for nom, pads in FAMILLES.items():
-            out[nom] = len(ev) if pads is None else sum(1 for e in ev
-                                                        if e[1] in pads)
-        return out
+        return compte_frappes([e[1] for e in info["_audio"]["events"]])
 
     # ---- morceaux
     def add_track(self, path, name):
@@ -648,6 +644,8 @@ class Handler(BaseHTTPRequestHandler):
                                  for k, v in sorted(PALETTES.items())},
                     "fonds": list(BACKGROUNDS),
                     "instruments": list(INSTRUMENTS),
+                    "declencheurs": [{"titre": t, "noms": n}
+                                     for t, n in groupes_declencheurs()],
                     "travellings": list(TRAVELLINGS),
                     "qualites": {k: v["quoi"] for k, v in QUALITES.items()},
                     "presets": {k: {CHAMPS[a]: b for a, b in v.items()}
@@ -964,10 +962,19 @@ PAGE = r"""<!doctype html>
 
   <div class="card">
     <h2>Reactions au son</h2>
-    <p class="hint" style="margin-top:0">Chaque reaction se cale sur
-      l'instrument de votre choix : la batterie est reconnue a l'analyse, donc
-      « caisse claire » veut vraiment dire caisse claire. A zero, la reaction
-      est eteinte.</p>
+    <p class="hint" style="margin-top:0">Chaque reaction se cale sur ce que
+      vous voulez. A zero, elle est eteinte.<br>
+      Les listes proposent quatre sortes de declencheurs.
+      <b>Instruments</b> : la batterie est reconnue a l'analyse, « caisse
+      claire » veut donc vraiment dire caisse claire.
+      <b>Bandes de frequences</b> : une hauteur et non un instrument — elles
+      attrapent aussi ce qui n'est pas percussif, une nappe qui monte, une
+      voix, un souffle de cymbale.
+      <b>Hasard</b> : tire au sort, mais pose sur la grille du morceau, donc
+      jamais a contretemps.
+      <b>Un coup sur deux</b> : deux effets poses l'un sur « 1 sur 2 » et
+      l'autre sur « l'autre sur 2 » ne peuvent jamais partir ensemble — c'est
+      la reponse quand tout tombe en meme temps.</p>
 
     <label for="punch">zoom d'impact &mdash; <span id="v-pu">0.03</span></label>
     <input type="range" id="punch" min="0" max="0.25" step="0.005" value="0.032">
@@ -1605,6 +1612,18 @@ fetch('/config').then(r => r.json())
              + '>' + (sel === '#travelMode' ? v : 'sur : ' + v) + '</option>'
       ).join('');
     };
+    /* Les declencheurs arrivent groupes : instruments, bandes de frequences,
+       hasard, parts. Sans ces groupes la liste ferait quarante lignes a plat
+       et plus personne n'y trouverait rien. */
+    const echap = v => v.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                        .replace(/"/g, '&quot;');
+    const remplirGroupes = (sel, groupes, choisi) => {
+      $(sel).innerHTML = groupes.map(g =>
+        '<optgroup label="' + echap(g.titre) + '">' + g.noms.map(
+          v => '<option value="' + echap(v) + '"'
+               + (v === choisi ? ' selected' : '') + '>sur : ' + echap(v)
+               + '</option>').join('') + '</optgroup>').join('');
+    };
     for (const [sel, def] of [['#splitOn', 'grosse caisse'],
                               ['#punchOn', 'grosse caisse'],
                               ['#shakeOn', 'grosse caisse'],
@@ -1625,7 +1644,7 @@ fetch('/config').then(r => r.json())
                               ['#cisailleOn', 'caisse claire'],
                               ['#coupureOn', 'grosse caisse'],
                               ['#tapestopOn', 'grosse caisse']])
-      remplir(sel, c.instruments || [], def);
+        remplirGroupes(sel, c.declencheurs || [], def);
     remplir('#travelMode', c.travellings || [], 'avant');
     // chaque qualite dit en clair ce qu'elle coute et ce qu'elle rend
     QUALITES = c.qualites || {};
