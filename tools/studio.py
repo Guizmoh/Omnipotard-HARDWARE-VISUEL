@@ -140,6 +140,10 @@ def look_from(q):
         "bg_color": hex_to_rgb(q.get("bgColor") or "#000000"),
         "bg_strength": float(q.get("bgStrength", 1.0)),
         "bg_clear": float(q.get("bgClear", 0.55)),
+        "bg_anim": float(q.get("bgAnim", 0.0)),
+        "neon": float(q.get("neon", 1.0)),
+        "reflet": float(q.get("reflet", 0.5)),
+        "tube": float(q.get("tube", 0.0)),
         "wobble": float(q.get("wobble", 0.0)),
         "split": float(q.get("split", 1.0)),
         "split_count": int(float(q.get("splitCount", 3))),
@@ -406,7 +410,7 @@ class Studio:
                 "coupure", "coupure_on", "tapestop", "tapestop_on",
                 "cadence", "poussiere", "flottement", "halo_doux",
                 "echo", "echo_n", "echo_delay", "couleurs", "step_div",
-                "presence")
+                "presence", "neon", "reflet", "tube")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
                         "backdrop_sharp", "spectro", "nettete", "taille")
@@ -1023,6 +1027,8 @@ PAGE = r"""<!doctype html>
       <input type="range" id="bgStrength" min="0" max="2" step="0.05" value="1">
       <label for="bgClear">degagement derriere la machine &mdash; <span id="v-clr">0.55</span></label>
       <input type="range" id="bgClear" min="0" max="1" step="0.05" value="0.55">
+      <label for="bgAnim">animation de la texture &mdash; <span id="v-ba">0.00</span></label>
+      <input type="range" id="bgAnim" min="0" max="6" step="0.1" value="0">
       <p class="hint">Le trait est additif : un fond clair mange son contraste.
         Le degagement creuse la texture derriere la machine pour qu'elle
         ressorte quand meme.</p>
@@ -1065,6 +1071,13 @@ PAGE = r"""<!doctype html>
     <input type="range" id="taille" min="0.35" max="1.3" step="0.01" value="1">
     <label for="presence">presence de la machine &mdash; <span id="v-pr">1.00</span></label>
     <input type="range" id="presence" min="0.1" max="1.6" step="0.02" value="1">
+    <label for="neon">eclat du neon &mdash; <span id="v-ne">1.00</span></label>
+    <input type="range" id="neon" min="0.2" max="3" step="0.05" value="1">
+    <label for="reflet">surface qui renvoie la lumiere &mdash;
+      <span id="v-re">0.50</span></label>
+    <input type="range" id="reflet" min="0" max="1" step="0.02" value="0.5">
+    <label for="tube">tube de verre (relief) &mdash; <span id="v-tu">0.00</span></label>
+    <input type="range" id="tube" min="0" max="1.5" step="0.05" value="0">
     <label for="nettete">finesse du trait &mdash; <span id="v-net">1.00</span></label>
     <input type="range" id="nettete" min="0.6" max="1.7" step="0.05" value="1">
     <label for="split">dedoublement du trait sur les gros subs &mdash; <span id="v-split">1.00</span></label>
@@ -1458,6 +1471,8 @@ function params() {
     bdSharp: $('#bdSharp').value,
     nettete: $('#nettete').value, stepDiv: $('#stepDiv').value,
     taille: $('#taille').value, presence: $('#presence').value,
+    neon: $('#neon').value, reflet: $('#reflet').value,
+    tube: $('#tube').value, bgAnim: $('#bgAnim').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
   return p;
@@ -1594,6 +1609,8 @@ bind('#stutLoop','#v-sl',2); bind('#miroir','#v-mi',2); bind('#ondul','#v-on',2)
 bind('#mosaic','#v-mo',2); bind('#scramble','#v-sc2',2); bind('#scrLen','#v-scl',2);
 bind('#bdSharp','#v-bdq',2); bind('#nettete','#v-net',2);
 bind('#taille','#v-ta',2); bind('#presence','#v-pr',2);
+bind('#neon','#v-ne',2); bind('#reflet','#v-re',2); bind('#tube','#v-tu',2);
+bind('#bgAnim','#v-ba',2);
 bind('#kaleido','#v-ka',2); bind('#cisaille','#v-ci',2);
 bind('#coupure','#v-co',2); bind('#tapestop','#v-ta',2);
 bind('#haloDoux','#v-hd',2); bind('#poussiere','#v-po',2);

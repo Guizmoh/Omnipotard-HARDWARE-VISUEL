@@ -789,6 +789,62 @@ défaut — mais c'est un parti pris, pas une fatalité. `--backdrop-sharp` va d
 aucun flou), avec un rapport de trente entre les deux sur le détail mesuré. La
 valeur par défaut, 0,37, reproduit exactement l'ancien comportement.
 
+### Le néon : éclairage, surface qui le reflète, tube de verre
+
+Ce qu'on voit autour du trait n'est pas le trait : c'est sa lumière renvoyée
+par la surface qui le porte. Trois réglages décrivent cette scène.
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --neon 2.2
+python3 tools/mpc_performance.py morceau.mp3 --reflet 1.0      # surface collée
+python3 tools/mpc_performance.py morceau.mp3 --tube 1.0        # verre et relief
+```
+
+`--neon` est la force de cet éclairage. Le trait lui-même ne bouge pas ; c'est
+la lumière qu'il jette autour de lui qui monte ou descend — mesuré, la lumière
+totale de l'image passe de 26 000 à 43 600 entre 1 et 2,2, et tombe à 14 000 à
+0,35.
+
+`--reflet` dit **à quelle distance se tient cette surface**. Collée au tube,
+elle renvoie une lueur serrée et vive, et le noir revient entre deux traits ;
+lointaine, la lueur s'étale et pâlit, et tout baigne. Techniquement, le halo
+est la somme de deux flous — un serré, un large — et le réglage déplace à la
+fois leur **poids** et leur **rayon**. À 0,5, les deux valent exactement ce
+qu'ils valaient avant : rien ne change pour ce qui a déjà été rendu.
+
+`--tube` donne au trait l'épaisseur d'un tube de verre. Le tracé n'a pas de
+normales — c'est un champ d'intensité, pas une géométrie 3D — mais la
+différence entre deux flous donne exactement l'anneau qu'il faut pour
+assombrir le bord, et le cœur décalé d'un pixel ou deux fait le reflet qui file
+le long de l'arête haute. Le résultat lit comme du verre, surtout en 1080p et
+au-dessus.
+
+### Textures de fond animées
+
+`--bg-anim` fait vivre la texture : le quadrillage, les points et les lignes de
+tube **descendent**, le grain **bout** comme une pellicule.
+
+La vitesse se compte en **motifs par seconde** et non en pixels. C'est ce qui
+la rend utilisable : à vitesse constante en pixels, le même réglage faisait
+dériver doucement un quadrillage à grosses mailles et strober des lignes de
+tube cent fois plus fines — jusqu'à les faire remonter, par le même effet qui
+fait tourner les roues de diligence à l'envers au cinéma.
+
+Deux détails qui comptent. La maille passe de « environ vingt-quatre cases » à
+**vingt-cinq exactement**, pour que la hauteur de l'image soit un multiple
+entier du motif : la texture défile alors en boucle sans jamais montrer de
+raccord. Et le creux ménagé derrière la machine est gardé **à part** de la
+texture — sinon il descendrait avec elle, et la machine se retrouverait
+éclairée par le bas au bout de deux secondes.
+
+Le grain, lui, ne défile pas : il saute d'un point à l'autre de sa propre
+matière, huit fois par seconde et par cran de vitesse, et reste fixe entre deux
+sauts — un grain de pellicule tient le temps d'un photogramme. Le tirage est
+semé par le numéro du saut, pas pris dans le tirage partagé : y puiser
+déplacerait tout le reste de l'image dès qu'on allume l'animation.
+
+Coût mesuré : 78 à 85 ms par image en 960×540 sans animation, 81 à 89 avec.
+
 ### Taille et présence de la machine
 
 Deux réglages pour décider de la place que la machine prend dans l'image —

@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-16.21"
+VERSION = "2026-09-16.22"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -315,6 +315,18 @@ AIDE = {
               "du morceau, eux, gardent la largeur de l'ecran.",
     "presence": "L'eclat de la machine. En la baissant elle s'efface derriere "
                 "le fond sans disparaitre, comme un reflet sur une vitre.",
+    "neon": "La force avec laquelle le neon eclaire ce qui l'entoure. Le "
+            "trait lui-meme ne change pas : c'est la lumiere qu'il jette "
+            "autour de lui qui monte ou descend.",
+    "reflet": "A quelle distance se tient la surface qui renvoie cette "
+              "lumiere. Collee, la lueur est serree et vive ; lointaine, elle "
+              "s'etale et palit.",
+    "tube": "Donne au trait l'epaisseur d'un tube de verre : les bords "
+            "s'assombrissent et un reflet file le long de son arete haute.",
+    "bgAnim": "Fait vivre la texture du fond : les lignes et le quadrillage "
+              "descendent, le grain bout comme une pellicule. A zero, la "
+              "texture est fixe. Sans effet sur « uni » et « degrade », qui "
+              "n'ont rien a faire defiler.",
     "nettete": "La finesse du trait lui-meme. A 1 il est large et velours ; "
                "plus haut il se resserre, jusqu'a un cheveu de lumiere. Le "
                "gain de nettete se voit surtout en 1080p et au-dessus.",
@@ -361,6 +373,7 @@ CHAMPS = {
     "snare": "snare", "wave_gain": "wave", "wave_punch": "wavePunch",
     "nettete": "nettete", "step_div": "stepDiv",
     "taille": "taille", "presence": "presence",
+    "neon": "neon", "reflet": "reflet", "tube": "tube", "bg_anim": "bgAnim",
     "wave_smooth": "waveSmooth", "trail": "trail", "glitch": "glitch",
     "punch": "punch", "punch_on": "punchOn",
     "shake_amp": "shake", "shake_on": "shakeOn",
@@ -466,12 +479,9 @@ def _backdrop_mask(w, h, strength, clear, scale, screen_dim):
     yy = np.arange(h, dtype=np.float32)[:, None]
     xx = np.arange(w, dtype=np.float32)[None, :]
     m = np.full((h, w), float(strength), dtype=np.float32)
-    if clear > 0:
-        nx = (xx - w * 0.5) / (1.52 * sc)
-        ny = (yy - h * 0.5) / (1.08 * sc)
-        r = np.sqrt(nx * nx + ny * ny)
-        k = np.clip((r - 0.82) / 0.55, 0.0, 1.0)
-        m *= 1.0 - float(clear) * (1.0 - k * k * (3.0 - 2.0 * k))
+    trou = creux_machine(w, h, clear, scale)
+    if trou is not None:
+        m *= trou
     if screen_dim > 0:
         # la dalle est opaque : sans cela le ciel de la photo passe au travers
         # et l'ecran de la machine a l'air d'etre en verre.
@@ -718,6 +728,22 @@ def rgb_to_hex(c):
     return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(v * 255)))) for v in c)
 
 
+def creux_machine(w, h, clear, scale=None):
+    """Le creux que l'on menage derriere la machine, en (h, w).
+
+    La texture comme l'image de fond s'y appuient : le faisceau etant additif,
+    un fond clair juste derriere le trait lui mange tout son contraste.
+    """
+    if clear <= 0.0:
+        return None
+    sc = scale if scale else min(h * 0.5, w * 0.5 / 1.30)
+    nx = (np.arange(w, dtype=np.float32)[None, :] - w * 0.5) / (1.52 * sc)
+    ny = (np.arange(h, dtype=np.float32)[:, None] - h * 0.5) / (1.08 * sc)
+    r = np.sqrt(nx * nx + ny * ny)
+    k = np.clip((r - 0.82) / 0.55, 0.0, 1.0)
+    return (1.0 - float(clear) * (1.0 - k * k * (3.0 - 2.0 * k))).astype(np.float32)
+
+
 def make_background(w, h, kind="noir", color=(0.0, 0.0, 0.0), strength=1.0,
                     clear=0.55, scale=None, seed=11):
     """Construit le fond, une fois pour toutes.
@@ -737,7 +763,11 @@ def make_background(w, h, kind="noir", color=(0.0, 0.0, 0.0), strength=1.0,
 
     yy = np.arange(h, dtype=np.float32)[:, None]
     xx = np.arange(w, dtype=np.float32)[None, :]
-    pitch = max(6.0, h / 24.0)                  # maille ~24 cases sur la hauteur
+    # Vingt-cinq cases exactement, et non « environ vingt-quatre » : la texture
+    # peut alors defiler en boucle sans montrer de raccord, puisque la hauteur
+    # de l'image est un multiple entier de la maille — et des cinq mailles du
+    # trait fort, et des cent lignes de tube.
+    pitch = max(6.0, h / 25.0)
 
     if kind == "uni":
         pat = np.ones((h, w), dtype=np.float32)
@@ -776,14 +806,9 @@ def make_background(w, h, kind="noir", color=(0.0, 0.0, 0.0), strength=1.0,
     else:
         raise ValueError("fond inconnu : %s" % kind)
 
-    if clear > 0.0:
-        # creuse une ellipse douce la ou se tient la machine
-        sc = scale if scale else min(h * 0.5, w * 0.5 / 1.30)
-        nx = (xx - w * 0.5) / (1.52 * sc)
-        ny = (yy - h * 0.5) / (1.08 * sc)
-        r = np.sqrt(nx * nx + ny * ny)
-        k = np.clip((r - 0.82) / 0.55, 0.0, 1.0)
-        pat = pat * (1.0 - float(clear) * (1.0 - k * k * (3.0 - 2.0 * k)))
+    trou = creux_machine(w, h, clear, scale)
+    if trou is not None:
+        pat = pat * trou
 
     return (pat[..., None] * col.reshape(1, 1, 3)).astype(np.float32)
 
@@ -1813,7 +1838,7 @@ STEP_LIT = frozenset(KICKS + RIMS + HATS + PERCS + SKANKS)
 class Renderer:
     def __init__(self, w, h, fps, duration, audio, curve=True, seed=7,
                  palette="vert", subtitle=SUB_TXT, bg=None, bg_color=None,
-                 bg_strength=1.0, bg_clear=0.55, nettete=1.0):
+                 bg_strength=1.0, bg_clear=0.55, bg_anim=0.0, nettete=1.0):
         self.W, self.H = w, h
         self.fps = fps
         self.dur = duration
@@ -1831,7 +1856,13 @@ class Renderer:
         self.taille = 1.0
         self.presence = 1.0
         self._ech = 1.0                      # echelle du dessin en cours
-        self.set_look(palette, bg, bg_color, bg_strength, bg_clear)
+        # Le neon : de quelle force il eclaire, a quelle distance se tient la
+        # surface qui lui renvoie sa lumiere, et s'il a l'epaisseur d'un tube
+        # de verre. Les valeurs par defaut redonnent exactement l'ancien rendu.
+        self.neon = 1.0
+        self.reflet = 0.5
+        self.tube = 0.0
+        self.set_look(palette, bg, bg_color, bg_strength, bg_clear, bg_anim)
         self._zoom = 1.0                     # respiration de l'image sur les kicks
         self._cam = (0.0, 0.0)               # camera : centre, puis dans l'ecran
         self._cam_z = 1.0
@@ -3080,7 +3111,7 @@ class Renderer:
     glitch = 1.0        # dosage des glitchs sur les paroxysmes (0 = aucun)
 
     def set_look(self, palette="vert", bg=None, bg_color=None,
-                 bg_strength=1.0, bg_clear=0.55):
+                 bg_strength=1.0, bg_clear=0.55, bg_anim=0.0):
         """Change la couleur et le fond sans rien recalculer d'autre.
 
         Rien de tout cela ne depend du son : on peut donc changer d'allure
@@ -3098,12 +3129,59 @@ class Renderer:
         self.backdrop = None      # image de fond, ajoutee sous la texture
         # On retient de quoi refaire cette texture : son creux derriere la
         # machine depend de la taille de celle-ci, qui se regle apres coup.
-        self._look = (palette, bg, bg_color, bg_strength, bg_clear)
-        self.c_bg = make_background(
-            self.W, self.H, kind=bg or "uni",
+        self._look = (palette, bg, bg_color, bg_strength, bg_clear, bg_anim)
+        self.bg_kind = bg or "uni"
+        self.bg_anim = float(bg_anim)
+        creux = (creux_machine(self.W, self.H, bg_clear, self.scale * self.taille)
+                 if bg else None)
+        # La texture est construite sans son creux : c'est elle qui defile, et
+        # le creux, lui, doit rester derriere la machine. Tant que rien ne
+        # bouge on les multiplie une fois pour toutes — garder les deux plans
+        # separes couterait le double de memoire a chaque tache de rendu.
+        pat = make_background(
+            self.W, self.H, kind=self.bg_kind,
             color=pbg if bg_color is None else bg_color,
-            strength=bg_strength, clear=bg_clear if bg else 0.0,
+            strength=bg_strength, clear=0.0,
             scale=self.scale * self.taille, seed=self.seed)
+        # La vitesse se compte en motifs par seconde et non en pixels : sinon
+        # le meme reglage ferait deriver doucement un quadrillage a grosses
+        # mailles et strober des lignes de tube cent fois plus fines.
+        maille = max(6.0, self.H / 25.0)
+        self.bg_periode = maille * (0.25 if self.bg_kind == "scan" else 1.0)
+        anime = (self.bg_anim > 1e-4 and pat.shape[0] > 1
+                 and self.bg_kind not in ("uni", "degrade"))
+        if anime:
+            self.c_bg, self.c_bg_pat, self.c_bg_creux = None, pat, creux
+        else:
+            self.c_bg = pat if creux is None else pat * creux[..., None]
+            self.c_bg_pat = self.c_bg_creux = None
+
+    def fond_texture(self, t):
+        """La texture du fond a l'instant t.
+
+        Les lignes de tube et le quadrillage descendent ; le grain, lui, saute
+        d'un point a l'autre de sa propre matiere, ce qui le fait bouillir
+        comme un grain de pellicule. Le saut est tire d'un hasard seme par le
+        numero de l'image, et non du tirage partage : piocher dedans
+        deplacerait tout le reste de l'image — le grain, les tranches de
+        glitch — des qu'on allume l'animation.
+        """
+        if self.c_bg is not None:
+            return self.c_bg
+        pat = self.c_bg_pat
+        h, w = pat.shape[0], pat.shape[1]
+        if self.bg_kind == "bruit":
+            # le grain saute huit fois par seconde et par cran de vitesse :
+            # entre deux sauts il reste fixe, comme un grain de pellicule qui
+            # tient le temps d'une photogramme
+            saut = int(t * self.bg_anim * 8.0)
+            r = np.random.default_rng(self.seed + 7717 + saut)
+            pat = np.roll(pat, (int(r.integers(0, h)), int(r.integers(0, w))),
+                          axis=(0, 1))
+        else:
+            pat = np.roll(pat, int(t * self.bg_anim * self.bg_periode) % h,
+                          axis=0)
+        return pat if self.c_bg_creux is None else pat * self.c_bg_creux[..., None]
 
     def set_taille(self, taille):
         """Change la taille de la machine, creux du fond compris.
@@ -3371,15 +3449,36 @@ class Renderer:
         W, H = self.W, self.H
         core = gauss(field, self.sigma)
 
-        g4 = gauss(downsample(core, 4), 2.6)
-        g8 = gauss(downsample(core, 8), 4.5)
-        glow = upsample(g4, 4, (H, W)) * 2.6 + upsample(g8, 8, (H, W)) * 3.4
+        # Un neon n'eclaire pas dans le vide : ce qu'on voit autour de lui est
+        # sa lumiere renvoyee par la surface qui le porte. Plus cette surface
+        # est proche, plus la lueur est serree et vive ; plus elle est loin,
+        # plus elle s'etale et palit. On deplace donc a la fois le poids et le
+        # rayon des deux flous. A 0,5 on retrouve exactement l'ancien rendu.
+        k = float(np.clip(self.reflet, 0.0, 1.0))
+        ecart = 1.45 - 0.9 * k
+        pres, loin = 1.0 + 1.2 * (k - 0.5), 1.0 - 1.2 * (k - 0.5)
+        g4 = gauss(downsample(core, 4), 2.6 * ecart)
+        g8 = gauss(downsample(core, 8), 4.5 * ecart)
+        glow = (upsample(g4, 4, (H, W)) * 2.6 * pres
+                + upsample(g8, 8, (H, W)) * 3.4 * loin)
 
         inten = core * 1.15
         hot = np.clip(inten - 0.72, 0, None)
 
         img = np.zeros((H, W, 3), dtype=np.float32)
         base = np.clip(inten, 0, 1.6)
+        # Effet de tube : le verre assombrit les bords du trait, et un reflet
+        # file le long de son arete haute. Le trace n'a pas de normales — c'est
+        # un champ d'intensite — mais la difference entre deux flous donne
+        # exactement l'anneau qu'il faut pour le bord, et le coeur decale d'un
+        # pixel ou deux fait le reflet.
+        luisant = None
+        if self.tube > 0.01:
+            kt = float(self.tube)
+            bord = np.clip(gauss(field, self.sigma * 1.9) * 1.9 - core, 0.0, None)
+            base = np.clip(base - kt * 0.45 * bord, 0.0, None)
+            d = max(1, int(round(self.sigma)))
+            luisant = self._shift(gauss(field, self.sigma * 0.5), -d, -d) * (kt * 0.60)
         # la caisse claire embrase le trait : il vire au jaune et le halo enfle
         fluo, halo = self.c_fluo, self.c_halo
         sn = self.snare * self.snare_hit(t)
@@ -3408,15 +3507,18 @@ class Renderer:
                 fluo = tuple(f * (1.0 - k) + c * k for f, c in zip(fluo, teinte))
                 halo = tuple(h * (1.0 - k) + c * k for h, c in zip(halo, teinte))
         gc = np.clip(glow, 0, 3.0)
+        gmul = gmul * float(self.neon)
         for c in range(3):
             img[:, :, c] = fluo[c] * base + halo[c] * gc * gmul
         img += (np.clip(hot * 1.25, 0, 1.0) ** 1.25)[..., None] * self.c_hot
+        if luisant is not None:
+            img += np.clip(luisant, 0.0, 1.4)[..., None]
         sp = self.split * self.sub_hit(t)
         if sp > 0.01:
             img = self._split(img, sp)
         # le fond passe sous les textures : scanlines, vignettage et grain
         # le travaillent comme le reste de la dalle.
-        img += self.c_bg
+        img += self.fond_texture(t)
         if self.backdrop is not None:
             fond = self.backdrop.at(t)
             if self.bg_flash > 0.01:

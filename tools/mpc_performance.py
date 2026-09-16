@@ -162,13 +162,14 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               backdrop=None, backdrop_strength=1.00,
                               backdrop_clear=0.28, screen_dim=0.40,
                               backdrop_sharp=0.37, taille=1.0, presence=1.0,
-                              **bgkw):
+                              neon=1.0, reflet=0.5, tube=0.0, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
     # la taille se pose avant tout le reste : le creux de la texture et celui
     # de l'image de fond se calent dessus
     r.set_taille(taille)
     r.presence = float(presence)
+    r.neon, r.reflet, r.tube = float(neon), float(reflet), float(tube)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
     r.glitch = float(glitch)
@@ -508,6 +509,20 @@ def add_look_args(ap):
                          "(plafonne par la duree : un au plus toutes les 25 s)")
     ap.add_argument("--split-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI",
                     help="coups autorises a declencher le dedoublement")
+    ap.add_argument("--neon", type=float, default=1.0,
+                    help="force de l'eclairage du neon : 1 = d'origine, "
+                         "2 = deux fois plus de lumiere autour du trait")
+    ap.add_argument("--reflet", type=float, default=0.5,
+                    help="proximite de la surface qui renvoie la lumiere : "
+                         "0 = lointaine (lueur large et douce), 1 = collee "
+                         "(lueur serree et vive)")
+    ap.add_argument("--tube", type=float, default=0.0,
+                    help="effet de tube de verre : bords assombris et reflet "
+                         "le long du trait")
+    ap.add_argument("--bg-anim", type=float, default=0.0,
+                    help="animation de la texture de fond, en motifs par "
+                         "seconde : les lignes descendent, le grain bout "
+                         "(0 = fixe)")
     ap.add_argument("--taille", type=float, default=1.0,
                     help="taille de la machine dans l'image : 1 = d'origine, "
                          "0.6 = plus petite, 1.3 = plus grande")
@@ -661,7 +676,9 @@ def look_kwargs(args):
             "split_count": args.split_count, "split_on": args.split_on,
             "glitch": args.glitch, "step_div": args.step_div,
             "nettete": args.nettete, "taille": args.taille,
-            "presence": args.presence,
+            "presence": args.presence, "neon": args.neon,
+            "reflet": args.reflet, "tube": args.tube,
+            "bg_anim": args.bg_anim,
             "tranches": args.tranches, "tranches_on": args.tranches_on,
             "roll": args.roll, "roll_on": args.roll_on,
             "ghost": args.ghost, "ghost_on": args.ghost_on,
