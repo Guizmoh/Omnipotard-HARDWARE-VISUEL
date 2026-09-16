@@ -40,7 +40,7 @@ from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
     detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, pool_context,
     fit_jobs, INSTRUMENTS, TRAVELLINGS, python_trop_petit,
-    compute_spectro, PRESETS,
+    compute_spectro, PRESETS, QUALITES,
 )
 
 
@@ -123,6 +123,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               seed=7, palette="vert", wobble=0.0, split=1.0,
                               split_px=11.0, split_count=3,
                               split_on="grosse caisse", glitch=1.0,
+                              step_div=2.0,
                               tranches=0.0, tranches_on="caisse claire",
                               roll=0.0, roll_on="grosse caisse",
                               ghost=0.0, ghost_on="caisse claire",
@@ -159,6 +160,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
     r.glitch = float(glitch)
+    r.step_div = float(step_div)
     r.tranches, r.tranches_on = float(tranches), str(tranches_on)
     r.roll, r.roll_on = float(roll), str(roll_on)
     r.ghost, r.ghost_on = float(ghost), str(ghost_on)
@@ -345,8 +347,8 @@ def render_still(music, t, width=960, height=540, fps=30, start=0.0,
 
 
 def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
-                 fps=30, crf=20, jobs=None, seed=7, curve=True, palette="vert",
-                 info=None, progress=None, **bgkw):
+                 fps=30, crf=None, jobs=None, seed=7, curve=True, palette="vert",
+                 info=None, progress=None, quality="compatible", **bgkw):
     """Rend la video complete et y remet le son.
 
     `progress(done, total, elapsed)` est appele au fil de l'eau ; renvoie le
@@ -373,13 +375,22 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
     if outdir:
         os.makedirs(outdir, exist_ok=True)
 
+    q = QUALITES.get(quality, QUALITES["compatible"])
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
            "-f", "rawvideo", "-pix_fmt", "rgb24",
            "-s", "%dx%d" % (width, height), "-r", str(fps), "-i", "-",
            "-i", wav,
-           "-c:v", "libx264", "-preset", "slow", "-crf", str(crf),
-           "-pix_fmt", "yuv420p", "-profile:v", "high", "-movflags", "+faststart",
-           "-x264-params", "keyint=%d" % (fps * 2),
+           "-c:v", "libx264", "-preset", "slow",
+           "-crf", str(int(crf) if crf is not None else q["crf"]),
+           "-pix_fmt", q["pix"], "-profile:v", q["profil"],
+           "-movflags", "+faststart",
+           # aq-mode 3 donne du debit aux zones sombres — ici tout le fond —
+           # et un deblocage negatif evite que le filtre anti-blocs ne lisse
+           # les traits fins en croyant corriger un artefact.
+           "-x264-params", "keyint=%d:aq-mode=3:aq-strength=0.9:"
+                           "psy-rd=1.2,0.2:deblock=-2,-2" % (fps * 2),
+           "-colorspace", "bt709", "-color_primaries", "bt709",
+           "-color_trc", "bt709",
            "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-shortest", out]
 
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -460,6 +471,12 @@ def add_look_args(ap):
                          "(plafonne par la duree : un au plus toutes les 25 s)")
     ap.add_argument("--split-on", default="grosse caisse", choices=INSTRUMENTS,
                     help="coups autorises a declencher le dedoublement")
+    ap.add_argument("--nettete", type=float, default=1.0,
+                    help="finesse du trait : 1 = d'origine, 1.5 = deux fois "
+                         "plus fin")
+    ap.add_argument("--step-div", type=float, default=2.0,
+                    help="vitesse du sequenceur : 4 = double-croche (ancien), "
+                         "2 = croche, 1 = noire")
     ap.add_argument("--glitch", type=float, default=1.0,
                     help="dosage des glitchs sur les paroxysmes (0 = aucun)")
     # ---- avaries d'image declenchees par la batterie
@@ -599,7 +616,8 @@ def look_kwargs(args):
             "bg_clear": args.bg_clear,
             "wobble": args.wobble, "split": args.split, "split_px": args.split_px,
             "split_count": args.split_count, "split_on": args.split_on,
-            "glitch": args.glitch,
+            "glitch": args.glitch, "step_div": args.step_div,
+            "nettete": args.nettete,
             "tranches": args.tranches, "tranches_on": args.tranches_on,
             "roll": args.roll, "roll_on": args.roll_on,
             "ghost": args.ghost, "ghost_on": args.ghost_on,
@@ -665,7 +683,12 @@ def main():
     ap.add_argument("--start", type=float, default=0.0, help="depart dans le morceau (s)")
     ap.add_argument("--duration", type=float, default=None,
                     help="duree a traiter (par defaut : le morceau entier)")
-    ap.add_argument("--crf", type=int, default=20)
+    ap.add_argument("--crf", type=int, default=None,
+                    help="qualite fine de l'encodage ; par defaut celle du "
+                         "profil choisi")
+    ap.add_argument("--quality", default="compatible", choices=sorted(QUALITES),
+                    help="compatible (lit partout), net (trait plus fin, VLC "
+                         "et montage), master (pour retravailler)")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--no-curve", action="store_true")
@@ -707,7 +730,8 @@ def main():
               % (done, total, el, el / max(done, 1) * (total - done)),
               end="", flush=True)
 
-    render_video(args.music, args.out, crf=args.crf, jobs=args.jobs,
+    render_video(args.music, args.out, crf=args.crf, quality=args.quality,
+                 jobs=args.jobs,
                  progress=show, **common)
     print("\n%s  (%.1f s, %dx%d @ %dfps)"
           % (args.out, info["duration"], args.width, args.height, args.fps))

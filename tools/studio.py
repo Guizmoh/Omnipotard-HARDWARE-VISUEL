@@ -42,7 +42,7 @@ from mpc_performance import (  # noqa: E402
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
     VERSION, INSTRUMENTS, TRAVELLINGS, FAMILLES,
-    backdrop_quality, PRESETS, CHAMPS, AIDE, COMPTE, pick_split_times,
+    backdrop_quality, PRESETS, CHAMPS, AIDE, COMPTE, QUALITES, pick_split_times,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -138,6 +138,8 @@ def look_from(q):
         "split_count": int(float(q.get("splitCount", 3))),
         "split_on": _dans(q.get("splitOn"), INSTRUMENTS, "grosse caisse"),
         "glitch": float(q.get("glitch", 1.0)),
+        "nettete": float(q.get("nettete", 1.0)),
+        "step_div": float(q.get("stepDiv", 2.0)),
         # ---- avaries d'image, declenchees par la batterie
         "tranches": float(q.get("tranches", 0.0)),
         "tranches_on": _dans(q.get("tranchesOn"), INSTRUMENTS, "caisse claire"),
@@ -308,7 +310,10 @@ class Studio:
     def _still(self, tid, t, q, w, h):
         tr = self.track(tid)
         palette, kw = look_from(q)
-        key = (tid, w, h, bool(q.get("curve", True)))
+        # La finesse du trait est fixee a la construction du moteur (elle
+        # decide de l'etalement du faisceau) : la changer demande donc un
+        # moteur neuf, contrairement a la couleur ou au fond qu'on repose.
+        key = (tid, w, h, bool(q.get("curve", True)), kw["nettete"])
         with self.lock:
             r = self.renderers.get(key)
         if r is None:
@@ -336,10 +341,10 @@ class Studio:
                 "kaleido", "kaleido_on", "cisaille", "cisaille_on",
                 "coupure", "coupure_on", "tapestop", "tapestop_on",
                 "cadence", "poussiere", "flottement", "halo_doux",
-                "echo", "echo_n", "echo_delay", "couleurs")
+                "echo", "echo_n", "echo_delay", "couleurs", "step_div")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
-                        "backdrop_sharp", "spectro")
+                        "backdrop_sharp", "spectro", "nettete")
         r.set_look(palette, **{k: v for k, v in kw.items() if k not in APART})
         for k in POSE:
             setattr(r, k, kw[k])
@@ -421,11 +426,16 @@ class Studio:
                     job["done"], job["total"] = done, total
                     job["eta"] = el / max(done, 1) * (total - done)
 
+                # Sans consigne, c'est la qualite choisie qui fixe la
+                # compression : imposer un CRF ici annulerait le reglage.
+                crf = q.get("crf")
                 render_video(tr["path"], job["out"], info=info,
                              width=int(q.get("width", 1920)),
                              height=int(q.get("height", 1080)),
                              fps=int(q.get("fps", 30)),
-                             crf=int(q.get("crf", 20)),
+                             crf=int(crf) if crf else None,
+                             quality=_dans(q.get("quality"), QUALITES,
+                                           "compatible"),
                              curve=bool(q.get("curve", True)),
                              palette=palette, progress=prog, **kw)
                 job["size"] = os.path.getsize(job["out"])
@@ -520,6 +530,7 @@ class Handler(BaseHTTPRequestHandler):
                     "fonds": list(BACKGROUNDS),
                     "instruments": list(INSTRUMENTS),
                     "travellings": list(TRAVELLINGS),
+                    "qualites": {k: v["quoi"] for k, v in QUALITES.items()},
                     "presets": {k: {CHAMPS[a]: b for a, b in v.items()}
                                 for k, v in PRESETS.items()},
                     "aide": AIDE, "compte": COMPTE,
@@ -785,6 +796,8 @@ PAGE = r"""<!doctype html>
 
   <div class="card">
     <h2>Trait</h2>
+    <label for="nettete">finesse du trait &mdash; <span id="v-net">1.00</span></label>
+    <input type="range" id="nettete" min="0.6" max="1.7" step="0.05" value="1">
     <label for="split">dedoublement du trait sur les gros subs &mdash; <span id="v-split">1.00</span></label>
     <input type="range" id="split" min="0" max="2.5" step="0.05" value="1">
     <select id="splitOn" class="inst"></select>
@@ -806,6 +819,12 @@ PAGE = r"""<!doctype html>
     <input type="range" id="trail" min="0" max="2.5" step="0.05" value="1">
     <label for="glitch">glitchs sur les paroxysmes &mdash; <span id="v-gl">1.00</span></label>
     <input type="range" id="glitch" min="0" max="2" step="0.05" value="1">
+    <label for="stepDiv">vitesse des pas du sequenceur</label>
+    <select id="stepDiv">
+      <option value="1">lente &mdash; une case par temps</option>
+      <option value="2" selected>moyenne &mdash; une case par demi-temps</option>
+      <option value="4">rapide &mdash; une case par quart de temps</option>
+    </select>
     <label for="title">titre affiche sur la dalle</label>
     <input type="text" id="title" maxlength="22" placeholder="nom du fichier">
     <p class="hint">Sur les coups vraiment appuyes — et seulement ceux-la —
@@ -1014,6 +1033,8 @@ PAGE = r"""<!doctype html>
       <div><label for="fps">images/s</label>
         <select id="fps"><option>30</option><option>60</option><option>24</option></select></div>
     </div>
+    <label for="quality">qualite du fichier</label>
+    <select id="quality"></select>
     <label><input type="checkbox" id="curve" checked style="width:auto;margin-right:6px">
       bombe de l'ecran cathodique</label>
     <button id="go" disabled style="margin-top:12px">Lancer le rendu</button>
@@ -1072,7 +1093,7 @@ async function upload(f) {
     track = j.track; drops = j.drops || []; duration = j.duration;
     // les frappes du morceau : c'est d'elles que sortent les frequences
     FRAPPES = {frappes: j.frappes || {}, drops: j.drops || [],
-               duree: j.duree || j.duration || 0};
+               duree: j.duree || j.duration || 0, bpm: j.bpm || 0};
     majFrequences();
     $('#m-dur').textContent = fmt(j.duration);
     $('#m-bpm').textContent = j.bpm.toFixed(1) + ' BPM';
@@ -1141,11 +1162,13 @@ function params() {
     cadence: $('#cadence').value, poussiere: $('#poussiere').value,
     flottement: $('#flottement').value, haloDoux: $('#haloDoux').value,
     bdSharp: $('#bdSharp').value,
+    nettete: $('#nettete').value, stepDiv: $('#stepDiv').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
   return p;
 }
-let pending = null, PRESETS = {}, USINE = {}, AIDE = {}, COMPTE = {}, FRAPPES = null;
+let pending = null, PRESETS = {}, USINE = {}, AIDE = {}, COMPTE = {};
+let QUALITES = {}, FRAPPES = null;
 
 /* Combien de fois chaque effet partira sur ce morceau. C'est le chiffre qui
    manque le plus quand on regle : un effet pose sur le charley se declenche
@@ -1157,6 +1180,10 @@ function majFrequences() {
     if (!cible) continue;
     const el = $('#' + id);
     const eteint = el && Math.abs(+el.value) < 1e-9;
+    if (genre === 'qualite') {
+      cible.textContent = QUALITES[$('#quality').value] || '';
+      continue;
+    }
     let txt = '';
     if (eteint) {
       txt = 'eteint';
@@ -1177,6 +1204,12 @@ function majFrequences() {
       const n = Math.min(+$('#splitCount').value,
                          1 + Math.floor(duree / Math.max(25, 0.14 * duree)));
       txt = '~ ' + n + ' fois dans le morceau';
+    } else if (genre === 'qualite') {
+      txt = QUALITES[$('#quality').value] || '';
+    } else if (genre === 'sequenceur') {
+      const pas = 60 / Math.max(1, FRAPPES.bpm) / +$('#stepDiv').value;
+      txt = 'une case toutes les ' + Math.round(pas * 1000) + ' ms, soit '
+          + Math.round(60 / pas) + ' par minute';
     } else if (genre === 'drops') {
       const n = (FRAPPES.drops || []).length;
       txt = '~ ' + n + ' fois dans le morceau  (les montees du morceau)';
@@ -1263,7 +1296,7 @@ bind('#tranches','#v-tr',2); bind('#blocs','#v-bl',2); bind('#roll','#v-ro',2);
 bind('#ghost','#v-gh',2); bind('#invert','#v-in',2); bind('#stut','#v-st',2);
 bind('#stutLoop','#v-sl',2); bind('#miroir','#v-mi',2); bind('#ondul','#v-on',2);
 bind('#mosaic','#v-mo',2); bind('#scramble','#v-sc2',2); bind('#scrLen','#v-scl',2);
-bind('#bdSharp','#v-bdq',2);
+bind('#bdSharp','#v-bdq',2); bind('#nettete','#v-net',2);
 bind('#kaleido','#v-ka',2); bind('#cisaille','#v-ci',2);
 bind('#coupure','#v-co',2); bind('#tapestop','#v-ta',2);
 bind('#haloDoux','#v-hd',2); bind('#poussiere','#v-po',2);
@@ -1282,8 +1315,10 @@ for (const id of ['#travelMode','#punchOn','#shakeOn','#partsOn','#ringOn',
                   '#gridOn','#flashOn','#splitOn','#tranchesOn','#blocsOn',
                   '#rollOn','#ghostOn','#invertOn','#stutOn','#miroirOn',
                   '#ondulOn','#mosaicOn','#kaleidoOn','#cisailleOn',
-                  '#coupureOn','#tapestopOn'])
+                  '#coupureOn','#tapestopOn','#stepDiv'])
   $(id).onchange = () => { majFrequences(); shot(); };
+// la qualite ne change rien a l'apercu : elle ne touche que l'encodage
+$('#quality').onchange = majFrequences;
 
 /* ---- fond : image ou video ---- */
 let backdrop = '';
@@ -1352,23 +1387,18 @@ $('#hi').onclick = () => {
 /* ---------- rendu ---------- */
 $('#go').onclick = async () => {
   const [w, h] = $('#size').value.split('x').map(Number);
-  const body = {
+  // Le rendu part exactement des reglages de l'apercu. Les recopier a la main
+  // laissait dehors, sans rien dire, tout effet ajoute depuis : on voyait une
+  // chose a l'ecran et on en recevait une autre dans le fichier.
+  const body = Object.fromEntries(params());
+  delete body.t; delete body.w; delete body.h;
+  Object.assign(body, {
     track, start: +$('#start').value || 0,
     duration: $('#dur').value ? +$('#dur').value : null,
     width: w, height: h, fps: +$('#fps').value,
-    palette: $('#palette').value, trait: $('#trait').value,
-    bg: $('#bg').value, bgColor: $('#bgColor').value,
-    bgStrength: +$('#bgStrength').value, bgClear: +$('#bgClear').value,
-    split: +$('#split').value, wobble: +$('#wobble').value,
-    trail: +$('#trail').value, title: $('#title').value,
-    fallbackTitle: ($('#title').placeholder || ''),
-    splitCount: +$('#splitCount').value, splitPx: +$('#splitPx').value,
-    snare: +$('#snare').value, wave: +$('#wave').value,
-    wavePunch: +$('#wavePunch').value, backdrop,
-    bdStrength: +$('#bdStrength').value, bdClear: +$('#bdClear').value,
-    screenDim: +$('#screenDim').value,
-    curve: $('#curve').checked,
-  };
+    quality: $('#quality').value,
+    curve: $('#curve').checked,      // '0' serait vrai cote python
+  });
   $('#go').disabled = true; $('#done').hidden = true; $('#prog').hidden = false;
   $('#pbar').style.width = '0%'; $('#ptext').textContent = 'preparation…';
   const r = await fetch('/render', {method:'POST', body: JSON.stringify(body)});
@@ -1442,6 +1472,10 @@ fetch('/config').then(r => r.json())
                               ['#tapestopOn', 'grosse caisse']])
       remplir(sel, c.instruments || [], def);
     remplir('#travelMode', c.travellings || [], 'avant');
+    // chaque qualite dit en clair ce qu'elle coute et ce qu'elle rend
+    QUALITES = c.qualites || {};
+    $('#quality').innerHTML = Object.keys(QUALITES).map(
+      k => '<option value="' + k + '">' + k + '</option>').join('');
 
     /* ---- une phrase sous chaque reglage, et sa frequence ---- */
     AIDE = c.aide || {}; COMPTE = c.compte || {};
@@ -1475,7 +1509,10 @@ fetch('/config').then(r => r.json())
       for (const [id, v] of Object.entries(USINE)) {
         // un prereglage ne dit pas tout : ce qu'il tait revient a l'usine,
         // sinon deux prereglages enchaines se melangeraient
-        if (id === 'preset' || id === 'bg' || id === 'backdrop') continue;
+        // le fichier de sortie n'est pas une affaire de style : un
+        // prereglage n'a pas a rabaisser une 4K choisie en 1080p
+        if (['preset', 'bg', 'backdrop', 'size', 'fps', 'quality']
+            .includes(id)) continue;
         const el = $('#' + id);
         if (el) { el.value = v; el.dispatchEvent(new Event('input')); }
       }

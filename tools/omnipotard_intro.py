@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-14.15"
+VERSION = "2026-09-16.16"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -66,6 +66,24 @@ TRAVELLINGS = ("aucun", "avant", "arriere", "gauche", "droite", "haut", "bas")
 PLANCHER_AVARIE = 0.45
 
 
+# Comment encoder la video finale. Mesure sur un extrait 1080p, en comparant
+# chaque encodage aux images brutes : le trait etant fin, vif et pose sur du
+# noir, l'essentiel de son signal est dans la couleur — et le 4:2:0, qui n'en
+# garde qu'un quart, l'abime bien plus que la quantification. Passer de CRF 20
+# a CRF 8 en 4:2:0 ne gagne que 1,7 dB pour sept fois le poids ; passer en
+# 4:4:4 en gagne 4,4 pour deux fois le poids. En revanche le 4:4:4 ne se lit
+# ni sur un telephone, ni dans un navigateur : d'ou le choix laisse.
+QUALITES = {
+    "compatible": {"pix": "yuv420p", "profil": "high", "crf": 17,
+                   "quoi": "lisible partout : telephones, navigateurs, reseaux"},
+    "net": {"pix": "yuv444p", "profil": "high444", "crf": 16,
+            "quoi": "trait bien plus net, mais VLC ou un logiciel de montage "
+                    "seulement"},
+    "master": {"pix": "yuv444p", "profil": "high444", "crf": 10,
+               "quoi": "pour remonter la video ensuite ; fichier lourd"},
+}
+
+
 # ==========================================================================
 #  Prereglages
 #
@@ -85,7 +103,7 @@ PRESETS = {
         "grid_pulse": 1.2, "grid_on": "grosse caisse",
         "tranches": 0.6, "tranches_on": "caisse claire",
         "split": 1.2, "split_count": 4, "trail": 1.4, "wave_gain": 1.30,
-        "glitch": 0.6,
+        "glitch": 0.6, "step_div": 4,
     },
 
     "dub": {
@@ -93,7 +111,7 @@ PRESETS = {
         "trail": 2.0, "halo_doux": 0.5, "flottement": 0.5,
         "wave_gain": 0.90, "punch": 0.05,
         "ring": 0.8, "ring_on": "grosse caisse",
-        "couleurs": 0.5, "glitch": 0.3, "split": 0.8,
+        "couleurs": 0.5, "glitch": 0.3, "split": 0.8, "step_div": 1,
     },
 
     "idm": {
@@ -111,7 +129,7 @@ PRESETS = {
         "cadence": 3, "halo_doux": 1.1, "poussiere": 1.2, "flottement": 1.0,
         "trail": 1.8, "wave_gain": 0.80, "punch": 0.03,
         "palette": "orange", "glitch": 0.0, "split": 0.0,
-        "backdrop_sharp": 0.75,
+        "backdrop_sharp": 0.75, "step_div": 1,
     },
 
     "hip hop": {
@@ -131,7 +149,7 @@ PRESETS = {
         "tranches": 1.0, "tranches_on": "caisse claire",
         "invert": 1.0, "invert_on": "grosse caisse",
         "parts": 1.1, "parts_n": 1500, "parts_on": "caisse claire",
-        "split": 1.4, "glitch": 1.0,
+        "split": 1.4, "glitch": 1.0, "step_div": 4,
     },
 
     "techno": {
@@ -147,7 +165,7 @@ PRESETS = {
         "echo": 0.50, "echo_n": 4, "echo_delay": 0.120,
         "halo_doux": 1.4, "trail": 2.2, "spectro": 0.8,
         "flottement": 0.4, "wave_gain": 0.60, "punch": 0.01,
-        "glitch": 0.0, "split": 0.0, "wave_smooth": 110,
+        "glitch": 0.0, "split": 0.0, "wave_smooth": 110, "step_div": 1,
     },
 }
 
@@ -249,6 +267,15 @@ AIDE = {
                 "contraste franc de l'oscilloscope.",
     "poussiere": "Grains, rayures verticales et cheveux de pellicule.",
     "flottement": "Lent va-et-vient de l'image, comme une cassette fatiguee.",
+    "nettete": "La finesse du trait lui-meme. A 1 il est large et velours ; "
+               "plus haut il se resserre, jusqu'a un cheveu de lumiere. Le "
+               "gain de nettete se voit surtout en 1080p et au-dessus.",
+    "stepDiv": "La vitesse a laquelle la rangee de pas, en haut de la "
+               "machine, avance d'une case.",
+    "quality": "Comment le fichier est encode. « compatible » menage les "
+               "telephones et les navigateurs ; les deux autres gardent la "
+               "couleur du trait intacte mais ne se lisent que sur "
+               "ordinateur.",
     "size": "La definition de la video finale. La 4K demande beaucoup de "
             "memoire et de temps.",
     "fps": "Images par seconde. 30 suffit ; 60 adoucit les mouvements rapides.",
@@ -264,6 +291,10 @@ COMPTE = {
     "kaleido": "instrument", "cisaille": "instrument", "coupure": "instrument",
     "tapestop": "instrument",
     "split": "split", "glitch": "drops", "scramble": "tranche",
+    # la rangee de pas n'attend aucun coup : elle avance au tempo
+    "stepDiv": "sequenceur",
+    # pas une frequence : ce que coute et ce que rend l'encodage choisi
+    "quality": "qualite",
     # L'eclair jaune n'a pas de selecteur : il est cable sur la caisse claire
     # et les percussions. Une liste de familles dit lesquelles compter.
     "snare": ["caisse claire", "percussions"],
@@ -280,6 +311,7 @@ CHAMPS = {
     "palette": "palette", "split": "split", "split_count": "splitCount",
     "split_on": "splitOn", "wobble": "wobble", "split_px": "splitPx",
     "snare": "snare", "wave_gain": "wave", "wave_punch": "wavePunch",
+    "nettete": "nettete", "step_div": "stepDiv",
     "wave_smooth": "waveSmooth", "trail": "trail", "glitch": "glitch",
     "punch": "punch", "punch_on": "punchOn",
     "shake_amp": "shake", "shake_on": "shakeOn",
@@ -1594,7 +1626,7 @@ STEP_LIT = frozenset(KICKS + RIMS + HATS + PERCS + SKANKS)
 class Renderer:
     def __init__(self, w, h, fps, duration, audio, curve=True, seed=7,
                  palette="vert", subtitle=SUB_TXT, bg=None, bg_color=None,
-                 bg_strength=1.0, bg_clear=0.55):
+                 bg_strength=1.0, bg_clear=0.55, nettete=1.0):
         self.W, self.H = w, h
         self.fps = fps
         self.dur = duration
@@ -1610,7 +1642,11 @@ class Renderer:
         self._zoom = 1.0                     # respiration de l'image sur les kicks
         self._cam = (0.0, 0.0)               # camera : centre, puis dans l'ecran
         self._cam_z = 1.0
-        self.sigma = max(0.60, h / 1080.0 * 0.95)
+        # `nettete` resserre le faisceau : a 1 on garde le rendu d'origine, au
+        # dela le trait s'affine. On ne descend pas sous 0,55 pixel — en
+        # dessous, l'etalement bilineaire ne suffit plus a lisser et le trait
+        # se met a monter en marches d'escalier.
+        self.sigma = max(0.55, h / 1080.0 * 0.95 / max(0.5, float(nettete)))
         # un trait garde la meme luminosite quelle que soit la definition
         self.gain = (self.scale * self.sigma) / (360.0 * 0.6333)
 
@@ -1973,9 +2009,17 @@ class Renderer:
         return float(np.clip((n - 1) / 3.0, 0.0, 1.0))
 
     def step_index(self, t):
+        """Le pas allume dans la bande du haut.
+
+        `step_div` est le denominateur du temps : 4 avance d'une double-croche
+        par pas, 2 d'une croche, 1 d'une noire. Plus il est petit, plus la
+        bande defile lentement — a seize pas, une valeur de 4 fait deux mesures
+        entieres en quatre temps, ce qui va vite.
+        """
         t0 = (self.tl.start("groove") if self.step_phase is None
               else self.step_phase)
-        return int((t - t0) / self.six) % 16
+        pas = self.beat / max(0.25, float(self.step_div))
+        return int((t - t0) / pas) % 16
 
     # -- geometrie ecran ---------------------------------------------------
 
@@ -2824,6 +2868,7 @@ class Renderer:
     spec = None          # le spectrogramme lui-meme (bandes x temps, en octets)
     spec_fps = 60.0
 
+    step_div = 2.0      # pas du sequenceur : 4 = double-croche, 2 = croche
     step_phase = None   # instant du premier pas du sequenceur (None = intro)
     drops = None        # instants des paroxysmes du morceau (None = intro)
     drop_dur = 0.22     # duree d'une rafale de glitch, en secondes

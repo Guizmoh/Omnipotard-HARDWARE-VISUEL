@@ -548,6 +548,14 @@ choix.
 | image fantôme | une copie décalée et transparente se superpose | `--ghost`, `--ghost-on` |
 | négatif du trait | le cœur du trait se replie vers le sombre | `--invert`, `--invert-on` |
 | bégaiement | l'image gèle pendant que le son continue | `--stut`, `--stut-on` |
+| miroir | l'image se replie sur elle-même | `--miroir`, `--miroir-on` |
+| ondulation liquide | le balayage ondule, la machine fond | `--ondul`, `--ondul-on` |
+| mosaïque | l'image tombe en gros pixels | `--mosaic`, `--mosaic-on` |
+| tranches brassées | le temps est rejoué dans le désordre | `--scramble`, `--scr-len` |
+| kaléidoscope | l'image répétée en grille, un carreau sur deux retourné | `--kaleido`, `--kaleido-on` |
+| cisaillement | l'image penche d'un bloc | `--cisaille`, `--cisaille-on` |
+| coupure franche | l'image s'absente, deux images durant | `--coupure`, `--coupure-on` |
+| patinage de bande | le temps ralentit puis rattrape d'un coup | `--tapestop`, `--tapestop-on` |
 
 Le **bégaiement** demande un mot. Sur chaque coup retenu, l'image se fige sur
 l'instant de ce coup pendant la durée réglée ; le son, lui, ne s'arrête pas.
@@ -570,6 +578,40 @@ Un gel pur ne se remarque que si l'image bougeait beaucoup juste avant. D'où
 `--stut-loop` : au lieu de figer, l'image **rejoue en boucle** un bout très
 court pris à l'instant du coup. Avec une boucle de deux ou trois images, on
 obtient un sursaut répété, bien plus visible qu'un arrêt.
+
+Elles s'appliquent à l'image finie, juste avant la déformation du tube — au
+même endroit que les glitchs de paroxysme, ce qui leur donne cet air de signal
+cassé plutôt que d'effet dessiné.
+
+Les **tranches brassées** ne dépendent d'aucun instrument : elles découpent le
+temps en blocs réguliers et les rejouent dans le désordre, par paquets de huit,
+pendant que le son continue tout droit — le montage haché des disques de
+breakcore. Le tirage est semé par le numéro du paquet, si bien que chaque tâche
+de rendu retrouve le même désordre sans rien savoir des images voisines.
+
+Deux détails qui comptent. Le **négatif** n'est pas un vrai négatif : inverser
+franchement l'image passerait par un gris uniforme à mi-chemin, ce qui donne un
+voile au lieu d'un éclair, et rendrait le fond noir tout blanc. On replie donc
+seulement ce qui dépasse un seuil — le cœur du trait vire au sombre en gardant
+ses bords lumineux, et le fond reste noir. Le **bégaiement**, lui, n'est pas un
+effet appliqué à l'image mais un décalage du temps : la tâche de rendu calcule
+quel instant dessiner, ce qu'elle déduit seule, sans rien savoir des images
+voisines — c'est ce qui permet de le calculer en parallèle.
+
+Toutes frappent ou ne font rien : elles gardent un **plancher de 45 %**
+indépendant de la force du coup. Un morceau au mixage sage donne des coups qui
+pèsent 0,3, et un effet strictement proportionnel y resterait invisible quel
+que soit le réglage.
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --glitch 0 \
+    --tranches 1.5 --tranches-on "caisse claire" \
+    --invert 1.8 --invert-on "grosse caisse" \
+    --stut 0.10 --stut-on charley
+```
+
+Leur coût est nul à la mesure : 1080p, toutes allumées, 529 ms par image contre
+544 sans.
 
 ### Texture — trip hop, lo-fi
 
@@ -678,48 +720,94 @@ défaut — mais c'est un parti pris, pas une fatalité. `--backdrop-sharp` va d
 aucun flou), avec un rapport de trente entre les deux sur le détail mesuré. La
 valeur par défaut, 0,37, reproduit exactement l'ancien comportement.
 
-| miroir | l'image se replie sur elle-même | `--miroir`, `--miroir-on` |
-| ondulation liquide | le balayage ondule, la machine fond | `--ondul`, `--ondul-on` |
-| mosaïque | l'image tombe en gros pixels | `--mosaic`, `--mosaic-on` |
-| tranches brassées | le temps est rejoué dans le désordre | `--scramble`, `--scr-len` |
-| kaléidoscope | l'image répétée en grille, un carreau sur deux retourné | `--kaleido`, `--kaleido-on` |
-| cisaillement | l'image penche d'un bloc | `--cisaille`, `--cisaille-on` |
-| coupure franche | l'image s'absente, deux images durant | `--coupure`, `--coupure-on` |
-| patinage de bande | le temps ralentit puis rattrape d'un coup | `--tapestop`, `--tapestop-on` |
+### Finesse du trait, et qualité du fichier
 
-Elles s'appliquent à l'image finie, juste avant la déformation du tube — au
-même endroit que les glitchs de paroxysme, ce qui leur donne cet air de signal
-cassé plutôt que d'effet dessiné.
+Deux choses différentes décident de la netteté du trait dans le fichier final :
+sa **largeur** au tracé, et ce que l'**encodage** en garde.
 
-Les **tranches brassées** ne dépendent d'aucun instrument : elles découpent le
-temps en blocs réguliers et les rejouent dans le désordre, par paquets de huit,
-pendant que le son continue tout droit — le montage haché des disques de
-breakcore. Le tirage est semé par le numéro du paquet, si bien que chaque tâche
-de rendu retrouve le même désordre sans rien savoir des images voisines.
+`--nettete` resserre le faisceau. À 1 — la valeur d'origine — un trait mesure
+4 px à mi-hauteur en 1080p ; à 1,25 il en mesure 3, à 1,5 il en mesure 2, et
+les creux entre deux traits voisins s'assombrissent d'autant (57 → 39). Au-delà
+le faisceau ne peut plus se resserrer sans se mettre à grener : il est étalé sur
+les pixels, et un étalement plus étroit qu'un demi-pixel donnerait un trait en
+pointillés. La limite est donc atteinte vers 1,75 en 1080p, plus tard en 4K.
 
-Deux détails qui comptent. Le **négatif** n'est pas un vrai négatif : inverser
-franchement l'image passerait par un gris uniforme à mi-chemin, ce qui donne un
-voile au lieu d'un éclair, et rendrait le fond noir tout blanc. On replie donc
-seulement ce qui dépasse un seuil — le cœur du trait vire au sombre en gardant
-ses bords lumineux, et le fond reste noir. Le **bégaiement**, lui, n'est pas un
-effet appliqué à l'image mais un décalage du temps : la tâche de rendu calcule
-quel instant dessiner, ce qu'elle déduit seule, sans rien savoir des images
-voisines — c'est ce qui permet de le calculer en parallèle.
+L'encodage, lui, pesait plus lourd que tout le reste. Mesuré sur un extrait
+1080p, chaque encodage comparé aux images brutes, l'erreur séparée entre les
+traits et le fond :
 
-Ces six-là frappent ou ne font rien : elles gardent un **plancher de 45 %**
-indépendant de la force du coup. Un morceau au mixage sage donne des coups qui
-pèsent 0,3, et un effet strictement proportionnel y resterait invisible quel
-que soit le réglage.
+| encodage | fidélité | erreur sur le trait | poids |
+| --- | --- | --- | --- |
+| 4:2:0 CRF 20 (l'ancien réglage) | 35,1 dB | 8,16 | 1,4 Mo |
+| 4:2:0 CRF 17 | 35,9 dB | 7,20 | 2,9 Mo |
+| 4:2:0 CRF 14 | 36,4 dB | 6,71 | 4,6 Mo |
+| 4:2:0 CRF 8 | 36,8 dB | 6,12 | 10,5 Mo |
+| **4:4:4 CRF 17** | **40,3 dB** | **4,63** | **2,7 Mo** |
+| 4:4:4 CRF 14 | 42,1 dB | 3,76 | 4,5 Mo |
+
+Le coupable n'est pas la compression mais le **sous-échantillonnage de la
+couleur**. Un trait fin, saturé, posé sur du noir a l'essentiel de son signal
+dans la couleur ; le 4:2:0 n'en garde qu'un quart. On peut baisser le CRF
+jusqu'à 8 — sept fois le poids — sans jamais rattraper ce que le 4:4:4 donne
+pour moitié moins lourd. Changer de filtre de sous-échantillonnage ne change
+rien non plus (36,0 contre 35,9).
+
+Mais le 4:4:4 ne se lit ni sur un téléphone, ni dans un navigateur, ni sur la
+plupart des téléviseurs. D'où trois profils, au choix, plutôt qu'un défaut
+imposé :
 
 ```bash
-python3 tools/mpc_performance.py morceau.mp3 --glitch 0 \
-    --tranches 1.5 --tranches-on "caisse claire" \
-    --invert 1.8 --invert-on "grosse caisse" \
-    --stut 0.10 --stut-on charley
+python3 tools/mpc_performance.py morceau.mp3 --quality compatible   # defaut
+python3 tools/mpc_performance.py morceau.mp3 --quality net --nettete 1.3
+python3 tools/mpc_performance.py morceau.mp3 --quality master
 ```
 
-Leur coût est nul à la mesure : 1080p, toutes allumées, 529 ms par image contre
-544 sans.
+| profil | encodage | pour quoi |
+| --- | --- | --- |
+| `compatible` | 4:2:0, CRF 17 | lisible partout : téléphones, navigateurs, réseaux |
+| `net` | 4:4:4, CRF 16 | VLC, mpv, un logiciel de montage |
+| `master` | 4:4:4, CRF 10 | remonter la vidéo ensuite ; fichier lourd |
+
+Les trois partagent les mêmes réglages fins de `x264`, choisis pour ce genre
+d'image : du débit donné aux zones sombres — ici tout le fond —, et un
+déblocage négatif pour que le filtre anti-blocs cesse de lisser les traits fins
+en croyant corriger un artefact.
+
+### Vitesse du séquenceur
+
+La rangée de pas, en haut de la machine, avançait d'une case par double-croche.
+Sur un morceau à 85 BPM cela fait une case toutes les 176 ms, soit 340 par
+minute : de loin, une course. `--step-div` divise le temps autrement — 4 pour
+l'ancien pas, **2 par défaut désormais** (une case par croche, 353 ms), 1 pour
+une case par temps. Le studio affiche la cadence obtenue sous le réglage, en
+millisecondes et par minute, calculée sur le tempo du morceau chargé.
+
+
+### Un contrôle de cohérence
+
+```bash
+python3 tools/verifier_studio.py
+```
+
+Le studio a deux moitiés — une page qui affiche des curseurs, un moteur qui lit
+des réglages — et rien n'oblige les deux à rester d'accord. Ce contrôle le
+vérifie, sans navigateur et sans rien lancer :
+
+- chaque curseur de la page part vraiment au moteur ;
+- le rendu repart des mêmes réglages que l'aperçu, au lieu d'en tenir une
+  seconde liste ;
+- le moteur lit tout ce que la page lui envoie, et rien ne s'envoie dans le
+  vide ;
+- chaque curseur a sa phrase d'explication, et aucune phrase ne pend dans le
+  vide ;
+- chaque préréglage pose ses valeurs sur des curseurs qui existent.
+
+Il existe parce que ce genre d'erreur ne se voit pas. Le rendu recopiait à la
+main la liste des réglages de l'aperçu : les effets ajoutés ensuite —
+kaléidoscope, écho, spectrogramme, avaries, travelling — s'affichaient à
+l'écran et **n'arrivaient jamais dans le fichier final**, sans le moindre
+message. Le contrôle a été écrit après coup, et la première chose qu'il ait
+faite a été de retrouver cette liste oubliée.
 
 ## STUDIO WEB — une page HTML, rien a installer
 
