@@ -41,7 +41,7 @@ from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, pool_context,
     fit_jobs, DECLENCHEURS, hasard_events, TRAVELLINGS,
     python_trop_petit,
-    compute_spectro, PRESETS, QUALITES,
+    compute_spectro, PRESETS, QUALITES, APERCU, apercu_possible,
 )
 
 
@@ -408,23 +408,27 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
     if outdir:
         os.makedirs(outdir, exist_ok=True)
 
-    q = QUALITES.get(quality, QUALITES["compatible"])
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-           "-f", "rawvideo", "-pix_fmt", "rgb24",
-           "-s", "%dx%d" % (width, height), "-r", str(fps), "-i", "-",
-           "-i", wav,
-           "-c:v", "libx264", "-preset", "slow",
-           "-crf", str(int(crf) if crf is not None else q["crf"]),
-           "-pix_fmt", q["pix"], "-profile:v", q["profil"],
-           "-movflags", "+faststart",
-           # aq-mode 3 donne du debit aux zones sombres — ici tout le fond —
-           # et un deblocage negatif evite que le filtre anti-blocs ne lisse
-           # les traits fins en croyant corriger un artefact.
-           "-x264-params", "keyint=%d:aq-mode=3:aq-strength=0.9:"
-                           "psy-rd=1.2,0.2:deblock=-2,-2" % (fps * 2),
-           "-colorspace", "bt709", "-color_primaries", "bt709",
-           "-color_trc", "bt709",
-           "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-shortest", out]
+    entree = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+              "-f", "rawvideo", "-pix_fmt", "rgb24",
+              "-s", "%dx%d" % (width, height), "-r", str(fps), "-i", "-",
+              "-i", wav]
+    if quality == "apercu":
+        cmd = entree + APERCU["video"] + APERCU["audio"] + ["-shortest", out]
+    else:
+        q = QUALITES.get(quality, QUALITES["compatible"])
+        cmd = entree + [
+            "-c:v", "libx264", "-preset", "slow",
+            "-crf", str(int(crf) if crf is not None else q["crf"]),
+            "-pix_fmt", q["pix"], "-profile:v", q["profil"],
+            "-movflags", "+faststart",
+            # aq-mode 3 donne du debit aux zones sombres — ici tout le fond —
+            # et un deblocage negatif evite que le filtre anti-blocs ne lisse
+            # les traits fins en croyant corriger un artefact.
+            "-x264-params", "keyint=%d:aq-mode=3:aq-strength=0.9:"
+                            "psy-rd=1.2,0.2:deblock=-2,-2" % (fps * 2),
+            "-colorspace", "bt709", "-color_primaries", "bt709",
+            "-color_trc", "bt709",
+            "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-shortest", out]
 
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     t0 = time.time()

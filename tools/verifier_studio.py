@@ -25,7 +25,10 @@ import studio as S                                           # noqa: E402
 # Ce qui ne fait pas partie de l'allure : le fichier de sortie, le morceau,
 # l'instant regarde. Ces reglages-la ne passent pas par look_from.
 HORS_ALLURE = {"size", "fps", "quality", "start", "dur", "preset", "scrub",
-               "file", "bdfile"}
+               "file", "bdfile",
+               # la duree de l'apercu en mouvement : elle ne decrit rien de
+               # l'image, elle dit seulement combien de secondes calculer
+               "clipDur"}
 # Ce que la page envoie en plus des reglages d'allure.
 META = {"track", "t", "w", "h", "curve", "width", "height", "fps", "quality",
         "start", "duration", "crf",

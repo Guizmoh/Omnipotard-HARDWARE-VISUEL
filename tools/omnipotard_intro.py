@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-16.19"
+VERSION = "2026-09-16.20"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -82,6 +82,48 @@ QUALITES = {
     "master": {"pix": "yuv444p", "profil": "high444", "crf": 10,
                "quoi": "pour remonter la video ensuite ; fichier lourd"},
 }
+
+
+# L'apercu en mouvement ne sort pas du studio : il doit se lire dans le
+# navigateur, tout de suite, et sa qualite n'a aucune importance. Le VP8 est
+# choisi plutot que le H.264 parce qu'aucun navigateur ne le refuse — certains
+# Chromium et Firefox sont construits sans H.264 — et parce qu'en mode
+# « realtime » il encode plus vite que le rendu ne calcule les images.
+# Le debit est fixe plutot que laisse a la qualite constante : mesure contre
+# les images brutes, le VP8 « qualite constante » ne rendait que 24,1 dB — un
+# trait fin et grene est cher a encoder, et le codec choisissait d'y renoncer.
+# A 3 Mbit/s il rend 28,3 dB pour un fichier de 1,5 Mo par tranche de quatre
+# secondes, qui ne quitte jamais la machine. Le calcul des images coute de
+# toute facon dix fois plus que l'encodage.
+APERCU = {
+    "ext": ".webm",
+    "video": ["-c:v", "libvpx", "-deadline", "realtime", "-cpu-used", "6",
+              "-b:v", "3M", "-pix_fmt", "yuv420p"],
+    "audio": ["-c:a", "libopus", "-b:a", "96k"],
+}
+
+
+def apercu_possible():
+    """Vrai si ffmpeg sait encoder du VP8 et de l'Opus.
+
+    Les versions de ffmpeg livrees sur Windows les ont toutes, mais une
+    installation minimale peut en manquer : mieux vaut retomber sur le MP4
+    que faire echouer l'apercu avec une ligne de commande incomprehensible.
+    """
+    global _APERCU_OK
+    if _APERCU_OK is None:
+        try:
+            out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL).stdout.decode(
+                                     "utf-8", "replace")
+            _APERCU_OK = ("libvpx" in out) and ("libopus" in out)
+        except Exception:                                 # noqa: BLE001
+            _APERCU_OK = False
+    return _APERCU_OK
+
+
+_APERCU_OK = None
 
 
 # ==========================================================================

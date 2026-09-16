@@ -18,6 +18,7 @@ bibliotheque web, pas de CDN — la page est servie telle quelle.
 """
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -42,7 +43,7 @@ from mpc_performance import (  # noqa: E402
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
     VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs,
-    compte_frappes, TRAVELLINGS, FAMILLES,
+    compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
     backdrop_quality, PRESETS, CHAMPS, AIDE, COMPTE, QUALITES, pick_split_times,
 )
 
@@ -225,6 +226,25 @@ def look_from(q):
     }
 
 
+def purger_apercus(garder=3):
+    """Efface les extraits d'apercu passes.
+
+    Regler, c'est en demander des dizaines : sans ce menage, une seance de
+    travail laisse des centaines de megaoctets dans le dossier de sortie.
+    On garde les derniers, au cas ou le navigateur en relise encore un.
+    """
+    try:
+        vus = sorted(glob.glob(os.path.join(OUTDIR, "apercu_*.webm")),
+                     key=os.path.getmtime, reverse=True)
+    except OSError:
+        return
+    for vieux in vus[garder:]:
+        try:
+            os.remove(vieux)
+        except OSError:
+            pass
+
+
 def backdrop_path(name):
     """Chemin du fond depose, ou None. Le nom vient de la page, donc on le
     ramene a un simple nom de fichier dans le dossier prevu."""
@@ -404,10 +424,19 @@ class Studio:
         start = float(q.get("start", 0.0))
         dur = q.get("duration")
         dur = float(dur) if dur else None
-        out = os.path.join(OUTDIR, "%s_%s.mp4"
-                           % (os.path.splitext(tr["name"])[0][:60], jid))
+        # L'apercu en mouvement se lit dans la page : il part en VP8, qu'aucun
+        # navigateur ne refuse. Si ffmpeg ne sait pas l'encoder, il redevient
+        # un MP4 ordinaire plutot que d'echouer.
+        apercu = bool(q.get("apercu")) and apercu_possible()
+        ext = ".webm" if apercu else ".mp4"
+        if apercu:
+            purger_apercus()
+        out = os.path.join(OUTDIR, "%s%s_%s%s"
+                           % ("apercu_" if apercu else "",
+                              os.path.splitext(tr["name"])[0][:60], jid, ext))
         job = {"id": jid, "state": "attente", "done": 0, "total": 0, "eta": 0.0,
-               "out": out, "name": os.path.basename(out), "error": None}
+               "out": out, "name": os.path.basename(out), "error": None,
+               "apercu": apercu}
         with self.lock:
             self.jobs[jid] = job
         threading.Thread(target=self._run, args=(job, tr, q, start, dur),
@@ -443,8 +472,9 @@ class Studio:
                              height=int(q.get("height", 1080)),
                              fps=int(q.get("fps", 30)),
                              crf=int(crf) if crf else None,
-                             quality=_dans(q.get("quality"), QUALITES,
-                                           "compatible"),
+                             quality=("apercu" if job["apercu"] else
+                                      _dans(q.get("quality"), QUALITES,
+                                            "compatible")),
                              curve=bool(q.get("curve", True)),
                              palette=palette, progress=prog, **kw)
                 job["size"] = os.path.getsize(job["out"])
@@ -581,8 +611,30 @@ class Handler(BaseHTTPRequestHandler):
             # normale. On ratisse donc large plutot que de nommer chaque cas.
             pass
 
+    def _tranche(self, taille):
+        """Le morceau de fichier demande par un en-tete Range, ou None.
+
+        Une balise video ne se contente pas de telecharger : elle demande des
+        tranches, pour demarrer sans tout avoir et pour se deplacer dedans.
+        Sans cette reponse-la, l'apercu en mouvement restait noir.
+        """
+        brut = self.headers.get("Range") or ""
+        if not brut.startswith("bytes=") or "," in brut:
+            return None
+        deb, _, fin = brut[6:].partition("-")
+        try:
+            if deb == "":                       # « les N derniers octets »
+                n = int(fin)
+                return (max(0, taille - n), taille - 1) if n > 0 else None
+            a = int(deb)
+            b = int(fin) if fin else taille - 1
+        except ValueError:
+            return None
+        b = min(b, taille - 1)
+        return (a, b) if 0 <= a <= b else None
+
     def _fichier(self, path, ctype, extra=None):
-        """Envoie un fichier par blocs.
+        """Envoie un fichier par blocs, entier ou par tranches.
 
         Une video rendue pese des centaines de megaoctets : la charger
         entierement pour la remettre au navigateur demandait cette memoire
@@ -592,18 +644,28 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._begun = True
         try:
-            self.send_response(200)
+            taille = os.path.getsize(path)
+            tranche = self._tranche(taille)
+            a, b = tranche if tranche else (0, taille - 1)
+            self.send_response(206 if tranche else 200)
             self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(os.path.getsize(path)))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(b - a + 1))
+            if tranche:
+                self.send_header("Content-Range",
+                                 "bytes %d-%d/%d" % (a, b, taille))
             self.send_header("Cache-Control", "no-store")
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()
+            reste = b - a + 1
             with open(path, "rb") as f:
-                while True:
-                    bloc = f.read(BLOC)
+                f.seek(a)
+                while reste > 0:
+                    bloc = f.read(min(BLOC, reste))
                     if not bloc:
                         break
+                    reste -= len(bloc)
                     self.wfile.write(bloc)
         except OSError:
             pass
@@ -680,8 +742,14 @@ class Handler(BaseHTTPRequestHandler):
                     job = STUDIO.jobs.get(q.get("id"))
                 if not job or job["state"] != "fini":
                     return self._fail("rendu non termine", 404)
-                return self._fichier(job["out"], "video/mp4", {
-                    "Content-Disposition": 'attachment; filename="%s"' % job["name"]})
+                # « inline » sert l'apercu anime, qui se joue dans la page
+                # au lieu d'etre telecharge
+                entete = ({} if q.get("inline") == "1" else
+                          {"Content-Disposition":
+                           'attachment; filename="%s"' % job["name"]})
+                genre = ("video/webm" if job["out"].endswith(".webm")
+                         else "video/mp4")
+                return self._fichier(job["out"], genre, entete)
             self._fail("page inconnue", 404)
         except Depasse:
             # l'apercu suivant est deja en route : celui-ci n'a plus lieu d'etre
@@ -794,6 +862,12 @@ PAGE = r"""<!doctype html>
   #shot.calcul{opacity:.35;transition:opacity .2s}
   select.inst{margin:2px 0 4px;font-size:11px;color:var(--dim)}
   .aide{font-size:11px;line-height:1.5;color:#7c8f88;margin:2px 0 12px}
+  /* le style en ligne aurait ecrase l'attribut « hidden », qui ne passe que
+     par la feuille de style du navigateur */
+  #clip{width:100%;display:block;border-radius:6px;background:#000}
+  /* « hidden » ne coupe rien tout seul des qu'une regle donne un display :
+     il faut le redire pour chacun des deux apercus */
+  #clip[hidden], #shot[hidden]{display:none}
   .aide b.freq{display:block;color:var(--acc);font-weight:600;margin-top:2px;
     letter-spacing:.03em}
   #shoterr{display:none;margin-top:8px;padding:8px 10px;border-radius:6px;
@@ -1185,6 +1259,7 @@ PAGE = r"""<!doctype html>
   <div class="card">
     <h2>Apercu</h2>
     <img id="shot" alt="apercu">
+    <video id="clip" hidden loop controls playsinline></video>
     <div id="shoterr"></div>
     <label for="scrub">instant du morceau &mdash; <span id="v-t">0.0 s</span></label>
     <input type="range" id="scrub" min="0" max="100" step="0.1" value="0" disabled>
@@ -1193,8 +1268,26 @@ PAGE = r"""<!doctype html>
       <button class="ghost" id="toDrop">aller au prochain paroxysme</button>
       <button class="ghost" id="hi">chercher un kick</button>
     </div>
+    <div class="row" style="margin-top:8px">
+      <button id="lire" disabled>Lire en mouvement</button>
+      <div><label for="clipDur">duree</label>
+        <select id="clipDur">
+          <option value="2">2 s</option>
+          <option value="4" selected>4 s</option>
+          <option value="8">8 s</option>
+        </select></div>
+    </div>
+    <div id="clipprog" hidden>
+      <div class="bar"><i id="cbar"></i></div>
+      <div class="hint" id="ctext"></div>
+    </div>
     <p class="hint">L'apercu est une vraie image du rendu, calculee avec vos
-      reglages : ce que vous voyez ici est ce que vous obtiendrez.</p>
+      reglages : ce que vous voyez ici est ce que vous obtiendrez.<br>
+      <b>Lire en mouvement</b> calcule pour de bon quelques secondes a partir
+      de l'instant regarde, avec le son, et les joue en boucle. C'est la seule
+      facon de juger ce qui bouge — begaiement, travelling, etincelles,
+      spectrogramme. La lecture est en 15 images par seconde pour ne pas faire
+      attendre : le rendu final, lui, en fera 30 ou 60.</p>
   </div>
  </div>
 </main>
@@ -1237,6 +1330,7 @@ async function upload(f) {
     $('#v-t').textContent = (duration * 0.35).toFixed(1) + ' s';
     $('#dur').placeholder = 'tout';
     $('#go').disabled = false;
+    $('#lire').disabled = false;
     setStatus(j.name + ' — ' + j.bpm.toFixed(1) + ' BPM, ' + drops.length +
       ' paroxysme(s) : les glitchs tomberont la.');
     shot();
@@ -1358,6 +1452,7 @@ function parMinute(n, duree) {
 }
 function shot() {
   if (!track) return;
+  rendreLImage();
   clearTimeout(pending);
   pending = setTimeout(() => {           // on ne recalcule pas a chaque pixel
     const n = ++shotSeq;
@@ -1545,6 +1640,90 @@ $('#hi').onclick = () => {
   $('#v-t').textContent = (+$('#scrub').value).toFixed(1) + ' s';
   shot();
 };
+
+/* ---------- apercu en mouvement ----------
+
+   Une image fixe ne dit rien de ce qui bouge. Plutot que de rejouer des
+   images une par une — chacune coute plus d'un dixieme de seconde, on ne
+   verrait qu'un diaporama — on calcule pour de bon un court extrait, dans le
+   meme moteur et avec les memes reglages que le rendu final, et on le joue
+   en boucle. */
+let clipTimer = null;
+
+function reglagesDuClip() {
+  const secondes = +$('#clipDur').value;
+  const depart = Math.max(0, Math.min(+$('#scrub').value,
+                                      Math.max(0, duration - secondes)));
+  const body = Object.fromEntries(params());
+  delete body.t; delete body.w; delete body.h;
+  Object.assign(body, {
+    track, start: depart, duration: secondes,
+    // assez grand pour juger, assez petit pour ne pas faire attendre
+    width: 960, height: 540, fps: 15, apercu: true,
+    curve: $('#curve').checked,
+  });
+  return body;
+}
+
+$('#lire').onclick = async () => {
+  if (!track) return;
+  clearTimeout(clipTimer);
+  // on rend la main a l'image fixe pendant le calcul : laisser l'ancien
+  // extrait tourner ferait croire que rien ne se passe
+  rendreLImage();
+  $('#lire').disabled = true;
+  $('#clipprog').hidden = false;
+  $('#cbar').style.width = '0%';
+  $('#ctext').textContent = 'preparation\u2026';
+  try {
+    const r = await fetch('/render', {method: 'POST',
+                                      body: JSON.stringify(reglagesDuClip())});
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    suivreClip(j.id);
+  } catch (e) {
+    setStatus('lecture impossible : ' + e.message, true);
+    $('#lire').disabled = false; $('#clipprog').hidden = true;
+  }
+};
+
+function suivreClip(id) {
+  clipTimer = setTimeout(async () => {
+    let j;
+    try {
+      j = await (await fetch('/job?id=' + id)).json();
+    } catch (e) { return suivreClip(id); }
+    if (j.state === 'erreur') {
+      setStatus('lecture impossible : ' + j.error, true);
+      $('#lire').disabled = false; $('#clipprog').hidden = true;
+      return;
+    }
+    if (j.state === 'fini') {
+      const v = $('#clip');
+      v.src = '/download?inline=1&id=' + id;
+      v.hidden = false; $('#shot').hidden = true;
+      $('#clipprog').hidden = true; $('#lire').disabled = false;
+      // le son demande parfois un geste de l'utilisateur : a defaut on joue
+      // sans, plutot que de laisser une image arretee
+      v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+      setStatus('lecture en boucle — bougez un reglage pour revenir a l\'image');
+      return;
+    }
+    const pc = j.total ? j.done / j.total * 100 : 0;
+    $('#cbar').style.width = pc.toFixed(1) + '%';
+    $('#ctext').textContent = j.state === 'rendu'
+      ? j.done + '/' + j.total + ' images' : j.state + '\u2026';
+    suivreClip(id);
+  }, 500);
+}
+
+/* Toute nouvelle image fixe reprend la place de la video : sans cela on
+   croirait regler dans le vide, la video restant affichee telle quelle. */
+function rendreLImage() {
+  const v = $('#clip');
+  if (!v.hidden) { v.pause(); v.hidden = true; v.removeAttribute('src'); }
+  $('#shot').hidden = false;
+}
 
 /* ---------- rendu ---------- */
 $('#go').onclick = async () => {

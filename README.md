@@ -871,6 +871,38 @@ une case par temps. Le studio affiche la cadence obtenue sous le réglage, en
 millisecondes et par minute, calculée sur le tempo du morceau chargé.
 
 
+### Lire l'aperçu en mouvement
+
+Une image fixe ne dit rien de ce qui bouge — bégaiement, travelling,
+étincelles, spectrogramme, patinage de bande. Le bouton **Lire en mouvement**
+calcule pour de bon quelques secondes à partir de l'instant regardé, avec le
+son, et les joue en boucle dans la page.
+
+C'est un vrai rendu, dans le même moteur et avec les mêmes réglages que le
+fichier final — pas un diaporama d'images fixes : chacune coûte plus d'un
+dixième de seconde, on n'en verrait jamais plus de huit par seconde. Le clip
+est en 960×540 à 15 images par seconde, ce qui le rend à peu près en temps
+réel : **2,6 s pour deux secondes, 4,1 s pour quatre, 7,7 s pour huit**,
+mesuré. Le rendu final, lui, en fera 30 ou 60.
+
+Il sort en **VP8/WebM** et non en MP4, pour une raison qui s'est vue à
+l'essai : certains navigateurs sont construits sans H.264 — le Chromium qui
+sert à vérifier cette page en fait partie — et le lecteur répondait alors
+`DEMUXER_ERROR_NO_SUPPORTED_STREAMS` sur un fichier pourtant valide. Le VP8,
+personne ne le refuse. Si ffmpeg ne sait pas l'encoder, l'aperçu redevient un
+MP4 ordinaire au lieu d'échouer.
+
+Le débit est fixé à 3 Mbit/s plutôt que laissé à la qualité constante :
+mesurée contre les images brutes, la qualité constante ne rendait que 24,1 dB
+— un trait fin et grené est cher à encoder, et le codec choisissait d'y
+renoncer — contre 28,3 dB à débit fixe, pour 1,5 Mo par tranche de quatre
+secondes. Le calcul des images coûte de toute façon dix fois plus que
+l'encodage. Ces extraits sont effacés au fur et à mesure, les trois derniers
+exceptés : sans ce ménage, une séance de réglage en laisserait des centaines
+de mégaoctets.
+
+Bouger n'importe quel réglage rend la main à l'image fixe.
+
 ### Déposer un morceau, une image, une vidéo
 
 Le studio reçoit les fichiers **par blocs, écrits au fur et à mesure sur le
