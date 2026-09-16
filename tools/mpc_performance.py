@@ -154,9 +154,14 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               travel=0.0, travel_mode="avant",
                               backdrop=None, backdrop_strength=1.00,
                               backdrop_clear=0.28, screen_dim=0.40,
-                              backdrop_sharp=0.37, **bgkw):
+                              backdrop_sharp=0.37, taille=1.0, presence=1.0,
+                              **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
+    # la taille se pose avant tout le reste : le creux de la texture et celui
+    # de l'image de fond se calent dessus
+    r.set_taille(taille)
+    r.presence = float(presence)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
     r.glitch = float(glitch)
@@ -202,7 +207,8 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     if backdrop:
         r.backdrop = make_backdrop(
             backdrop, w, h, fps, duration, strength=backdrop_strength,
-            clear=backdrop_clear, scale=r.scale, screen_dim=screen_dim,
+            clear=backdrop_clear, scale=r.scale * r.taille,
+            screen_dim=screen_dim,
             travel=r.travel, travel_mode=r.travel_mode, sharp=backdrop_sharp)
     # La machine est deja entierement deployee et joue en continu : on
     # neutralise tout ce qui, dans le moteur de l'intro, appartient au
@@ -246,11 +252,30 @@ def frame_performance(r, t, duration):
     shake = r.glitch_at(t)
 
     beam = Beam(r.H, r.W, r.gain)
+    # Le decor tient la largeur de l'image : quadrillage, coins, et le fil du
+    # morceau qui entre par la gauche et ressort a droite. Il garde donc sa
+    # taille quand la machine, elle, change de la sienne.
+    r._ech = 1.0
     r._grid(beam, t, 0.55, 1.0)
     r._hud(beam, t, 1.0, 0.65)
-    r._onde(beam, t, 1.0)                     # anneau, sous la machine
     # le fil du morceau passe derriere la machine et s'allume sur les graves
     r._wave_line(beam, t, 1.0, 0.48, None, 999.0, 0.0)
+    # ---- a partir d'ici, la machine et ce qui lui appartient
+    #
+    # Le trace est echantillonne en unites du monde : une machine retrecie
+    # tasse le meme nombre de points sur moins de pixels, donc un trait plus
+    # dense et plus lumineux. On corrige la luminosite d'autant, sans quoi
+    # reduire la machine reviendrait a l'allumer.
+    #
+    # L'exposant 1,35 est mesure, pas choisi : la simple proportion (exposant
+    # 1) laissait la machine passer de 149 a 212 en descendant a 0,45, parce
+    # que des traits plus serres que le halo additionnent leurs halos. A 1,35
+    # elle va de 149 a 167, ce qui ne se voit plus. A taille 1 le facteur vaut
+    # 1 : rien ne change pour les videos deja rendues.
+    r._ech = float(r.taille)
+    machine = float(r.taille) ** 1.35 * float(r.presence)
+    beam.mul = machine
+    r._onde(beam, t, 1.0)                     # anneau, sous la machine
     # Echos : la machine telle qu'elle etait il y a quelques centiemes, de plus
     # en plus pale, dessinee sous l'image du moment. On les empile dans le meme
     # faisceau plutot que de calculer des images entieres — seul le trace est
@@ -260,13 +285,14 @@ def frame_performance(r, t, duration):
             te = t - k * r.echo_delay
             if te < 0.0:
                 continue
-            beam.mul = float(r.echo) ** k
+            beam.mul = machine * float(r.echo) ** k
             r._machine(beam, te, 1.0, 999.0, 0.0,
                        np.random.default_rng(r.seed + int(te * r.fps + 0.5)),
                        r.glitch_at(te))
-        beam.mul = 1.0
+        beam.mul = machine
     r._machine(beam, t, 1.0, 999.0, 0.0, rng, shake)   # sweep_x enorme = deployee
     r._etincelles(beam, t, 1.0)               # etincelles, par-dessus
+    beam.mul, r._ech = 1.0, 1.0
     field = beam.render()
     img = r.colorize(field, t, 1.0, shake, rng)
 
@@ -471,6 +497,12 @@ def add_look_args(ap):
                          "(plafonne par la duree : un au plus toutes les 25 s)")
     ap.add_argument("--split-on", default="grosse caisse", choices=INSTRUMENTS,
                     help="coups autorises a declencher le dedoublement")
+    ap.add_argument("--taille", type=float, default=1.0,
+                    help="taille de la machine dans l'image : 1 = d'origine, "
+                         "0.6 = plus petite, 1.3 = plus grande")
+    ap.add_argument("--presence", type=float, default=1.0,
+                    help="presence de la machine : 1 = d'origine, 0.4 = "
+                         "effacee derriere le fond")
     ap.add_argument("--nettete", type=float, default=1.0,
                     help="finesse du trait : 1 = d'origine, 1.5 = deux fois "
                          "plus fin")
@@ -617,7 +649,8 @@ def look_kwargs(args):
             "wobble": args.wobble, "split": args.split, "split_px": args.split_px,
             "split_count": args.split_count, "split_on": args.split_on,
             "glitch": args.glitch, "step_div": args.step_div,
-            "nettete": args.nettete,
+            "nettete": args.nettete, "taille": args.taille,
+            "presence": args.presence,
             "tranches": args.tranches, "tranches_on": args.tranches_on,
             "roll": args.roll, "roll_on": args.roll_on,
             "ghost": args.ghost, "ghost_on": args.ghost_on,

@@ -144,6 +144,8 @@ def look_from(q):
         "split_on": _dans(q.get("splitOn"), INSTRUMENTS, "grosse caisse"),
         "glitch": float(q.get("glitch", 1.0)),
         "nettete": float(q.get("nettete", 1.0)),
+        "taille": float(q.get("taille", 1.0)),
+        "presence": float(q.get("presence", 1.0)),
         "step_div": float(q.get("stepDiv", 2.0)),
         # ---- avaries d'image, declenchees par la batterie
         "tranches": float(q.get("tranches", 0.0)),
@@ -346,10 +348,14 @@ class Studio:
                 "kaleido", "kaleido_on", "cisaille", "cisaille_on",
                 "coupure", "coupure_on", "tapestop", "tapestop_on",
                 "cadence", "poussiere", "flottement", "halo_doux",
-                "echo", "echo_n", "echo_delay", "couleurs", "step_div")
+                "echo", "echo_n", "echo_delay", "couleurs", "step_div",
+                "presence")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
-                        "backdrop_sharp", "spectro", "nettete")
+                        "backdrop_sharp", "spectro", "nettete", "taille")
+        # La taille se pose avant l'allure : c'est elle qui decide du creux
+        # que la texture garde derriere la machine, et set_look le recalcule.
+        r.taille = float(kw["taille"])
         r.set_look(palette, **{k: v for k, v in kw.items() if k not in APART})
         for k in POSE:
             setattr(r, k, kw[k])
@@ -369,7 +375,8 @@ class Studio:
         bd = kw["backdrop"]
         stamp = (bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
                  kw["screen_dim"], round(float(t), 1),
-                 kw["travel"], kw["travel_mode"], kw["backdrop_sharp"])
+                 kw["travel"], kw["travel_mode"], kw["backdrop_sharp"],
+                 kw["taille"])
         # set_look, plus haut, remet le fond a zero — il fait partie de
         # l'allure. On le repose donc ici a chaque fois, en ne le rechargeant
         # que si un de ses reglages a bouge : sans cela, tout apercu qui ne
@@ -380,7 +387,8 @@ class Studio:
                 # le cadre de l'instant regarde, pas celui du debut
                 r._bd = load_backdrop(
                     bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
-                    scale=r.scale, screen_dim=kw["screen_dim"], seek=float(t),
+                    scale=r.scale * r.taille, screen_dim=kw["screen_dim"],
+                    seek=float(t),
                     travel=kw["travel"], travel_mode=kw["travel_mode"],
                     dur=max(tr["info"]["duration"], 1e-3),
                     blur=backdrop_quality(kw["backdrop_sharp"])[0])
@@ -909,6 +917,10 @@ PAGE = r"""<!doctype html>
 
   <div class="card">
     <h2>Trait</h2>
+    <label for="taille">taille de la machine &mdash; <span id="v-ta">1.00</span></label>
+    <input type="range" id="taille" min="0.35" max="1.3" step="0.01" value="1">
+    <label for="presence">presence de la machine &mdash; <span id="v-pr">1.00</span></label>
+    <input type="range" id="presence" min="0.1" max="1.6" step="0.02" value="1">
     <label for="nettete">finesse du trait &mdash; <span id="v-net">1.00</span></label>
     <input type="range" id="nettete" min="0.6" max="1.7" step="0.05" value="1">
     <label for="split">dedoublement du trait sur les gros subs &mdash; <span id="v-split">1.00</span></label>
@@ -1272,6 +1284,7 @@ function params() {
     flottement: $('#flottement').value, haloDoux: $('#haloDoux').value,
     bdSharp: $('#bdSharp').value,
     nettete: $('#nettete').value, stepDiv: $('#stepDiv').value,
+    taille: $('#taille').value, presence: $('#presence').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
   return p;
@@ -1406,6 +1419,7 @@ bind('#ghost','#v-gh',2); bind('#invert','#v-in',2); bind('#stut','#v-st',2);
 bind('#stutLoop','#v-sl',2); bind('#miroir','#v-mi',2); bind('#ondul','#v-on',2);
 bind('#mosaic','#v-mo',2); bind('#scramble','#v-sc2',2); bind('#scrLen','#v-scl',2);
 bind('#bdSharp','#v-bdq',2); bind('#nettete','#v-net',2);
+bind('#taille','#v-ta',2); bind('#presence','#v-pr',2);
 bind('#kaleido','#v-ka',2); bind('#cisaille','#v-ci',2);
 bind('#coupure','#v-co',2); bind('#tapestop','#v-ta',2);
 bind('#haloDoux','#v-hd',2); bind('#poussiere','#v-po',2);

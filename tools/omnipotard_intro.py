@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-16.17"
+VERSION = "2026-09-16.18"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -267,6 +267,11 @@ AIDE = {
                 "contraste franc de l'oscilloscope.",
     "poussiere": "Grains, rayures verticales et cheveux de pellicule.",
     "flottement": "Lent va-et-vient de l'image, comme une cassette fatiguee.",
+    "taille": "La place que prend la machine dans l'image. En la reduisant "
+              "on decouvre le fond autour d'elle ; le quadrillage et le fil "
+              "du morceau, eux, gardent la largeur de l'ecran.",
+    "presence": "L'eclat de la machine. En la baissant elle s'efface derriere "
+                "le fond sans disparaitre, comme un reflet sur une vitre.",
     "nettete": "La finesse du trait lui-meme. A 1 il est large et velours ; "
                "plus haut il se resserre, jusqu'a un cheveu de lumiere. Le "
                "gain de nettete se voit surtout en 1080p et au-dessus.",
@@ -312,6 +317,7 @@ CHAMPS = {
     "split_on": "splitOn", "wobble": "wobble", "split_px": "splitPx",
     "snare": "snare", "wave_gain": "wave", "wave_punch": "wavePunch",
     "nettete": "nettete", "step_div": "stepDiv",
+    "taille": "taille", "presence": "presence",
     "wave_smooth": "waveSmooth", "trail": "trail", "glitch": "glitch",
     "punch": "punch", "punch_on": "punchOn",
     "shake_amp": "shake", "shake_on": "shakeOn",
@@ -1638,6 +1644,12 @@ class Renderer:
 
         # la machine reste cadree quel que soit le format (16/9, carre, vertical)
         self.scale = min(h * 0.5, w * 0.5 / 1.30)
+        # Taille et presence de la machine dans l'image. Elles ne touchent
+        # qu'elle : le quadrillage du fond et le fil du morceau tiennent la
+        # largeur de l'ecran et n'ont pas a retrecir avec elle.
+        self.taille = 1.0
+        self.presence = 1.0
+        self._ech = 1.0                      # echelle du dessin en cours
         self.set_look(palette, bg, bg_color, bg_strength, bg_clear)
         self._zoom = 1.0                     # respiration de l'image sur les kicks
         self._cam = (0.0, 0.0)               # camera : centre, puis dans l'ecran
@@ -2024,7 +2036,7 @@ class Renderer:
     # -- geometrie ecran ---------------------------------------------------
 
     def to_px(self, P, collapse=1.0, shake=(0.0, 0.0)):
-        s = self.scale * self._zoom * self._cam_z
+        s = self.scale * self._ech * self._zoom * self._cam_z
         cx, cy = self._cam
         return (self.W * 0.5 + (P[:, 0] - cx) * s + shake[0],
                 self.H * 0.5 - (P[:, 1] - cy) * s * collapse + shake[1])
@@ -2891,11 +2903,28 @@ class Renderer:
         self.c_hot = np.float32(hotc)
         # le fond de la palette reste la valeur par defaut ; `bg` le remplace
         self.backdrop = None      # image de fond, ajoutee sous la texture
+        # On retient de quoi refaire cette texture : son creux derriere la
+        # machine depend de la taille de celle-ci, qui se regle apres coup.
+        self._look = (palette, bg, bg_color, bg_strength, bg_clear)
         self.c_bg = make_background(
             self.W, self.H, kind=bg or "uni",
             color=pbg if bg_color is None else bg_color,
             strength=bg_strength, clear=bg_clear if bg else 0.0,
-            scale=self.scale, seed=self.seed)
+            scale=self.scale * self.taille, seed=self.seed)
+
+    def set_taille(self, taille):
+        """Change la taille de la machine, creux du fond compris.
+
+        La texture de la dalle est creusee derriere la machine : si le creux
+        gardait l'ancienne taille, une machine retrecie flotterait au milieu
+        d'un halo sombre plus grand qu'elle.
+        """
+        taille = float(taille)
+        if abs(taille - self.taille) < 1e-6:
+            return
+        self.taille = taille
+        if getattr(self, "_look", None):
+            self.set_look(*self._look)
 
     @staticmethod
     def _shift(a, dx, dy):

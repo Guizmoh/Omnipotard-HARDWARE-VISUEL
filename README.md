@@ -720,6 +720,46 @@ défaut — mais c'est un parti pris, pas une fatalité. `--backdrop-sharp` va d
 aucun flou), avec un rapport de trente entre les deux sur le détail mesuré. La
 valeur par défaut, 0,37, reproduit exactement l'ancien comportement.
 
+### Taille et présence de la machine
+
+Deux réglages pour décider de la place que la machine prend dans l'image —
+utiles surtout quand il y a une photo ou une vidéo derrière elle.
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --taille 0.62
+python3 tools/mpc_performance.py morceau.mp3 --presence 0.45
+python3 tools/mpc_performance.py morceau.mp3 --taille 0.55 --presence 0.60
+```
+
+`--taille` ne réduit **que la machine** : son châssis, ses pads, sa dalle, ses
+étincelles et son onde de choc. Le quadrillage du fond et le fil du morceau,
+eux, tiennent la largeur de l'écran et ne bougent pas — les faire rétrécir
+aussi laisserait des marges noires autour d'un décor qui devrait être plein.
+Le creux que la texture garde derrière la machine, et la dalle opaque qui
+empêche le ciel de la photo de traverser son écran, se recalent sur la
+nouvelle taille : sans cela, une machine rétrécie flotterait au milieu d'un
+halo sombre plus grand qu'elle.
+
+`--presence` baisse son éclat sans rien déplacer. Le faisceau étant additif,
+elle s'efface derrière le fond comme un reflet sur une vitre, au lieu de
+devenir grise.
+
+Un détail de calcul qui se voit à l'œil. Le tracé est échantillonné en unités
+du monde, pas en pixels : une machine rétrécie tasse le même nombre de points
+sur moins de pixels, donc un trait plus dense — et plus lumineux. Réduire la
+machine revenait donc à l'allumer. La correction est proportionnelle à la
+taille **puissance 1,35**, et cet exposant est mesuré, pas choisi : à la simple
+proportion, la luminosité du trait montait de 149 à 212 en descendant à 0,45,
+parce que des traits plus serrés que le halo additionnent leurs halos. À 1,35
+elle va de 149 à 167, ce qui ne se voit plus. À taille 1 le facteur vaut
+exactement 1 : rien ne change pour ce qui a déjà été rendu.
+
+Le curseur du studio s'arrête à 1,30. Au-delà, deux points voisins du tracé
+s'écartent de plus d'un pixel et demi et le trait commence à s'égrener —
+mesuré : l'ondulation le long d'un trait passe de 0,05 à 0,13 entre taille
+1,25 et taille 1,50 avec une finesse de 1,7. De toute façon, à 1,25 la machine
+touche déjà les bords.
+
 ### Finesse du trait, et qualité du fichier
 
 Deux choses différentes décident de la netteté du trait dans le fichier final :
