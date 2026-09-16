@@ -226,6 +226,47 @@ def look_from(q):
     }
 
 
+MES_REGLAGES = os.path.join(WORKDIR, "mes-reglages.json")
+MAX_REGLAGES = 200
+
+
+def lire_mes_reglages():
+    """Les reglages enregistres par l'utilisateur.
+
+    Un fichier illisible ne doit pas empecher le studio de demarrer : on
+    repart d'une liste vide plutot que de refuser d'ouvrir.
+    """
+    try:
+        with open(MES_REGLAGES, encoding="utf-8") as f:
+            tout = json.load(f)
+        return tout if isinstance(tout, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def ecrire_mes_reglages(tout):
+    """Ecrit a cote puis renomme : une coupure ne laisse pas un fichier a
+    moitie ecrit a la place de tous les reglages d'une soiree."""
+    os.makedirs(WORKDIR, exist_ok=True)
+    moitie = MES_REGLAGES + ".en-cours"
+    with open(moitie, "w", encoding="utf-8") as f:
+        json.dump(tout, f, ensure_ascii=False, indent=1, sort_keys=True)
+    os.replace(moitie, MES_REGLAGES)
+
+
+def propre(valeurs):
+    """Ce qui vient de la page, ramene a des cles et des valeurs simples."""
+    if not isinstance(valeurs, dict):
+        raise ValueError("reglages illisibles")
+    out = {}
+    for cle, v in list(valeurs.items())[:400]:
+        cle = re.sub(r"[^A-Za-z0-9_-]", "", str(cle))[:40]
+        if not cle:
+            continue
+        out[cle] = v if isinstance(v, (bool, int, float)) else str(v)[:120]
+    return out
+
+
 def purger_apercus(garder=3):
     """Efface les extraits d'apercu passes.
 
@@ -712,6 +753,7 @@ class Handler(BaseHTTPRequestHandler):
                     "qualites": {k: v["quoi"] for k, v in QUALITES.items()},
                     "presets": {k: {CHAMPS[a]: b for a, b in v.items()}
                                 for k, v in PRESETS.items()},
+                    "mes": lire_mes_reglages(),
                     "aide": AIDE, "compte": COMPTE,
                 })
             if u.path == "/still":
@@ -799,6 +841,25 @@ class Handler(BaseHTTPRequestHandler):
                     # ce qu'un « ffmpeg ne sait pas lire ce fichier » taisait
                     return self._fail(e)
                 return self._json({"name": name, "video": is_video(path)})
+
+            if u.path == "/reglages":
+                corps = self._corps()
+                if corps is None:
+                    return self._fail("reglages illisibles", 413)
+                d = json.loads(corps or b"{}")
+                nom = " ".join(str(d.get("nom") or "").split())[:40]
+                tout = lire_mes_reglages()
+                if d.get("action") == "supprimer":
+                    tout.pop(nom, None)
+                else:
+                    if not nom:
+                        return self._fail("donnez un nom a ce reglage")
+                    if nom not in tout and len(tout) >= MAX_REGLAGES:
+                        return self._fail("deja %d reglages enregistres : "
+                                          "effacez-en un" % MAX_REGLAGES)
+                    tout[nom] = propre(d.get("valeurs"))
+                ecrire_mes_reglages(tout)
+                return self._json({"mes": tout, "nom": nom})
 
             if u.path == "/render":
                 corps = self._corps()
@@ -913,8 +974,19 @@ PAGE = r"""<!doctype html>
   <div class="card">
     <h2>Prereglage</h2>
     <select id="preset"></select>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="presetNom" maxlength="40"
+             placeholder="nom de votre reglage">
+      <button class="ghost" id="presetSave">Enregistrer</button>
+    </div>
+    <button class="ghost" id="presetDel" style="margin-top:6px" disabled>
+      Effacer ce reglage</button>
     <p class="hint">Ceux qu'un prereglage ne mentionne pas reviennent a leur
-      valeur d'usine : deux prereglages enchaines ne se melangent donc pas.</p>
+      valeur d'usine : deux prereglages enchaines ne se melangent donc pas.<br>
+      <b>Enregistrer</b> garde d'un coup tous les curseurs, toutes les listes,
+      les couleurs et le titre — tout sauf la definition, la cadence et le
+      morceau. Ils sont ecrits dans <code>out/studio/mes-reglages.json</code>
+      et vous les retrouverez a la prochaine ouverture.</p>
   </div>
 
   <div class="card">
@@ -1852,35 +1924,121 @@ fetch('/config').then(r => r.json())
 
     /* ---- prereglages : ils reposent tous les curseurs d'un coup ---- */
     PRESETS = c.presets || {};
-    $('#preset').innerHTML = Object.keys(PRESETS).map(
-      k => '<option value="' + k + '">' + k + '</option>').join('');
+    MES = c.mes || {};
     USINE = {};                       // les valeurs d'usine, pour y revenir
     for (const el of document.querySelectorAll('input[type=range], select'))
       if (el.id) USINE[el.id] = el.value;
+    listeDesPrereglages();
     $('#preset').onchange = () => {
-      const p = PRESETS[$('#preset').value] || {};
-      for (const [id, v] of Object.entries(USINE)) {
-        // un prereglage ne dit pas tout : ce qu'il tait revient a l'usine,
-        // sinon deux prereglages enchaines se melangeraient
-        // le fichier de sortie n'est pas une affaire de style : un
-        // prereglage n'a pas a rabaisser une 4K choisie en 1080p
-        if (['preset', 'bg', 'backdrop', 'size', 'fps', 'quality']
-            .includes(id)) continue;
-        const el = $('#' + id);
-        if (el) { el.value = v; el.dispatchEvent(new Event('input')); }
-      }
-      for (const [id, v] of Object.entries(p)) {
-        const el = $('#' + id);
-        if (!el) { console.warn('prereglage : curseur inconnu', id); continue; }
-        // le nombre d'etincelles est porte par sa racine
-        el.value = (id === 'partsN') ? Math.round(Math.sqrt(+v)) : v;
-        el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input'));
-      }
+      appliquerPrereglage($('#preset').value);
+      majBoutonsPreset();
       majFrequences();
       shot();
     };
   })
   .catch(() => {});
+
+/* ---------- prereglages, ceux d'usine et les votres ----------
+
+   Les deux passent par la meme table : des identifiants de curseurs et leurs
+   valeurs. Un prereglage d'usine ne dit que l'essentiel et laisse le reste
+   revenir a l'usine ; un reglage enregistre, lui, est une photographie
+   complete de la page. */
+let MES = {};
+
+function listeDesPrereglages() {
+  const groupe = (titre, noms) => !noms.length ? '' :
+    '<optgroup label="' + titre + '">' + noms.map(
+      k => '<option value="' + echapHtml(k) + '">' + echapHtml(k)
+           + '</option>').join('') + '</optgroup>';
+  const choisi = $('#preset').value;
+  $('#preset').innerHTML = groupe("Fournis", Object.keys(PRESETS))
+                         + groupe("Mes reglages", Object.keys(MES).sort());
+  if (choisi) $('#preset').value = choisi;
+  majBoutonsPreset();
+}
+function echapHtml(v) {
+  return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/"/g, '&quot;');
+}
+function majBoutonsPreset() {
+  $('#presetDel').disabled = !(($('#preset').value || '') in MES);
+}
+
+function appliquerPrereglage(nom) {
+  const p = PRESETS[nom] || MES[nom] || {};
+  for (const [id, v] of Object.entries(USINE)) {
+    // un prereglage d'usine ne dit pas tout : ce qu'il tait revient a
+    // l'usine, sinon deux prereglages enchaines se melangeraient
+    // le fichier de sortie n'est pas une affaire de style : un
+    // prereglage n'a pas a rabaisser une 4K choisie en 1080p
+    if (['preset', 'bg', 'backdrop', 'size', 'fps', 'quality', 'clipDur']
+        .includes(id)) continue;
+    const el = $('#' + id);
+    if (el) { el.value = v; el.dispatchEvent(new Event('input')); }
+  }
+  for (const [id, v] of Object.entries(p)) {
+    const el = $('#' + id);
+    if (!el) { console.warn('prereglage : curseur inconnu', id); continue; }
+    if (el.type === 'checkbox') {
+      el.checked = !!v && v !== 'false';
+    } else {
+      // le nombre d'etincelles est porte par sa racine
+      el.value = (id === 'partsN') ? Math.round(Math.sqrt(+v)) : v;
+    }
+    el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input'));
+  }
+}
+
+/* Tout ce qui decrit l'allure, et rien de ce qui decrit le fichier : la
+   definition, la cadence, la duree d'apercu et le morceau n'ont rien a faire
+   dans un reglage qu'on rappelle six mois plus tard. */
+function reglagesActuels() {
+  const sauf = new Set(['preset', 'presetNom', 'size', 'fps', 'quality',
+                        'clipDur', 'scrub', 'start', 'dur']);
+  const out = {};
+  for (const el of document.querySelectorAll(
+         'input[type=range], input[type=color], input[type=text], select')) {
+    if (!el.id || sauf.has(el.id)) continue;
+    out[el.id] = el.value;
+  }
+  // meme convention que les prereglages d'usine : le nombre d'etincelles,
+  // pas la racine que porte le curseur
+  out.partsN = String(Math.round($('#partsN').value * $('#partsN').value));
+  out.curve = $('#curve').checked;
+  return out;
+}
+
+async function ecrireReglages(corps) {
+  const r = await fetch('/reglages', {method: 'POST',
+                                      body: JSON.stringify(corps)});
+  const j = await r.json();
+  if (j.error) throw new Error(j.error);
+  MES = j.mes || {};
+  listeDesPrereglages();
+  return j;
+}
+
+$('#presetSave').onclick = async () => {
+  const nom = ($('#presetNom').value || '').trim();
+  if (!nom) { setStatus('donnez un nom a ce reglage', true); return; }
+  try {
+    await ecrireReglages({nom: nom, valeurs: reglagesActuels()});
+    $('#preset').value = nom;
+    majBoutonsPreset();
+    $('#presetNom').value = '';
+    setStatus('« ' + nom + ' » enregistre');
+  } catch (e) { setStatus('pas enregistre : ' + e.message, true); }
+};
+
+$('#presetDel').onclick = async () => {
+  const nom = $('#preset').value;
+  if (!(nom in MES)) return;
+  try {
+    await ecrireReglages({action: 'supprimer', nom: nom});
+    setStatus('« ' + nom + ' » efface');
+  } catch (e) { setStatus('pas efface : ' + e.message, true); }
+};
 
 /* ---------- divers ---------- */
 function fmt(s) {

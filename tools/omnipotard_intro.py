@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-16.20"
+VERSION = "2026-09-16.21"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -226,7 +226,8 @@ PRESETS = {
 
 AIDE = {
     "preset": "Repose tous les curseurs sur un point de depart. Tout reste "
-              "modifiable ensuite.",
+              "modifiable ensuite. « Mes reglages » sont les votres, gardes "
+              "d'une fois sur l'autre.",
     "palette": "La teinte du trait. « perso » ouvre un nuancier libre.",
     "trait": "La couleur du trait quand la palette est « perso ».",
     "bg": "La texture de la dalle, derriere la machine.",

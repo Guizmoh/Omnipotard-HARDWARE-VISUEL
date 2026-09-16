@@ -759,6 +759,27 @@ curseur du studio chacun correspond. Un contrôle vérifie que chaque nom existe
 des deux côtés : sans lui, un préréglage poserait des valeurs dans le vide sans
 que rien ne le signale.
 
+### Enregistrer ses propres réglages
+
+Avec plus de quatre-vingts réglages, retrouver à la main ce qu'on avait la
+semaine dernière n'est pas raisonnable. Le champ sous le préréglage garde
+**tout d'un coup** : les curseurs, les listes de déclencheurs, les couleurs, le
+titre, la bombe de l'écran. Pas la définition, la cadence, la durée d'aperçu ni
+le morceau — ceux-là décrivent le fichier, pas l'allure, et n'ont rien à faire
+dans un réglage qu'on rappelle six mois plus tard.
+
+Ils rejoignent la même liste que les préréglages fournis, dans un groupe « Mes
+réglages », et se rappellent de la même façon. Un préréglage fourni ne dit que
+l'essentiel et laisse le reste revenir à l'usine ; un réglage enregistré, lui,
+est une photographie complète de la page — le rappeler rend exactement ce qui a
+été gardé.
+
+Ils vivent dans `out/studio/mes-reglages.json`, lisible et modifiable à la main.
+Le fichier est écrit à côté puis renommé : une coupure ne laisse pas un fichier
+à moitié écrit à la place des réglages d'une soirée. Un fichier illisible
+n'empêche pas le studio de démarrer — il repart d'une liste vide plutôt que de
+refuser d'ouvrir.
+
 ### Netteté du fond
 
 Le faisceau est additif : une image nette et claire derrière le trait lui mange
