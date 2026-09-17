@@ -292,6 +292,37 @@ def purger_apercus(garder=3):
             pass
 
 
+def code_modifie():
+    """L'instant de la derniere modification des fichiers du studio.
+
+    Une mise a jour faite sans fermer le studio laisse le programme tourner
+    sur l'ancien code, tandis que les taches de rendu — sous Windows, des
+    interpreteurs neufs — relisent le nouveau. Les deux ne se comprennent
+    plus, et le rendu s'arretait sur un message incomprehensible. On compare
+    donc l'heure des fichiers a celle du demarrage.
+    """
+    ici = os.path.dirname(os.path.abspath(__file__))
+    t = 0.0
+    for nom in os.listdir(ici):
+        if nom.endswith(".py"):
+            try:
+                t = max(t, os.path.getmtime(os.path.join(ici, nom)))
+            except OSError:
+                pass
+    return t
+
+
+CODE_AU_DEMARRAGE = code_modifie()
+A_RELANCER = ("Le studio a ete mis a jour pendant qu'il tournait : il fait "
+              "encore tourner l'ancienne version. Fermez la fenetre noire du "
+              "studio et relancez-le, puis rechargez cette page.")
+
+
+def perime():
+    """Vrai si les fichiers ont change depuis le demarrage."""
+    return code_modifie() > CODE_AU_DEMARRAGE + 1.0
+
+
 def _entier(v, defaut):
     """Un nombre venu de la page, ou la valeur par defaut.
 
@@ -516,6 +547,8 @@ class Studio:
                 # recalculer une image au retour.
                 with self.lock:
                     self.renderers.clear()
+                if perime():
+                    raise RuntimeError(A_RELANCER)
                 job["state"] = "analyse"
                 palette, kw = look_from(q)
                 full = tr["info"]["duration"]
@@ -544,7 +577,10 @@ class Studio:
                 job["size"] = os.path.getsize(job["out"])
                 job["state"] = "fini"
             except Exception as e:                       # noqa: BLE001
-                job["error"] = "%s: %s" % (type(e).__name__, e)
+                # nos propres messages se suffisent ; les autres ont besoin
+                # de leur nom pour etre rapportables
+                job["error"] = (str(e) if isinstance(e, (ValueError, RuntimeError))
+                                else "%s: %s" % (type(e).__name__, e))
                 job["state"] = "erreur"
                 traceback.print_exc()
 
@@ -771,6 +807,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/config":
                 return self._json({
                     "version": version(),
+                    "perime": perime(),
                     "palettes": {k: {"trait": rgb_to_hex(v[0]),
                                      "fond": rgb_to_hex(v[3])}
                                  for k, v in sorted(PALETTES.items())},
@@ -1915,6 +1952,8 @@ function watch(id) {
 fetch('/config').then(r => r.json())
   .then(c => {
     if (c.version) $('#ver').textContent = c.version;
+    if (c.perime) setStatus('mise a jour installee : fermez la fenetre noire '
+      + 'du studio, relancez-le, puis rechargez cette page', true);
     // Les instruments et les sens de travelling viennent du moteur : la page
     // n'en garde pas sa propre copie, qui finirait par diverger.
     const remplir = (sel, liste, choisi) => {
@@ -2158,7 +2197,8 @@ def main():
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     url = "http://%s:%d%s" % (args.host, args.port, "/v2" if args.v2 else "")
-    print("Studio Omnipotard  ->  %s" % url)
+    print("Studio Omnipotard %s" % version())
+    print("  ->  %s" % url)
     print("Ctrl-C pour arreter. Les videos sont ecrites dans out/studio/.")
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

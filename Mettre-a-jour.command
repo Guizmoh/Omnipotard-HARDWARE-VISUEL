@@ -29,6 +29,9 @@ echo
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+echo "IMPORTANT : fermez d'abord la fenetre du studio."
+echo "Mettre a jour pendant qu'il tourne le laisse sur l'ancienne version."
+echo
 echo "Telechargement..."
 if ! curl -fsSL "$ZIPURL" -o "$TMP/maj.zip"; then
     echo "Echec du telechargement (pas de connexion ?)."
@@ -46,9 +49,13 @@ SRC="$TMP/$RACINE"
 
 mkdir -p tools
 cp -f "$SRC"/tools/* tools/
-for f in README.md requirements.txt Lancer-le-studio.bat Lancer-le-studio.command \
-         Mettre-a-jour.bat .gitattributes; do
-    [ -f "$SRC/$f" ] && cp -f "$SRC/$f" .
+# tous les fichiers de la racine, et non une liste tenue a la main : un
+# lanceur ajoute depuis n'arrivait jamais jusqu'ici. Sauf ce script-ci, que
+# le shell relit au fur et a mesure et qu'il ne faut pas reecrire sous ses
+# pieds.
+for f in "$SRC"/*; do
+    nom="$(basename "$f")"
+    [ -f "$f" ] && [ "$nom" != "Mettre-a-jour.command" ] && cp -f "$f" .
 done
 chmod +x ./*.command 2>/dev/null
 

@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-17.27"
+VERSION = "2026-09-17.28"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -2558,6 +2558,29 @@ class Renderer:
     # l'image. On ne les transmet donc pas aux taches de rendu (voir
     # __getstate__), qui les refont a l'arrivee en une poignee de secondes.
     _WARP = ("ww00", "ww01", "ww10", "ww11", "wi00", "_vign", "_scan")
+
+    # Valeurs de repli, portees par la classe et non par l'instance.
+    #
+    # Un moteur voyage : le studio le construit, puis l'envoie tel quel aux
+    # taches de rendu, qui sont sous Windows des interpreteurs neufs. Si les
+    # fichiers ont change entre les deux — une mise a jour faite sans fermer
+    # le studio — la tache relit la nouvelle classe et recoit l'ancien etat.
+    # Tout reglage ajoute depuis manque alors a l'appel, et le rendu s'arretait
+    # sur un « object has no attribute ». Avec ces replis il repart sur la
+    # valeur d'origine, et la page, elle, previent qu'il faut relancer.
+    machine = "mpc"
+    ecran = SCREEN
+    taille = 1.0
+    presence = 1.0
+    neon = 1.0
+    reflet = 0.5
+    tube = 0.0
+    _ech = 1.0
+    bg_kind = "uni"
+    bg_anim = 0.0
+    c_bg_pat = None
+    c_bg_creux = None
+    step_div = 2.0
 
     def __getstate__(self):
         """Ce qu'on envoie a une tache de rendu.

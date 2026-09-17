@@ -1047,6 +1047,36 @@ envoi interrompu laissait sinon un fichier tronqué que le studio reprenait
 ensuite pour un bon. La vidéo rendue est renvoyée elle aussi par blocs, au lieu
 d'être relue entièrement en mémoire pour être recopiée.
 
+### Mettre à jour sans casser le rendu en cours
+
+Un rendu échouait sur `AttributeError: 'Renderer' object has no attribute
+'machine'`, et la page n'offrait pas les nouvelles machines. Les deux venaient
+de la même cause : **le studio avait été mis à jour pendant qu'il tournait**.
+
+Le programme garde son code en mémoire au démarrage. Les tâches de rendu, elles,
+sont sous Windows des interpréteurs neufs qui relisent les fichiers **sur le
+disque**. Mettre à jour sans fermer la fenêtre laisse donc l'ancien programme
+envoyer un moteur d'ancienne forme à des tâches qui attendent la nouvelle : tout
+réglage ajouté depuis manque à l'appel. Et la page servie reste l'ancienne —
+d'où les machines invisibles.
+
+Reproduit en trois lignes (supprimer `machine` d'un état sérialisé puis le
+relire), puis corrigé de trois façons :
+
+- le moteur porte désormais des **valeurs de repli au niveau de la classe** :
+  un état auquel manque un réglage repart sur la valeur d'origine au lieu de
+  s'arrêter net ;
+- le studio **compare l'heure de ses fichiers à celle de son démarrage**. S'ils
+  ont changé, la page le dit en rouge et le rendu refuse de partir avec une
+  phrase claire — « fermez la fenêtre noire du studio et relancez-le » — plutôt
+  qu'avec un message d'erreur Python ;
+- les scripts de mise à jour recopient maintenant **tous** les fichiers de la
+  racine et non une liste tenue à la main (le lanceur de la v2 n'arrivait
+  jamais), et ils commencent par rappeler qu'il faut fermer le studio d'abord.
+
+Le studio affiche aussi sa version au démarrage, dans la fenêtre noire : de quoi
+vérifier d'un coup d'œil qu'une mise à jour a bien pris.
+
 ### Un contrôle de cohérence
 
 ```bash

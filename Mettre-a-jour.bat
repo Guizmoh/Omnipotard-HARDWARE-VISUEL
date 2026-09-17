@@ -8,7 +8,9 @@ title Mise a jour du studio Omnipotard
 
 echo.
 echo   Mise a jour du studio Omnipotard.
-echo   Si la fenetre du studio est encore ouverte, fermez-la avant de continuer.
+echo   IMPORTANT : fermez d'abord la fenetre noire du studio.
+echo   Mettre a jour pendant qu'il tourne le laisse sur l'ancienne version,
+echo   et le rendu s'arrete en chemin.
 echo.
 REM Ce fichier doit etre DANS le dossier du projet, a cote de
 REM Lancer-le-studio.bat. Lance ailleurs, il y deverserait tout le projet.
@@ -35,7 +37,7 @@ echo   Telechargement...
 REM Mettre-a-jour.bat ne se remplace pas lui-meme : cmd.exe relit le fichier
 REM en cours d execution ligne par ligne, et le reecrire sous ses pieds le
 REM ferait derailler. Ce script-ci est court et stable ; tout le reste passe.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $z=Join-Path $env:TEMP 'omni-maj.zip'; $d=Join-Path $env:TEMP 'omni-maj'; Invoke-WebRequest -UseBasicParsing '%ZIPURL%' -OutFile $z; if(Test-Path $d){Remove-Item $d -Recurse -Force}; Expand-Archive $z $d -Force; $s=Join-Path $d '%RACINE%'; if(-not (Test-Path $s)){throw 'archive inattendue'}; $t=Join-Path '%~dp0' 'tools'; [void](New-Item -ItemType Directory -Force -Path $t); Copy-Item (Join-Path $s 'tools\*') $t -Recurse -Force; foreach($f in @('README.md','requirements.txt','Lancer-le-studio.bat','Lancer-le-studio.command','Mettre-a-jour.command','.gitattributes')){$p=Join-Path $s $f; if(Test-Path $p){Copy-Item $p '%~dp0' -Force}}; Remove-Item $z,$d -Recurse -Force"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $z=Join-Path $env:TEMP 'omni-maj.zip'; $d=Join-Path $env:TEMP 'omni-maj'; Invoke-WebRequest -UseBasicParsing '%ZIPURL%' -OutFile $z; if(Test-Path $d){Remove-Item $d -Recurse -Force}; Expand-Archive $z $d -Force; $s=Join-Path $d '%RACINE%'; if(-not (Test-Path $s)){throw 'archive inattendue'}; $t=Join-Path '%~dp0' 'tools'; [void](New-Item -ItemType Directory -Force -Path $t); Copy-Item (Join-Path $s 'tools\*') $t -Recurse -Force; foreach($p in Get-ChildItem -File $s){ if($p.Name -ne 'Mettre-a-jour.bat'){Copy-Item $p.FullName '%~dp0' -Force} }; Remove-Item $z,$d -Recurse -Force"
 
 if errorlevel 1 (
     echo.

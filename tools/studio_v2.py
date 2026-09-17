@@ -955,6 +955,8 @@ $('#versSplit').onclick = async () => {
 bati();
 fetch('/config').then(r => r.json()).then(c => {
   if (c.version) $('#ver').textContent = c.version;
+  if (c.perime) etat('mise a jour installee : fermez la fenetre noire du '
+    + 'studio, relancez-le, puis rechargez cette page', true);
   AIDE = c.aide || {}; COMPTE = c.compte || {}; QUALITES = c.qualites || {};
   PRESETS = c.presets || {}; MES = c.mes || {};
   const groupes = (sel, gs, def) => {
