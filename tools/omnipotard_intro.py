@@ -971,11 +971,18 @@ def resample(pts, step=STEP, closed=False):
 
 
 class Path:
-    """Chemin discretise : points, normales, abscisse curviligne, etiquette."""
+    """Chemin discretise : points, normales, abscisse curviligne, etiquette.
 
-    __slots__ = ("P", "N", "s", "ph", "tag")
+    `alpha` est la part de lumiere que le trait recoit. Elle vaut un partout,
+    et rien d'autre ne la change pour l'instant : c'est la prise qui permet a
+    un trait de s'effacer sans bouger — ce que demande un texte qui change,
+    puisqu'une lettre qui se deforme en une autre ne se lit plus.
+    """
+
+    __slots__ = ("P", "N", "s", "ph", "tag", "alpha")
 
     def __init__(self, pts, closed=False, tag="", step=STEP):
+        self.alpha = 1.0
         self.P, self.s, _ = resample(pts, step, closed)
         tan = np.gradient(self.P, axis=0)
         tan /= (np.linalg.norm(tan, axis=1, keepdims=True) + 1e-12)
@@ -3086,6 +3093,8 @@ class Renderer:
 
         half = BODY[3]
         for p in self.mpc:
+            if p.alpha <= 0.003:
+                continue
             mo = self.morph_at(p.P[:, 0], sweep_x)
             if mo.max() <= 0.003:
                 continue
@@ -3127,7 +3136,7 @@ class Renderer:
                 w *= (1.0 - melt) ** 0.7
                 P = self._melt(P, melt, t)
             px, py = self.to_px(P, collapse, (jx, 0.0))
-            beam.add(px, py, w * self._cam_z)
+            beam.add(px, py, w * (self._cam_z * p.alpha))
 
         # ---- organes animes
         if melt >= 0.99:
