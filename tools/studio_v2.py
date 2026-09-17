@@ -1086,6 +1086,8 @@ const _redessine = () => apercu();
 const _etat = (m, e) => etat(m, e);
 const _duree = () => duree;
 
+/*__SEQ_MIDI__*/
+
 /* Le sequenceur se glisse sous le choix de la machine, et les deux curseurs
    de la melodie rejoignent sa carte : ils sont extraits de la v1 comme tous
    les autres, mais leur place est la, a cote du fichier. */
@@ -1118,7 +1120,7 @@ const _duree = () => duree;
   if (m) m.addEventListener('change', () => { seqEcrire(); seqDessine(); });
   seqPose('');
 })();
-/*__SEQ_MIDI__*/
+
 """
 
 PAGE = PAGE.replace("</script>\n</body></html>",
