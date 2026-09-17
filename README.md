@@ -460,11 +460,31 @@ Plaquer une mélodie sur seize pads de batterie ne donnait rien de lisible :
 trois choses s'y disputaient les mêmes cellules — les coups, les pas et les
 notes.
 
-Le fichier est **calé tout seul** sur le morceau. Le studio ne compare pas des
-sons mais des instants d'attaque : ceux du fichier MIDI d'un côté, ceux relevés
-dans l'audio de l'autre, et il cherche le glissement qui en fait coïncider le
-plus. La carte affiche le décalage trouvé et s'il est sûr ; le curseur
-**avance / retard** ne sert que s'il tombe un peu à côté.
+Le fichier est pris **tel quel**. Un MIDI exporté du même projet que le morceau
+est déjà à l'heure : son décalage vaut zéro, et c'est ce qu'on lui laisse.
+
+Pour le vérifier, la carte annonce l'instant de la **première note**. Comparez-le
+à l'instant où la mélodie s'entend dans le morceau ; s'il y a un écart, le
+curseur **avance / retard** (± 10 s, au centième) le rattrape.
+
+Une case **chercher le décalage tout seul** existe, décochée par défaut. Elle
+compare les attaques du fichier à celles du morceau. Mesuré sur le morceau
+d'essai, avec des décalages connus :
+
+| fichier | 0 s | +0,8 s | +3 s | +7,5 s | −2 s |
+| --- | --- | --- | --- | --- | --- |
+| notes posées sur les attaques | exact | exact | exact | exact | exact |
+| **mélodie** | −17,9 | −17,1 | −14,9 | −10,4 | −17,5 |
+
+Sur une mélodie il se trompe **à tous les coups**, et sans qu'on puisse s'en
+apercevoir : ses mauvaises réponses ont des « netteté » jusqu'à 3,7, plus hautes
+que certaines bonnes, qui descendent à 1,7 — aucun seuil ne les sépare. La
+raison tient en une phrase : les attaques relevées dans l'audio sont surtout des
+coups de batterie — six mille sept cents sur quatre minutes — là où une mélodie
+ne porte que quelques centaines de notes tenues, qui ne tombent pas dessus.
+
+À ne cocher que pour une piste de **batterie**, où il retrouve le décalage
+exactement.
 
 Une note trop grave ou trop aiguë pour les trente-sept touches y est ramenée
 par octaves : la mélodie garde ses notes, elle change seulement d'octave. C'est

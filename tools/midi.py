@@ -165,12 +165,21 @@ def lire_notes(chemin, pistes=None):
 
 
 def resume(notes):
-    """De quoi renseigner la page : combien de notes, quelle etendue."""
+    """De quoi renseigner la page : combien de notes, quelle etendue, et
+    surtout **a quel instant tombe la premiere**.
+
+    C'est ce dernier chiffre qui permet de verifier le calage a l'oreille :
+    si la premiere note est annoncee a 0:12 et que la melodie s'entend bien a
+    0:12 dans le morceau, le fichier est a l'heure. Aucun calcul ne le dit
+    mieux que cette comparaison-la.
+    """
     if not notes:
-        return {"notes": 0, "duree": 0.0, "grave": 0, "aigu": 0, "median": 60}
+        return {"notes": 0, "duree": 0.0, "debut": 0.0,
+                "grave": 0, "aigu": 0, "median": 60}
     hauteurs = sorted(n[2] for n in notes)
     return {"notes": len(notes),
             "duree": max(n[1] for n in notes),
+            "debut": min(n[0] for n in notes),
             "grave": hauteurs[0], "aigu": hauteurs[-1],
             "median": hauteurs[len(hauteurs) // 2]}
 
@@ -193,16 +202,35 @@ def caler(notes, instants, fenetre=20.0, pas=0.010):
     millisecondes l'une de l'autre sont la meme — et on cherche le glissement
     qui en fait coincider le plus.
 
+    **A n'employer que sur un fichier percussif, et jamais par defaut.**
+    Mesure sur le morceau d'essai, en comparant a des decalages connus :
+
+        fichier dont les notes tombent sur les attaques
+            0 / +0,8 / +3 / +7,5 / -2 s  ->  retrouve exactement, cinq fois
+        fichier melodique
+            0 / +0,8 / +3 / +7,5 / -2 s  ->  -17,9 / -17,1 / -14,9 / -10,4
+                                             / -17,5 s, faux cinq fois
+
+    La raison tient en une phrase : les attaques relevees dans l'audio sont
+    surtout des coups de batterie — six mille sept cents sur quatre minutes —
+    la ou une melodie ne porte que quelques centaines de notes tenues, qui ne
+    tombent pas dessus. Le glissement qui fait le plus coincider n'est alors
+    pas le bon, et rien ne permet de s'en apercevoir : les mauvaises reponses
+    ci-dessus ont des nettetes allant jusqu'a 3,7, plus hautes que certaines
+    bonnes, qui descendent a 1,7. Aucun seuil ne les separe.
+
+    Un fichier MIDI exporte du meme projet que le morceau est deja a l'heure :
+    son decalage vaut zero, et c'est ce qu'on lui laisse.
+
     Les deux listes doivent etre dans la meme base de temps : celle du
     morceau entier. Un extrait qui commence a la quarantieme seconde doit donc
     presenter ses instants decales d'autant, sinon le vrai decalage tombe hors
     de la fenetre cherchee.
 
     Renvoie (decalage en secondes, nettete). La nettete est le rapport entre
-    le meilleur accord et l'accord moyen : au-dessus de 2, le calage est sur ;
-    en dessous de 1.3, il n'y a probablement rien a caler. Elle vaut zero si
-    le meilleur accord touche le bord de la fenetre — le vrai est alors plus
-    loin, et ce qu'on a trouve ne veut rien dire.
+    le meilleur accord et l'accord moyen. Elle vaut zero si le meilleur accord
+    touche le bord de la fenetre — le vrai est alors plus loin, et ce qu'on a
+    trouve ne veut rien dire.
     """
     import numpy as np
     if not len(notes) or not len(instants):

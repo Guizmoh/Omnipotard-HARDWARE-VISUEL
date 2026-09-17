@@ -127,6 +127,20 @@ def safe_name(name):
     return name[:120]
 
 
+def _coche(valeur, defaut=False):
+    """Une case a cocher, telle que la page l'envoie.
+
+    La page ecrit « 1 » ou « 0 ». Passer la chaine a bool() rend vrai dans les
+    deux cas — « 0 » n'est pas une chaine vide — et la case reste cochee quoi
+    qu'on fasse. C'est ce qui arrivait a la courbe du titre dans l'apercu : le
+    rendu, lui, envoie un vrai booleen et obeissait, si bien que l'image
+    regardee et le fichier produit ne disaient pas la meme chose.
+    """
+    if valeur is None or valeur == "":
+        return defaut
+    return str(valeur).strip().lower() not in ("0", "false", "off", "non")
+
+
 def _melodie(nom):
     """Le chemin d'une melodie deposee, ou rien.
 
@@ -181,6 +195,7 @@ def look_from(q):
         "midi": _melodie(q.get("midi")),
         "midi_force": float(q.get("midiForce", 1.0)),
         "midi_offset": float(q.get("midiOffset", 0.0)),
+        "midi_cale": _coche(q.get("midiCale")),
         "nettete": float(q.get("nettete", 1.0)),
         "taille": float(q.get("taille", 1.0)),
         "presence": float(q.get("presence", 1.0)),
@@ -471,7 +486,7 @@ class Studio:
         # moteur neuf, contrairement a la couleur ou au fond qu'on repose.
         # La machine decide de toute la geometrie : en changer demande un
         # moteur neuf, comme la finesse du trait.
-        key = (tid, w, h, bool(q.get("curve", True)), kw["nettete"],
+        key = (tid, w, h, _coche(q.get("curve"), True), kw["nettete"],
                kw["machine"])
         with self.lock:
             r = self.renderers.get(key)
@@ -479,7 +494,7 @@ class Studio:
             # la melodie est posee plus bas, une fois pour toutes : la lire
             # et la caler a chaque apercu couterait une seconde par curseur
             # deplace
-            r = _renderer(tr["info"], w, h, 30, 7, bool(q.get("curve", True)),
+            r = _renderer(tr["info"], w, h, 30, 7, _coche(q.get("curve"), True),
                           palette, dict(kw, midi=""))
             with self.lock:
                 if len(self.renderers) > 2:        # ne pas garder tout l'historique
@@ -512,7 +527,7 @@ class Studio:
                         "machine",
                         # le plan de machines et la melodie se posent a la
                         # main : l'un se relit, l'autre se lit dans un fichier
-                        "machines", "midi", "midi_offset")
+                        "machines", "midi", "midi_offset", "midi_cale")
         # La taille se pose avant l'allure : c'est elle qui decide du creux
         # que la texture garde derriere la machine, et set_look le recalcule.
         r.taille = float(kw["taille"])
@@ -529,14 +544,17 @@ class Studio:
 
         # La melodie : lue et calee une seule fois par fichier. Le decalage de
         # la page s'ajoute a celui trouve tout seul.
-        chemin = kw["midi"]
-        if getattr(r, "_midi_de", "\0") != chemin:
+        # La case « chercher le decalage » fait partie de la cle : la cocher
+        # change le decalage calcule, il faut donc relire.
+        chemin = (kw["midi"], bool(kw["midi_cale"]))
+        if getattr(r, "_midi_de", None) != chemin:
             r._midi_de = chemin
             r.midi, r._midi_auto = None, 0.0
-            if chemin:
-                _, lu = preparer_midi(tr["info"], {"midi": chemin})
+            if chemin[0]:
+                _, lu = preparer_midi(tr["info"], {"midi": chemin[0],
+                                                  "midi_cale": chemin[1]})
                 if lu and lu.get("notes"):
-                    r.midi = np.asarray(midi.lire_notes(chemin),
+                    r.midi = np.asarray(midi.lire_notes(chemin[0]),
                                         dtype=np.float64).reshape(-1, 4)
                     r._midi_auto = float(lu.get("cale", 0.0))
                     r.midi_transpose = int(lu.get("transpose", 0))
@@ -644,7 +662,7 @@ class Studio:
                              quality=("apercu" if job["apercu"] else
                                       _dans(q.get("quality"), QUALITES,
                                             "compatible")),
-                             curve=bool(q.get("curve", True)),
+                             curve=_coche(q.get("curve"), True),
                              palette=palette, progress=prog, **kw)
                 job["size"] = os.path.getsize(job["out"])
                 job["state"] = "fini"
@@ -1000,13 +1018,9 @@ class Handler(BaseHTTPRequestHandler):
                 rep = dict(midi.resume(notes), name=name)
                 rep["grave"] = midi.nom_note(rep["grave"])
                 rep["aigu"] = midi.nom_note(rep["aigu"])
-                # le calage ne se calcule que si un morceau est deja depose :
-                # c'est sur ses attaques qu'il se cherche
-                info = STUDIO.info_courante()
-                if info is not None:
-                    _, cale = preparer_midi(info, {"midi": path})
-                    rep["cale"] = round(cale.get("cale", 0.0), 3)
-                    rep["nettete"] = round(cale.get("nettete", 0.0), 2)
+                # On ne cherche plus de calage a l'envoi : il se trompe a tous
+                # les coups sur une melodie (voir midi.caler). On rend l'instant
+                # de la premiere note, qui se verifie a l'oreille.
                 return self._json(rep)
 
             if u.path == "/reglages":
@@ -1181,6 +1195,15 @@ function seqBrancher() {
   seqPose('');
 }
 
+/* Un instant, ecrit au centieme : c'est ce qui permet de comparer la premiere
+   note du fichier a ce qu'on entend. Arrondi a la seconde, « 5 s » ne disait
+   pas si le fichier tombait a 5,00 ou a 5,49. */
+function instant(s) {
+  s = Math.max(0, +s || 0);
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return m + ':' + (r < 10 ? '0' : '') + r.toFixed(2);
+}
+
 function midiOte() {
   $('#midi').value = '';
   midiAvis();
@@ -1196,11 +1219,7 @@ async function sendMidi(f) {
     $('#midi').value = j.name;
     $('#mi-n').textContent = j.notes;
     $('#mi-e').textContent = j.grave + ' \u2192 ' + j.aigu;
-    $('#mi-c').textContent = (j.cale === null || j.cale === undefined)
-      ? 'depose le morceau d\'abord'
-      : (j.cale >= 0 ? '+' : '') + j.cale.toFixed(2) + ' s'
-        + (j.nettete >= 2 ? ' (sur)' : j.nettete >= 1.3 ? ' (probable)'
-                                                        : ' (rien trouve)');
+    $('#mi-c').textContent = instant(j.debut);
     $('#midimeta').hidden = false;
     $('#midiReglages').hidden = false;
     $('#midiDrop').innerHTML = '<b>' + j.name
@@ -1373,7 +1392,7 @@ PAGE = r"""<!doctype html>
     <div class="meta" id="midimeta" hidden>
       <span>notes <b id="mi-n">-</b></span>
       <span>etendue <b id="mi-e">-</b></span>
-      <span>calage <b id="mi-c">-</b></span>
+      <span>premiere note <b id="mi-c">-</b></span>
     </div>
     <div id="midiReglages" hidden>
       <label for="midiForce">eclat des touches jouees &mdash;
@@ -1381,7 +1400,9 @@ PAGE = r"""<!doctype html>
       <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1">
       <label for="midiOffset">avance / retard &mdash;
         <span id="v-mio">0.00 s</span></label>
-      <input type="range" id="midiOffset" min="-4" max="4" step="0.02" value="0">
+      <input type="range" id="midiOffset" min="-10" max="10" step="0.01" value="0">
+      <label class="coche"><input type="checkbox" id="midiCale">
+        chercher le decalage tout seul</label>
       <button class="ghost" id="midiOte">Oter ce fichier</button>
     </div>
     <input type="hidden" id="midi">
@@ -1390,8 +1411,16 @@ PAGE = r"""<!doctype html>
       <b>clavier du MiniFreak</b> : c'est la touche exacte qui s'enfonce. La
       MPC et le Digitakt n'ont pas de clavier &mdash; leurs pads restent a la
       batterie, et le fichier n'y change rien.<br>
-      Il est <b>cale tout seul</b> sur les attaques du morceau ; le curseur
-      d'avance ne sert que si le calage tombe un peu a cote.<br>
+      Le fichier est pris <b>tel quel</b> : un MIDI exporte du meme projet que
+      le morceau est deja a l'heure, son decalage vaut zero. Pour le verifier,
+      comparez la <b>premiere note</b> annoncee ci-dessus a l'instant ou la
+      melodie s'entend dans le morceau ; s'il y a un ecart, le curseur
+      d'avance le rattrape.<br>
+      <b>Chercher le decalage tout seul</b> compare les attaques du fichier a
+      celles du morceau. Mesure : sur un fichier percussif il retrouve le
+      decalage exactement ; sur une melodie il se trompe a tous les coups, et
+      sans qu'on puisse s'en apercevoir. A ne cocher que pour une piste de
+      batterie.<br>
       Une note trop grave ou trop aigue pour le clavier y est ramenee par
       octaves : la melodie garde ses notes, elle change seulement d'octave.</p>
   </div>
@@ -1852,6 +1881,7 @@ function params() {
     passage: $('#passage').value, passageTurb: $('#passageTurb').value,
     midi: $('#midi').value,
     midiForce: $('#midiForce').value, midiOffset: $('#midiOffset').value,
+    midiCale: $('#midiCale').checked ? '1' : '0',
     palette: $('#palette').value, trait: $('#trait').value,
     bg: $('#bg').value, bgColor: $('#bgColor').value,
     bgStrength: $('#bgStrength').value, bgClear: $('#bgClear').value,

@@ -68,7 +68,7 @@ REGLE = SIMPLE | {
     "echo", "echoN", "echoDelay", "couleurs", "spectro",
     "cadence", "haloDoux", "poussiere", "flottement",
     "tranches", "tranchesOn", "stut", "stutOn", "kaleido", "kaleidoOn",
-    "scramble", "scrLen", "passageTurb", "midiOffset",
+    "scramble", "scrLen", "passageTurb", "midiOffset", "midiCale",
 }
 
 
@@ -507,7 +507,7 @@ PAGE = r"""<!doctype html>
     <div class="meta" id="midimeta" hidden>
       <span>notes <b id="mi-n">-</b></span>
       <span>etendue <b id="mi-e">-</b></span>
-      <span>calage <b id="mi-c">-</b></span>
+      <span>premiere note <b id="mi-c">-</b></span>
     </div>
     <div id="midiReglages" hidden>
       <div id="midiCurseurs"></div>
@@ -1107,7 +1107,7 @@ const _duree = () => duree;
     champMachine.insertAdjacentElement('afterend', d);
   }
   const cible = $('#midiCurseurs');
-  for (const id of ['midiForce', 'midiOffset']) {
+  for (const id of ['midiForce', 'midiOffset', 'midiCale']) {
     const c = document.querySelector('[data-champ="' + id + '"]');
     if (c && cible) cible.appendChild(c);
   }

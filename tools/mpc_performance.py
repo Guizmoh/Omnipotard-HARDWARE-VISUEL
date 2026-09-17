@@ -379,7 +379,10 @@ def preparer_midi(info, reglages):
     """
     reglages = dict(reglages)
     chemin = reglages.pop("midi", None) or None
-    cale = reglages.pop("midi_cale", True)
+    # Le calage automatique est desactive par defaut : il se trompe a tous les
+    # coups sur un fichier melodique (voir midi.caler). Un fichier exporte du
+    # meme projet est de toute facon deja a l'heure.
+    cale = reglages.pop("midi_cale", False)
     ecart = float(reglages.pop("midi_offset", 0.0) or 0.0)
     transpo = reglages.pop("midi_transpose", None)
     if not chemin or not os.path.exists(chemin):
@@ -585,9 +588,12 @@ def add_look_args(ap):
     ap.add_argument("--midi-offset", type=float, default=0.0, metavar="S",
                     help="decalage du fichier MIDI, en secondes, ajoute au "
                          "calage automatique (negatif = plus tot)")
-    ap.add_argument("--midi-cale", type=int, default=1, choices=(0, 1),
-                    help="1 : cale le fichier MIDI sur les attaques du "
-                         "morceau ; 0 : le prend tel quel")
+    ap.add_argument("--midi-cale", type=int, default=0, choices=(0, 1),
+                    help="1 : cherche le decalage du fichier MIDI en le "
+                         "comparant aux attaques du morceau. Ne vaut que pour "
+                         "un fichier percussif : sur une melodie il se trompe "
+                         "a tous les coups. Par defaut le fichier est pris tel "
+                         "quel, ce qui est juste pour un export du meme projet")
     ap.add_argument("--midi-transpose", type=int, default=None, metavar="N",
                     help="transposition en demi-tons ; par defaut, celle qui "
                          "met la melodie au milieu du clavier")
