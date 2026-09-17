@@ -1173,6 +1173,24 @@ pastille qui s'allume au survol), libellés en bas de casse plutôt qu'en
 capitales, cartes en léger dégradé, en-tête collante, et l'aperçu qui reste en
 place pendant qu'on règle.
 
+### Deux polices, deux usages
+
+Tout était en chasse fixe. C'est joli pour une console, fatigant pour lire
+quatre-vingt-dix libellés et autant d'explications. Le **texte** passe donc en
+caractères proportionnels — Segoe UI sous Windows, San Francisco sous macOS, ce
+que le système propose ailleurs — et les **nombres** gardent la chasse fixe :
+une valeur qui passe de `1` à `0.85` ne doit pas faire sauter toute la ligne.
+
+Restent en chasse fixe : les valeurs des curseurs, les chiffres du morceau
+(durée, tempo, nombre de coups), le numéro de version, les noms de fichiers et
+l'avancement du rendu. Le titre de la page aussi, parce que c'est une enseigne.
+
+Aucune police n'est téléchargée. Le studio tourne en local, souvent sans
+réseau : une police distante ferait attendre la page pour rien, et la ferait
+apparaître nue si elle n'arrivait pas.
+
+Les deux pages ont reçu le même traitement.
+
 ### Pourquoi les deux pages ne peuvent pas diverger
 
 La v2 **ne recopie pas** la liste des réglages : elle la **lit dans la page de

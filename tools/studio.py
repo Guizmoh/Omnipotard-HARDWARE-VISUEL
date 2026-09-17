@@ -919,10 +919,19 @@ PAGE = r"""<!doctype html>
   :root{
     --bg:#07090b; --panel:#0e1216; --line:#1d262e; --ink:#d6e2dc;
     --dim:#7d8c88; --acc:#3dff72; --bad:#ff6b5e;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    /* Le texte se lit en caracteres proportionnels, les nombres gardent la
+       chasse fixe. Rien n'est telecharge : le studio tourne sans reseau. */
+    --texte:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",
+            "Noto Sans",Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"Cascadia Mono","Segoe UI Mono",Menlo,
+           Consolas,monospace;
+    font-family:var(--texte);
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font-size:13px;line-height:1.5}
+  body{margin:0;background:var(--bg);color:var(--ink);font-size:13.5px;
+    line-height:1.58;-webkit-font-smoothing:antialiased}
+  h1,#ver,.meta b,.aide b.freq,#donepath,#ptext{font-family:var(--mono)}
+  label span{font-family:var(--mono);font-variant-numeric:tabular-nums}
   header{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;
     align-items:baseline;gap:12px;flex-wrap:wrap}
   h1{margin:0;font-size:15px;letter-spacing:.16em;text-transform:uppercase;

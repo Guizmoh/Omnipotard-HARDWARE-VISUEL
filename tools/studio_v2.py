@@ -245,12 +245,22 @@ PAGE = r"""<!doctype html>
     --fond:#06080a; --carte:#0d1115; --carte2:#11161b; --ligne:#1b242c;
     --ligne2:#27333c; --ink:#dfe9e4; --dim:#839690;
     --faible:#5f7069; --acc:#3dff72; --acc-mat:#1f8f45; --mal:#ff6b5e;
-    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    /* Deux polices, et deux usages. Le texte se lit en caracteres
+       proportionnels — c'est ce pour quoi ils sont faits ; les nombres
+       gardent la chasse fixe, sans quoi une valeur qui passe de 1 a 0,85
+       ferait sauter toute la ligne. Aucune n'est telechargee : le studio
+       tourne sans reseau, et une police qui n'arrive pas fait attendre la
+       page pour rien. Sous Windows le texte sort en Segoe UI, sous macOS en
+       San Francisco, ailleurs en ce que le systeme propose. */
+    --texte:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",
+            "Noto Sans",Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"Cascadia Mono","Segoe UI Mono",Menlo,
+           Consolas,monospace;
   }
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
-  body{margin:0;background:var(--fond);color:var(--ink);font-family:var(--mono);
-    font-size:13px;line-height:1.55;
+  body{margin:0;background:var(--fond);color:var(--ink);font-family:var(--texte);
+    font-size:13.5px;line-height:1.6;-webkit-font-smoothing:antialiased;
     background-image:radial-gradient(1200px 600px at 70% -10%,#0b1a13 0%,transparent 70%)}
 
   /* ---------- en-tete ---------- */
@@ -258,14 +268,14 @@ PAGE = r"""<!doctype html>
     gap:16px;flex-wrap:wrap;padding:11px 20px;
     background:rgba(6,8,10,.92);backdrop-filter:blur(8px);
     border-bottom:1px solid var(--ligne)}
-  h1{margin:0;font-size:13px;letter-spacing:.2em;text-transform:uppercase;
-    color:var(--acc);font-weight:600}
+  h1{margin:0;font-size:12.5px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--acc);font-weight:700;font-family:var(--mono)}
   h1 span{color:var(--ink);opacity:.8}
-  #ver{color:var(--faible);font-size:10.5px;letter-spacing:.04em}
-  #etat{color:var(--dim);flex:1 1 240px;min-width:0;font-size:12px;
+  #ver{color:var(--faible);font-size:11px;font-family:var(--mono)}
+  #etat{color:var(--dim);flex:1 1 240px;min-width:0;font-size:12.5px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #etat.mal{color:var(--mal)}
-  header a{color:var(--faible);font-size:11px;text-decoration:none;
+  header a{color:var(--faible);font-size:12px;text-decoration:none;
     border-bottom:1px solid transparent}
   header a:hover{color:var(--acc);border-color:var(--acc)}
 
@@ -277,29 +287,29 @@ PAGE = r"""<!doctype html>
     border:1px solid var(--ligne);border-radius:10px;padding:16px 16px 6px;
     margin-bottom:14px}
   .bloc.serre{padding:14px 16px}
-  .bloc h2{margin:0 0 12px;font-size:10px;letter-spacing:.2em;color:var(--faible);
-    text-transform:uppercase;font-weight:600}
+  .bloc h2{margin:0 0 12px;font-size:10.5px;letter-spacing:.16em;
+    color:var(--faible);text-transform:uppercase;font-weight:700}
 
   /* ---------- un reglage ---------- */
   .champ{padding:7px 0 9px;border-bottom:1px solid transparent}
   .champ + .champ{border-top:1px solid rgba(255,255,255,.035)}
   .tete{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
-  .tete label{flex:1;margin:0;color:var(--dim);font-size:12px;letter-spacing:.01em;
+  .tete label{flex:1;margin:0;color:var(--dim);font-size:13px;
     text-transform:none;cursor:pointer}
   .champ:hover .tete label,.champ:focus-within .tete label{color:var(--ink)}
-  .val{color:var(--acc);font-size:12px;font-variant-numeric:tabular-nums;
-    white-space:nowrap}
-  .freq{display:block;font-size:10.5px;color:var(--acc-mat);margin-top:5px;
-    letter-spacing:.01em}
+  .val{color:var(--acc);font-size:12.5px;font-family:var(--mono);
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  .freq{display:block;font-size:11.5px;color:var(--acc-mat);margin-top:6px;
+    font-variant-numeric:tabular-nums}
   /* le declencheur est second : il se lit, il ne se crie pas */
   .sur{margin-top:7px;display:flex;align-items:center;gap:8px}
   .sur em{font-style:normal;font-size:10.5px;color:var(--faible);
-    letter-spacing:.12em;text-transform:uppercase;flex:0 0 auto}
-  .sur select{font-size:11.5px;color:var(--dim);padding:5px 8px;
+    letter-spacing:.1em;text-transform:uppercase;flex:0 0 auto;font-weight:600}
+  .sur select{font-size:12px;color:var(--dim);padding:5px 8px;
     background:transparent;border-color:var(--ligne)}
   .sur select:hover{color:var(--ink);border-color:var(--ligne2)}
-  .aide{font-size:11px;line-height:1.5;color:var(--faible);margin:6px 0 0;
-    display:none}
+  .aide{font-size:12px;line-height:1.55;color:var(--faible);margin:7px 0 0;
+    display:none;max-width:56ch}
   .champ:hover .aide,.champ:focus-within .aide,body.aides .aide{display:block}
 
   /* ---------- curseurs ---------- */
@@ -323,22 +333,22 @@ PAGE = r"""<!doctype html>
   /* ---------- listes, champs, boutons ---------- */
   select,input[type=text],input[type=number],input[type=color]{
     width:100%;background:#090d10;color:var(--ink);border:1px solid var(--ligne2);
-    border-radius:7px;padding:8px 9px;font:inherit;font-size:12.5px;
+    border-radius:7px;padding:8px 10px;font:inherit;font-size:13px;
     transition:border-color .12s}
   select:hover,input[type=text]:hover,input[type=number]:hover{border-color:#36454f}
   select:focus,input[type=text]:focus,input[type=number]:focus{outline:none;
     border-color:var(--acc)}
   input[type=color]{height:36px;padding:3px;cursor:pointer}
-  .coche{display:flex;align-items:center;gap:9px;color:var(--dim);font-size:12px;
+  .coche{display:flex;align-items:center;gap:9px;color:var(--dim);font-size:13px;
     cursor:pointer}
   .coche input{width:16px;height:16px;accent-color:var(--acc);margin:0}
   .coche:hover{color:var(--ink)}
   button{background:#131a20;color:var(--ink);border:1px solid var(--ligne2);
-    border-radius:7px;padding:9px 13px;font:inherit;font-size:12.5px;
+    border-radius:7px;padding:9px 14px;font:inherit;font-size:13px;
     cursor:pointer;transition:border-color .12s,color .12s,background .12s}
   button:hover:not(:disabled){border-color:var(--acc);color:var(--acc)}
   button.fort{background:var(--acc);color:#04120a;border-color:var(--acc);
-    font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:12px;
+    font-weight:700;letter-spacing:.1em;text-transform:uppercase;font-size:12.5px;
     padding:12px 14px}
   button.fort:hover:not(:disabled){background:#63ff8d;color:#04120a}
   button:disabled{opacity:.38;cursor:default}
@@ -348,25 +358,26 @@ PAGE = r"""<!doctype html>
 
   /* ---------- onglets et profondeur ---------- */
   .onglets{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
-  .onglets button{padding:7px 12px;font-size:12px;border-radius:999px;
+  .onglets button{padding:7px 14px;font-size:12.5px;border-radius:999px;
     color:var(--dim)}
   .onglets button.on{border-color:var(--acc);color:var(--acc);
     background:rgba(61,255,114,.08)}
   .niveaux{display:flex;border:1px solid var(--ligne2);border-radius:999px;
     overflow:hidden}
-  .niveaux button{border:0;border-radius:0;padding:6px 13px;font-size:11.5px;
-    color:var(--dim);letter-spacing:.04em}
+  .niveaux button{border:0;border-radius:0;padding:6px 14px;font-size:12.5px;
+    color:var(--dim)}
   .niveaux button:hover:not(.on){color:var(--ink);background:#141b21}
   .niveaux button.on{background:var(--acc);color:#04120a;font-weight:700}
   .cache{display:none}
 
   /* ---------- depots ---------- */
   .drop{border:1px dashed var(--ligne2);border-radius:9px;padding:14px;
-    text-align:center;color:var(--faible);cursor:pointer;font-size:12px;
+    text-align:center;color:var(--faible);cursor:pointer;font-size:12.5px;
     transition:border-color .12s,color .12s,background .12s}
   .drop:hover{border-color:#3c4d57;color:var(--dim)}
   .drop.sur{border-color:var(--acc);color:var(--acc);background:rgba(61,255,114,.06)}
-  .drop b{display:block;color:var(--ink);font-size:13px;margin-bottom:2px}
+  .drop b{display:block;color:var(--ink);font-size:13.5px;margin-bottom:3px;
+    font-weight:600}
 
   /* ---------- apercu ---------- */
   #vue{position:sticky;top:64px}
@@ -379,14 +390,15 @@ PAGE = r"""<!doctype html>
   .jauge{height:3px;background:#121a1f;border-radius:2px;overflow:hidden;margin:9px 0 5px}
   .jauge i{display:block;height:100%;background:var(--acc);width:0;
     transition:width .2s}
-  .meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--faible);font-size:11px;
-    letter-spacing:.04em;margin-top:12px}
-  .meta b{color:var(--ink);font-weight:600}
-  .note{font-size:11px;color:var(--faible);margin:6px 0 0;min-height:1em}
+  .meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--faible);font-size:11.5px;
+    margin-top:12px}
+  .meta b{color:var(--ink);font-weight:600;font-family:var(--mono)}
+  .note{font-size:11.5px;color:var(--faible);margin:6px 0 0;min-height:1em;
+    font-family:var(--mono)}
   a.dl[hidden]{display:none}
   a.dl{display:inline-block;margin-top:10px;background:var(--acc);color:#04120a;
     padding:10px 14px;border-radius:7px;text-decoration:none;font-weight:700;
-    letter-spacing:.12em;text-transform:uppercase;font-size:12px}
+    letter-spacing:.1em;text-transform:uppercase;font-size:12.5px}
   a.dl:hover{background:#63ff8d}
 </style></head><body>
 
