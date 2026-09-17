@@ -52,6 +52,9 @@ SIMPLE = {
     "machine", "palette", "bg", "bgStrength", "taille", "presence", "neon",
     "split", "snare", "wave", "trail", "glitch", "punch", "punchOn", "title",
     "size", "fps", "quality", "curve", "start", "dur",
+    # le passage d'une machine a l'autre et l'eclat des touches jouees :
+    # ils accompagnent un reglage simple, ils doivent se voir avec lui
+    "passage", "midiForce",
 }
 REGLE = SIMPLE | {
     "trait", "bgColor", "bgClear", "bgAnim", "reflet", "tube", "nettete",
@@ -62,7 +65,7 @@ REGLE = SIMPLE | {
     "echo", "echoN", "echoDelay", "couleurs", "spectro",
     "cadence", "haloDoux", "poussiere", "flottement",
     "tranches", "tranchesOn", "stut", "stutOn", "kaleido", "kaleidoOn",
-    "scramble", "scrLen",
+    "scramble", "scrLen", "passageTurb", "midiOffset",
 }
 
 
@@ -370,6 +373,23 @@ PAGE = r"""<!doctype html>
   .niveaux button.on{background:var(--acc);color:#04120a;font-weight:700}
   .cache{display:none}
 
+  /* ---------- sequenceur de machines ----------
+     Une ligne par changement : « a [temps] [machine] [x] ». Sans colonnes,
+     chaque element prenait toute la largeur et une ligne faisait quatre
+     etages. */
+  .seq{margin:10px 0 2px}
+  .seq > label{display:block;color:var(--faible);font-size:11.5px;
+    letter-spacing:.04em;margin:2px 0 6px}
+  .seq .row{display:grid;align-items:center;gap:6px;margin-top:8px}
+  .seq .seqplus{grid-template-columns:1fr}
+  .seq .seqauto{grid-template-columns:1fr 70px auto}
+  .seq .seqrow{grid-template-columns:auto 84px 1fr auto}
+  .seq input,.seq select,.seq button{margin:0;padding:8px 9px;width:100%;
+    font-size:12.5px}
+  .seq .seqx{padding:7px 0;line-height:1}
+  .seq .unite{color:var(--faible);font-size:11.5px}
+  .seq .seqrow > .unite{text-align:right}
+
   /* ---------- depots ---------- */
   .drop{border:1px dashed var(--ligne2);border-radius:9px;padding:14px;
     text-align:center;color:var(--faible);cursor:pointer;font-size:12.5px;
@@ -471,6 +491,22 @@ PAGE = r"""<!doctype html>
       jpg, png, mp4, mov&hellip; ou cliquer</div>
     <input type="file" id="fichierFond" accept="image/*,video/*" hidden>
     <button id="retirerFond" style="margin-top:9px" hidden>retirer le fond</button>
+  </div>
+  <div class="bloc serre">
+    <h2>Melodie (fichier MIDI)</h2>
+    <div class="drop" id="midiDrop"><b>Deposer un fichier MIDI</b>
+      .mid, .midi &mdash; les vraies notes s'allument sur le clavier</div>
+    <input type="file" id="midifile" accept=".mid,.midi,audio/midi" hidden>
+    <div class="meta" id="midimeta" hidden>
+      <span>notes <b id="mi-n">-</b></span>
+      <span>etendue <b id="mi-e">-</b></span>
+      <span>calage <b id="mi-c">-</b></span>
+    </div>
+    <div id="midiReglages" hidden>
+      <div id="midiCurseurs"></div>
+      <button id="midiOte" style="margin-top:9px">oter la melodie</button>
+    </div>
+    <input type="hidden" id="midi">
   </div>
   <div class="bloc serre">
     <h2>Rendu</h2>
@@ -614,6 +650,10 @@ function reglages() {
   p.partsN = String(Math.round($('#partsN').value * $('#partsN').value));
   p.fallbackTitle = $('#title').placeholder || '';
   p.backdrop = fond;
+  // ces deux-la ne sont pas des curseurs : ils sont ecrits par le sequenceur
+  // de machines et par le depot de melodie
+  p.machines = $('#machines') ? $('#machines').value : '';
+  p.midi = $('#midi') ? $('#midi').value : '';
   return p;
 }
 function params() {
@@ -1029,10 +1069,45 @@ $('#aides').onclick = () => {
   const on = document.body.classList.toggle('aides');
   $('#aides').classList.toggle('on', on);
 };
+
+/* ---------- le sequenceur de machines et la melodie ----------
+   Le code est celui de la v1, ecrit une seule fois : les deux pages
+   n'appellent pas de la meme facon leur apercu et leur bandeau, d'ou ces
+   trois alias. */
+const _redessine = () => apercu();
+const _etat = (m, e) => etat(m, e);
+const _duree = () => duree;
+
+/* Le sequenceur se glisse sous le choix de la machine, et les deux curseurs
+   de la melodie rejoignent sa carte : ils sont extraits de la v1 comme tous
+   les autres, mais leur place est la, a cote du fichier. */
+(function ranger() {
+  const champMachine = document.querySelector('[data-champ="machine"]');
+  if (champMachine) {
+    const d = document.createElement('div');
+    d.className = 'seq';
+    d.innerHTML = '<label>puis, en cours de morceau</label>'
+      + '<div id="seqListe"></div>'
+      + '<div class="row seqplus">'
+      + '<button id="seqPlus">Ajouter un changement</button></div>'
+      + '<div class="row seqauto"><button id="seqAuto">Repartir toutes les</button>'
+      + '<input type="number" id="seqChaque" min="4" max="600" step="1" value="30">'
+      + '<span class="unite">s</span></div>'
+      + '<input type="hidden" id="machines">';
+    champMachine.insertAdjacentElement('afterend', d);
+  }
+  const cible = $('#midiCurseurs');
+  for (const id of ['midiForce', 'midiOffset']) {
+    const c = document.querySelector('[data-champ="' + id + '"]');
+    if (c && cible) cible.appendChild(c);
+  }
+})();
+/*__SEQ_MIDI__*/
 """
 
 PAGE = PAGE.replace("</script>\n</body></html>",
                     _SUITE + "\n</script>\n</body></html>")
+PAGE = PAGE.replace("/*__SEQ_MIDI__*/", S.JS_SEQ_MIDI)
 
 
 def page():

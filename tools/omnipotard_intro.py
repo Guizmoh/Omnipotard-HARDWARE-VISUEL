@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-17.30"
+VERSION = "2026-09-17.31"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -227,7 +227,21 @@ PRESETS = {
 AIDE = {
     "machine": "La machine dessinee. Chacune a ses organes : les pads de la "
                "MPC, les touches du MiniFreak, les declencheurs du Digitakt. "
-               "Les coups les allument de la meme facon.",
+               "Les coups les allument de la meme facon. C'est celle du debut "
+               "quand le sequenceur en fait venir d'autres.",
+    "passage": "Le temps que met une machine a se deformer jusqu'a devenir la "
+               "suivante. La deformation precede l'instant inscrit, de sorte "
+               "que la machine est bien posee quand cet instant arrive. A "
+               "zero, le changement est sec.",
+    "passageTurb": "L'ondulation du trace pendant la deformation. A zero les "
+                   "traits glissent proprement d'une forme a l'autre ; plus "
+                   "haut, ils serpentent comme un faisceau derange.",
+    "midiForce": "L'eclat des touches jouees par le fichier MIDI. A zero le "
+                 "fichier est charge mais rien ne s'allume.",
+    "midiOffset": "Avance ou retarde le fichier MIDI, en secondes, par "
+                  "rapport au calage trouve tout seul. A utiliser si les "
+                  "touches s'allument un peu avant ou un peu apres la "
+                  "melodie.",
     "preset": "Repose tous les curseurs sur un point de depart. Tout reste "
               "modifiable ensuite. « Mes reglages » sont les votres, gardes "
               "d'une fois sur l'autre.",
@@ -377,6 +391,8 @@ CHAMPS = {
     "nettete": "nettete", "step_div": "stepDiv",
     "taille": "taille", "presence": "presence",
     "neon": "neon", "reflet": "reflet", "tube": "tube", "bg_anim": "bgAnim",
+    "passage": "passage", "passage_turb": "passageTurb",
+    "midi_force": "midiForce", "midi_offset": "midiOffset",
     "wave_smooth": "waveSmooth", "trail": "trail", "glitch": "glitch",
     "punch": "punch", "punch_on": "punchOn",
     "shake_amp": "shake", "shake_on": "shakeOn",
@@ -1326,6 +1342,17 @@ def mf_noire(i):
     return x - l * 0.5, y0, x + l * 0.5, MF_CLAV[3]
 
 
+def mf_touches():
+    """Les 37 touches du clavier, rangees du grave a l'aigu.
+
+    Les ranger par abscisse suffit a les mettre dans l'ordre chromatique :
+    une noire est posee a cheval entre deux blanches, donc son bord gauche
+    tombe entre les leurs.
+    """
+    t = [mf_blanche(i) for i in range(22)] + [mf_noire(i) for i in range(15)]
+    return [t[i] for i in sorted(range(len(t)), key=lambda i: t[i][0])]
+
+
 MF_KNOBS = [(-1.330 + k * 0.158, 0.352) for k in range(8)]
 MF_KNOB_R = 0.062
 MF_MACRO = (1.216, 0.236)
@@ -1521,6 +1548,11 @@ MACHINES = {
         "pas": [step_rect(k) for k in range(16)],
         "potards": [(cx, cy, QLINK_R) for cx, cy in QLINK],
         "bande": STRIP,
+        # ce qu'une note du fichier MIDI allume, du grave a l'aigu, et la
+        # hauteur de la premiere. Sur une MPC les pads partent du do grave,
+        # c'est la note 36 depuis toujours.
+        "touches": [pad_rect(k // 4, k % 4) for k in range(16)],
+        "note0": 36,
         "quoi": "l'originale : seize pads, bande de pas, grand ecran tactile",
     },
     "minifreak": {
@@ -1534,6 +1566,10 @@ MACHINES = {
         "pas": [mf_blanche(int(i * 21 / 15.0)) for i in range(16)],
         "potards": [(cx, cy, MF_KNOB_R) for cx, cy in MF_KNOBS],
         "bande": MF_STRIPS[0],
+        # les 37 touches, une par demi-ton : c'est la machine qui joue
+        # vraiment la melodie
+        "touches": mf_touches(),
+        "note0": 36,
         "quoi": "clavier 37 touches : les notes s'allument, les pas courent "
                 "le long des blanches",
     },
@@ -1547,6 +1583,8 @@ MACHINES = {
         "pas": [dk_trig(k) for k in range(16)],
         "potards": [(cx, cy, DK_ENC_R) for cx, cy in DK_ENC],
         "bande": None,
+        "touches": [dk_trig(k) for k in range(16)],
+        "note0": 36,
         "quoi": "seize declencheurs qui font pads et pas a la fois, huit "
                 "encodeurs",
     },
@@ -2425,7 +2463,8 @@ class Renderer:
     def __init__(self, w, h, fps, duration, audio, curve=True, seed=7,
                  palette="vert", subtitle=SUB_TXT, bg=None, bg_color=None,
                  bg_strength=1.0, bg_clear=0.55, bg_anim=0.0, nettete=1.0,
-                 machine="mpc", machines=None, passage=1.9, passage_turb=1.0):
+                 machine="mpc", machines=None, passage=1.9, passage_turb=1.0,
+                 midi=None, midi_offset=0.0, midi_transpose=0, midi_force=1.0):
         self.W, self.H = w, h
         self.fps = fps
         self.dur = duration
@@ -2509,6 +2548,16 @@ class Renderer:
         self._plan = None                    # plan intermediaire, en passage
         self.ecran = self.mach["ecran"]
         self.mpc = self.mach["build"]()
+
+        # ---- le fichier MIDI, quand il y en a un : la vraie melodie du
+        # morceau, note par note. Quatre colonnes — debut, fin, hauteur,
+        # force — et rien d'autre : c'est tout ce qu'une touche a besoin de
+        # savoir pour s'allumer au bon moment.
+        self.midi = (np.asarray(midi, dtype=np.float64).reshape(-1, 4)
+                     if midi is not None and len(midi) else None)
+        self.midi_offset = float(midi_offset)
+        self.midi_transpose = int(midi_transpose)
+        self.midi_force = float(midi_force)
         (self.tP, self.tN, self.tkind,
          self.ts, self.tlen) = build_title_curve("OMNIPOTARD", TITLE_H, 0.0)
         tx = self.tP[self.tkind == TRAIT][:, 0]
@@ -2651,6 +2700,45 @@ class Renderer:
         for pad, val in zip(self.ev_pad[m], v):
             if val > 0.02:
                 out[int(pad)] = max(out.get(int(pad), 0.0), float(val))
+        return out
+
+    def notes_midi(self, t, touches, note0):
+        """Les touches allumees a l'instant t, avec leur intensite.
+
+        Une note tient tant qu'elle est tenue, puis retombe en un cinquieme de
+        seconde ; l'attaque est plus vive que la tenue, sans quoi une note
+        longue et une note repetee se ressemblent.
+
+        Une hauteur qui tombe hors du clavier y est ramenee par octaves : le
+        dessin garde la note, il change seulement d'octave. C'est ce qui
+        permet a seize pads de rendre une melodie ecrite sur cinq octaves.
+        """
+        if self.midi is None or not len(self.midi) or self.midi_force <= 0.001:
+            return {}
+        mt = t + self.midi_offset
+        deb, fin, haut, force = (self.midi[:, 0], self.midi[:, 1],
+                                 self.midi[:, 2], self.midi[:, 3])
+        vus = (mt >= deb) & (mt < fin + 0.30)
+        if not np.any(vus):
+            return {}
+        deb, fin, haut, force = deb[vus], fin[vus], haut[vus], force[vus]
+        v = force * (0.60 + 0.55 * np.exp(-(mt - deb) * 11.0))
+        v = np.where(mt < fin, v, v * np.exp(-(mt - fin) * 9.0))
+        v *= self.midi_force
+
+        n = len(touches)
+        k = haut.astype(np.int64) + self.midi_transpose - int(note0)
+        bas = k < 0
+        if np.any(bas):
+            k = np.where(bas, k + 12 * ((-k + 11) // 12), k)
+        trop = k >= n
+        if np.any(trop):
+            k = np.where(trop, k - 12 * ((k - n) // 12 + 1), k)
+        garde = (k >= 0) & (k < n) & (v > 0.02)
+        out = {}
+        for kk, vv in zip(k[garde], v[garde]):
+            kk = int(kk)
+            out[kk] = max(out.get(kk, 0.0), float(vv))
         return out
 
     def stutter_time(self, t):
@@ -2971,6 +3059,10 @@ class Renderer:
     _plan = None
     _cle_mach = None
     _passages = None
+    midi = None
+    midi_offset = 0.0
+    midi_transpose = 0
+    midi_force = 1.0
     ecran = SCREEN
     taille = 1.0
     presence = 1.0
@@ -3533,6 +3625,31 @@ class Renderer:
             mk = float(self.morph_at(mach["pads"][k][0], sweep_x))
             if mk > 0.4 and v > 0.05:
                 self._dyn(beam, mach["remplir"](k), 1.05 * v * mk, collapse, melt, t)
+
+        # ---- les notes du fichier MIDI : la touche jouee s'allume, contour
+        # compris. On la redessine plutot que de lui donner une etiquette a
+        # elle : sur le clavier les touches sont deja groupees par seize pour
+        # les coups de batterie, et il ne faut pas defaire ce groupement.
+        #
+        # Pendant un passage il n'y a pas de touches : les deux machines n'en
+        # ont pas le meme nombre, et une note tomberait n'importe ou sur une
+        # facade en train de se deformer.
+        touches = mach.get("touches")
+        if touches is not None and self.midi is not None:
+            for k, v in self.notes_midi(t, touches, mach.get("note0", 36)).items():
+                r = touches[k]
+                mk = float(self.morph_at(r[0], sweep_x))
+                if mk <= 0.4:
+                    continue
+                # le nombre de lignes suit la hauteur de la touche : quatre
+                # sur un pad de MPC, neuf sur une blanche de clavier, qui est
+                # trois fois plus haute. Un nombre fixe donnait soit un pad
+                # sature, soit une touche a peine teintee.
+                lignes = int(min(9, max(3, round((r[3] - r[1]) / 0.045))))
+                self._dyn(beam, _remplir(r, lignes, 0.010), 1.35 * v * mk,
+                          collapse, melt, t)
+                self._dyn(beam, rrect_pts(*r, r=0.012), 1.70 * v * mk,
+                          collapse, melt, t)
 
         # bande de pas : le pas courant s'allume
         if live and 0 <= step < len(mach["pas"]):

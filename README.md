@@ -83,6 +83,12 @@ refaire à la main :
 
 ## La machine
 
+Trois machines sont dessinées : la **MPC Live III**, le **MiniFreak** (clavier
+37 touches) et le **Digitakt II** (16 déclencheurs). Elles se jouent de la même
+façon — les coups du morceau allument leurs organes — et elles peuvent se
+**succéder dans une même vidéo** : le tracé de l'une se déforme jusqu'à devenir
+celui de l'autre (voir *Séquenceur de machines*).
+
 Disposition relevée sur une photo de dessus de la **MPC Live III**, simplifiée :
 potard de volume au coin haut gauche, bande de 16 boutons de step-séquenceur sur
 l'arête haute, touch strip vertical sur l'arête gauche, grille de 16 pads MPCe
@@ -415,6 +421,58 @@ vidéos) reste dans `out/studio/`.
 Rien ne sort de la machine : le serveur n'écoute que sur `127.0.0.1`, il n'y a
 ni bibliothèque web ni CDN — la page est servie telle quelle, et les seules
 dépendances sont celles du reste du projet (numpy et ffmpeg).
+
+### Séquenceur de machines
+
+La carte **Machine** choisit celle du début, puis on ajoute des changements :
+une ligne par instant, « à 0:32 → digitakt ». Le bouton **Répartir toutes les
+N s** remplit la liste d'un coup pour tout le morceau.
+
+Entre deux machines, le tracé se déforme : les pads glissent sur les
+déclencheurs, les encodeurs sur les potards. La déformation **précède**
+l'instant inscrit — à « 0:32 digitakt » avec 1,9 s de déformation, elle
+commence à 0:30 et le Digitakt est bien posé à 0:32. Deux curseurs la règlent :
+sa **durée** et son **ondulation** (à zéro, les traits glissent proprement ;
+plus haut, ils serpentent).
+
+Les noms des machines ne se déforment pas : celui de la première s'efface sur
+place pendant que celui de la seconde se lève à la sienne. Une lettre qui se
+déforme en une autre ne se lit plus — elle passe par de la bouillie.
+
+En ligne de commande :
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 \
+  --machines "0=mpc, 0:32=digitakt, 1:05=minifreak" --passage 1.9
+```
+
+Un rendu à machine unique ne paie rien : le tracé n'est refait que lorsque la
+machine change.
+
+### Mélodie : un fichier MIDI
+
+Déposer un **.mid** dans la carte *Mélodie* fait jouer les vraies notes du
+morceau par la machine : sur le MiniFreak c'est la touche exacte qui s'allume,
+sur la MPC et le Digitakt le pad correspondant.
+
+Le fichier est **calé tout seul** sur le morceau. Le studio ne compare pas des
+sons mais des instants d'attaque : ceux du fichier MIDI d'un côté, ceux relevés
+dans l'audio de l'autre, et il cherche le glissement qui en fait coïncider le
+plus. La carte affiche le décalage trouvé et s'il est sûr ; le curseur
+**avance / retard** ne sert que s'il tombe un peu à côté.
+
+Une note trop grave ou trop aiguë pour le clavier y est ramenée par octaves :
+la mélodie garde ses notes, elle change seulement d'octave. C'est ce qui permet
+à seize pads de rendre une mélodie écrite sur cinq octaves.
+
+Les formats 0 et 1 sont lus, avec leur carte des tempos (un morceau dont le
+tempo change en route reste en place). Rien à installer : le lecteur tient dans
+`tools/midi.py`.
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --machine minifreak \
+  --midi melodie.mid --midi-force 1.2
+```
 
 ### Couleur
 

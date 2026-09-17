@@ -38,13 +38,15 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mpc_performance import (  # noqa: E402
     analyze, frame_performance, probe_duration, render_video, _renderer,
-    compute_spectro,
+    compute_spectro, preparer_midi,
 )
+import midi                                                   # noqa: E402
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
     VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs, MACHINES,
     NOMS_MACHINES,
     compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
+    lire_plan_machines,
     backdrop_quality, PRESETS, CHAMPS, AIDE, COMPTE, QUALITES, pick_split_times,
 )
 
@@ -72,12 +74,16 @@ def version():
 WORKDIR = os.path.join(ROOT, "out", "studio")
 UPLOADS = os.path.join(WORKDIR, "morceaux")
 FONDS = os.path.join(WORKDIR, "fonds")        # images et videos de fond
+MELODIES = os.path.join(WORKDIR, "melodies")  # fichiers MIDI
 OUTDIR = WORKDIR
 MO = 1024 * 1024
 MAX_UPLOAD = 220 * MO                   # un morceau, pas une discotheque
 # Une video de telephone pese des centaines de megaoctets, et une video de
 # fond est rarement courte : la limite des morceaux n'a pas de sens pour elle.
 MAX_FOND = 2048 * MO
+# un fichier MIDI est minuscule : le plus gros qu'on croise fait quelques
+# centaines de kilo-octets. Au-dela, ce n'en est pas un.
+MAX_MIDI = 16 * MO
 BLOC = 1 * MO                           # on lit et on ecrit par blocs
 
 
@@ -121,6 +127,20 @@ def safe_name(name):
     return name[:120]
 
 
+def _melodie(nom):
+    """Le chemin d'une melodie deposee, ou rien.
+
+    Le nom vient de la page : on le repasse par `safe_name` et on ne sort pas
+    du dossier des melodies, pour qu'un nom tordu ne puisse pas designer un
+    fichier ailleurs sur le disque.
+    """
+    nom = str(nom or "").strip()
+    if not nom:
+        return ""
+    chemin = os.path.join(MELODIES, safe_name(nom))
+    return chemin if os.path.exists(chemin) else ""
+
+
 def _dans(valeur, permises, defaut):
     """Un nom venu de la page, ramene a ceux que le moteur connait.
 
@@ -151,6 +171,16 @@ def look_from(q):
         "split_on": _dans(q.get("splitOn"), DECLENCHEURS, "grosse caisse"),
         "glitch": float(q.get("glitch", 1.0)),
         "machine": _dans(q.get("machine"), NOMS_MACHINES, "mpc"),
+        # le sequenceur de machines, et la deformation qui mene de l'une a
+        # l'autre. Le plan est relu par le moteur, qui jette ce qu'il ne
+        # comprend pas : la page peut donc l'ecrire comme elle veut.
+        "machines": str(q.get("machines", "") or ""),
+        "passage": float(q.get("passage", 1.9)),
+        "passage_turb": float(q.get("passageTurb", 1.0)),
+        # la melodie : un nom de fichier depose dans out/studio/melodies
+        "midi": _melodie(q.get("midi")),
+        "midi_force": float(q.get("midiForce", 1.0)),
+        "midi_offset": float(q.get("midiOffset", 0.0)),
         "nettete": float(q.get("nettete", 1.0)),
         "taille": float(q.get("taille", 1.0)),
         "presence": float(q.get("presence", 1.0)),
@@ -400,6 +430,18 @@ class Studio:
             raise KeyError("morceau inconnu (relancez l'envoi)")
         return t
 
+    def info_courante(self):
+        """L'analyse du dernier morceau depose, s'il y en a un.
+
+        Sert au depot d'une melodie : le calage se cherche sur les attaques du
+        morceau, donc il faut un morceau. Sans lui on accepte quand meme le
+        fichier — on ne peut simplement pas encore dire de combien caler.
+        """
+        with self.lock:
+            if not self.tracks:
+                return None
+            return list(self.tracks.values())[-1]["info"]
+
     # ---- apercu
     def still(self, tid, t, q, w, h):
         """Une image, avec les reglages du moment.
@@ -434,8 +476,11 @@ class Studio:
         with self.lock:
             r = self.renderers.get(key)
         if r is None:
+            # la melodie est posee plus bas, une fois pour toutes : la lire
+            # et la caler a chaque apercu couterait une seconde par curseur
+            # deplace
             r = _renderer(tr["info"], w, h, 30, 7, bool(q.get("curve", True)),
-                          palette, kw)
+                          palette, dict(kw, midi=""))
             with self.lock:
                 if len(self.renderers) > 2:        # ne pas garder tout l'historique
                     self.renderers.pop(next(iter(self.renderers)))
@@ -459,17 +504,44 @@ class Studio:
                 "coupure", "coupure_on", "tapestop", "tapestop_on",
                 "cadence", "poussiere", "flottement", "halo_doux",
                 "echo", "echo_n", "echo_delay", "couleurs", "step_div",
-                "presence", "neon", "reflet", "tube")
+                "presence", "neon", "reflet", "tube",
+                "passage", "passage_turb", "midi_force")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
                         "backdrop_sharp", "spectro", "nettete", "taille",
-                        "machine")
+                        "machine",
+                        # le plan de machines et la melodie se posent a la
+                        # main : l'un se relit, l'autre se lit dans un fichier
+                        "machines", "midi", "midi_offset")
         # La taille se pose avant l'allure : c'est elle qui decide du creux
         # que la texture garde derriere la machine, et set_look le recalcule.
         r.taille = float(kw["taille"])
         r.set_look(palette, **{k: v for k, v in kw.items() if k not in APART})
         for k in POSE:
             setattr(r, k, kw[k])
+        # Le sequenceur de machines : le plan se relit a chaque apercu, il ne
+        # coute rien. On oublie ensuite la machine posee, pour que le moteur
+        # la repose selon le nouveau plan a l'instant regarde.
+        r.plan_mach = lire_plan_machines(kw["machines"], kw["machine"],
+                                         tr["info"]["duration"])
+        r._cle_mach = None
+        r.poser_machine(float(t))
+
+        # La melodie : lue et calee une seule fois par fichier. Le decalage de
+        # la page s'ajoute a celui trouve tout seul.
+        chemin = kw["midi"]
+        if getattr(r, "_midi_de", "\0") != chemin:
+            r._midi_de = chemin
+            r.midi, r._midi_auto = None, 0.0
+            if chemin:
+                _, lu = preparer_midi(tr["info"], {"midi": chemin})
+                if lu and lu.get("notes"):
+                    r.midi = np.asarray(midi.lire_notes(chemin),
+                                        dtype=np.float64).reshape(-1, 4)
+                    r._midi_auto = float(lu.get("cale", 0.0))
+                    r.midi_transpose = int(lu.get("transpose", 0))
+        r.midi_offset = r._midi_auto + float(kw["midi_offset"])
+
         # Le spectrogramme est calcule a partir du son, pas repose comme une
         # couleur : on ne le refait que lorsqu'on l'allume pour la premiere fois.
         if kw["spectro"] > 0.01 and getattr(r, "spec", None) is None:
@@ -910,6 +982,33 @@ class Handler(BaseHTTPRequestHandler):
                     return self._fail(e)
                 return self._json({"name": name, "video": is_video(path)})
 
+            if u.path == "/midi":
+                os.makedirs(MELODIES, exist_ok=True)
+                name = safe_name(self.headers.get("X-Filename"))
+                path = os.path.join(MELODIES, name)
+                if not self._recevoir(path, MAX_MIDI):
+                    return self._fail("ce fichier est trop gros pour un MIDI "
+                                      "(%d Mo au plus)" % (MAX_MIDI // MO), 413)
+                try:
+                    notes = midi.lire_notes(path)
+                except Exception as e:                    # noqa: BLE001
+                    os.remove(path)
+                    return self._fail("fichier MIDI illisible : %s" % e)
+                if not notes:
+                    os.remove(path)
+                    return self._fail("ce fichier MIDI ne contient aucune note")
+                rep = dict(midi.resume(notes), name=name)
+                rep["grave"] = midi.nom_note(rep["grave"])
+                rep["aigu"] = midi.nom_note(rep["aigu"])
+                # le calage ne se calcule que si un morceau est deja depose :
+                # c'est sur ses attaques qu'il se cherche
+                info = STUDIO.info_courante()
+                if info is not None:
+                    _, cale = preparer_midi(info, {"midi": path})
+                    rep["cale"] = round(cale.get("cale", 0.0), 3)
+                    rep["nettete"] = round(cale.get("nettete", 0.0), 2)
+                return self._json(rep)
+
             if u.path == "/reglages":
                 corps = self._corps()
                 if corps is None:
@@ -947,6 +1046,150 @@ class Handler(BaseHTTPRequestHandler):
 # --------------------------------------------------------------------------
 #  La page
 # --------------------------------------------------------------------------
+
+# Le sequenceur de machines et le depot de melodie, ecrits une seule fois :
+# les deux pages du studio les montrent, et deux copies auraient fini par
+# diverger. Chacune fournit `_redessine`, `_etat` et `_duree`, qui ne portent
+# pas le meme nom d'une page a l'autre.
+JS_SEQ_MIDI = r"""
+/* ---------- sequenceur de machines ----------
+
+   Le plan s'ecrit « 0:32=digitakt, 1:05=minifreak » dans un champ cache, que
+   params() envoie comme n'importe quel reglage. Les lignes ci-dessous ne sont
+   qu'une facon commode de l'ecrire : elles n'ont pas d'identifiant a elles,
+   pour que la page n'ait qu'un seul reglage a tenir. */
+let SEQ = [];
+
+function seqMachines() {
+  return [...$('#machine').options].map(o => o.value);
+}
+
+function seqTemps(v) {
+  v = Math.max(0, Math.round(v));
+  return Math.floor(v / 60) + ':' + String(v % 60).padStart(2, '0');
+}
+
+function seqLire(txt) {
+  const noms = seqMachines();
+  return String(txt || '').split(',').map(b => {
+    const m = b.trim().split('=');
+    if (m.length < 2) return null;
+    const t = m[0].trim().split(':');
+    const s = t.length > 1 ? (+t[0] || 0) * 60 + (+t[1] || 0) : (+t[0] || 0);
+    return noms.includes(m[1].trim()) ? {t: s, m: m[1].trim()} : null;
+  }).filter(Boolean);
+}
+
+function seqEcrire() {
+  SEQ.sort((a, b) => a.t - b.t);
+  $('#machines').value = SEQ.length
+    ? '0:00=' + $('#machine').value + ', '
+      + SEQ.map(e => seqTemps(e.t) + '=' + e.m).join(', ')
+    : '';
+}
+
+function seqDessine() {
+  const noms = seqMachines(), l = $('#seqListe');
+  l.innerHTML = '';
+  SEQ.forEach((e, i) => {
+    const d = document.createElement('div');
+    d.className = 'row seqrow';
+    d.innerHTML = '<span class="unite">a</span>'
+      + '<input type="text" class="seqt" value="' + seqTemps(e.t) + '">'
+      + '<select class="seqm">'
+      + noms.map(n => '<option value="' + n + '"'
+                 + (n === e.m ? ' selected' : '') + '>' + n + '</option>').join('')
+      + '</select><button class="ghost seqx">&times;</button>';
+    d.querySelector('.seqt').onchange = ev => {
+      const t = ev.target.value.trim().split(':');
+      SEQ[i].t = t.length > 1 ? (+t[0] || 0) * 60 + (+t[1] || 0) : (+t[0] || 0);
+      seqEcrire(); seqDessine(); _redessine();
+    };
+    d.querySelector('.seqm').onchange = ev => {
+      SEQ[i].m = ev.target.value; seqEcrire(); _redessine();
+    };
+    d.querySelector('.seqx').onclick = () => {
+      SEQ.splice(i, 1); seqEcrire(); seqDessine(); _redessine();
+    };
+    l.appendChild(d);
+  });
+  if (!SEQ.length) {
+    l.innerHTML = '<p class="hint" style="margin:2px 0 6px">Une seule machine '
+      + 'du debut a la fin. Ajoutez un changement pour qu\'elle se deforme '
+      + 'en une autre.</p>';
+  }
+}
+
+function seqPose(txt) {
+  SEQ = seqLire(txt).filter((e, i, a) => e.t > 0 || i > 0);
+  // la premiere entree du plan est la machine du debut : elle a son propre
+  // choix, elle ne prend pas une ligne de plus
+  const p = seqLire(txt);
+  if (p.length && p[0].t <= 0) { $('#machine').value = p[0].m; SEQ = p.slice(1); }
+  seqEcrire(); seqDessine();
+}
+
+$('#seqPlus').onclick = () => {
+  const dernier = SEQ.length ? SEQ[SEQ.length - 1].t : 0;
+  const noms = seqMachines();
+  const prec = SEQ.length ? SEQ[SEQ.length - 1].m : $('#machine').value;
+  const suiv = noms[(noms.indexOf(prec) + 1) % noms.length];
+  SEQ.push({t: Math.round(dernier + (_duree() ? Math.max(8, _duree() / 6) : 30)),
+            m: suiv});
+  seqEcrire(); seqDessine(); _redessine();
+};
+
+$('#seqAuto').onclick = () => {
+  const chaque = Math.max(4, +$('#seqChaque').value || 30);
+  const noms = seqMachines(), fin = _duree() || chaque * 4;
+  SEQ = [];
+  let i = noms.indexOf($('#machine').value);
+  for (let t = chaque; t < fin - 1; t += chaque) {
+    i = (i + 1) % noms.length;
+    SEQ.push({t: Math.round(t), m: noms[i]});
+  }
+  seqEcrire(); seqDessine(); _redessine();
+};
+
+/* ---------- melodie : le fichier MIDI ---------- */
+const mdrop = $('#midiDrop'), mfile = $('#midifile');
+mdrop.onclick = () => mfile.click();
+mdrop.ondragover = e => { e.preventDefault(); mdrop.classList.add('over'); };
+mdrop.ondragleave = () => mdrop.classList.remove('over');
+mdrop.ondrop = e => { e.preventDefault(); mdrop.classList.remove('over');
+                      if (e.dataTransfer.files[0]) sendMidi(e.dataTransfer.files[0]); };
+mfile.onchange = () => mfile.files[0] && sendMidi(mfile.files[0]);
+
+function midiOte() {
+  $('#midi').value = '';
+  $('#midimeta').hidden = true;
+  $('#midiReglages').hidden = true;
+  mdrop.innerHTML = '<b>Deposer un fichier MIDI</b>.mid, .midi<br>'
+    + 'ou cliquer pour choisir';
+}
+$('#midiOte').onclick = () => { midiOte(); _redessine(); };
+
+async function sendMidi(f) {
+  try {
+    const j = await deposer('/midi', f, 'de la melodie');
+    $('#midi').value = j.name;
+    $('#mi-n').textContent = j.notes;
+    $('#mi-e').textContent = j.grave + ' \u2192 ' + j.aigu;
+    $('#mi-c').textContent = (j.cale === null || j.cale === undefined)
+      ? 'depose le morceau d\'abord'
+      : (j.cale >= 0 ? '+' : '') + j.cale.toFixed(2) + ' s'
+        + (j.nettete >= 2 ? ' (sur)' : j.nettete >= 1.3 ? ' (probable)'
+                                                        : ' (rien trouve)');
+    $('#midimeta').hidden = false;
+    $('#midiReglages').hidden = false;
+    mdrop.innerHTML = '<b>' + j.name + '</b>cliquer pour changer de melodie';
+    _etat(j.notes + ' notes lues dans ' + j.name);
+    _redessine();
+  } catch (e) { _etat('melodie refusee : ' + e.message, true); }
+}
+
+"""
+
 
 PAGE = r"""<!doctype html>
 <html lang="fr"><head><meta charset="utf-8">
@@ -1021,6 +1264,21 @@ PAGE = r"""<!doctype html>
   .bar i{display:block;height:100%;background:var(--acc);width:0;transition:.3s}
   .err{color:var(--bad)}
   .hint{color:var(--dim);font-size:11px;margin-top:8px}
+  /* Le sequenceur de machines : une ligne par changement.
+     Toutes ces regles sont ecrites « .seq X » et non « X » : une regle a deux
+     classes l'emporte sur une regle a une seule, et « .seq .row » ecrasait
+     sinon les colonnes de chaque ligne — qui se retrouvait a trois colonnes
+     pour quatre elements, le bouton d'effacement tombant a la ligne. */
+  .seq{margin:10px 0 4px}
+  .seq .row{align-items:center;gap:6px;margin-top:8px}
+  .seq .seqplus{grid-template-columns:1fr}
+  .seq .seqauto{grid-template-columns:1fr 72px auto}
+  .seq .seqrow{grid-template-columns:auto 84px 1fr auto;margin-top:6px}
+  .seq input,.seq select,.seq button{margin:0;padding:8px 9px}
+  .seq .seqx{padding:7px 11px;line-height:1}
+  .seq .unite{color:var(--dim);font-size:11px;letter-spacing:.06em}
+  /* « hidden » ne coupe rien des qu'une autre regle donne un display */
+  #midimeta[hidden], #midiReglages[hidden]{display:none}
   a.dl{display:block;text-align:center;background:var(--acc);color:#04180c;
     padding:10px;border-radius:5px;text-decoration:none;font-weight:700;
     letter-spacing:.1em;text-transform:uppercase}
@@ -1050,8 +1308,67 @@ PAGE = r"""<!doctype html>
 
   <div class="card">
     <h2>Machine</h2>
-    <label for="machine">la machine dessinee</label>
+    <label for="machine">la machine du debut</label>
     <select id="machine"></select>
+
+    <div class="seq" id="seqBloc">
+      <label>puis, en cours de morceau</label>
+      <div id="seqListe"></div>
+      <div class="row seqplus">
+        <button class="ghost" id="seqPlus">Ajouter un changement</button>
+      </div>
+      <div class="row seqauto">
+        <button class="ghost" id="seqAuto">Repartir toutes les</button>
+        <input type="number" id="seqChaque" min="4" max="600" step="1" value="30">
+        <span class="unite">s</span>
+      </div>
+      <input type="hidden" id="machines">
+    </div>
+
+    <label for="passage">duree de la deformation &mdash;
+      <span id="v-psg">1.90</span> s</label>
+    <input type="range" id="passage" min="0" max="6" step="0.1" value="1.9">
+    <label for="passageTurb">ondulation pendant la deformation &mdash;
+      <span id="v-psgt">1.00</span></label>
+    <input type="range" id="passageTurb" min="0" max="2.5" step="0.05" value="1">
+    <p class="hint">Le trace d'une machine se deforme jusqu'a devenir celui de
+      la suivante : les pads glissent sur les declencheurs, les encodeurs sur
+      les potards. Les noms, eux, ne se deforment pas &mdash; ils se croisent
+      sur place, parce qu'une lettre qui se deforme en une autre ne se lit
+      plus.<br>
+      La deformation <b>precede</b> l'instant inscrit : a « 0:32 digitakt »
+      avec 1,9 s de deformation, elle commence a 0:30 et le Digitakt est bien
+      pose a 0:32.</p>
+  </div>
+
+  <div class="card">
+    <h2>Melodie (fichier MIDI)</h2>
+    <div class="drop" id="midiDrop">
+      <b>Deposer un fichier MIDI</b>.mid, .midi<br>ou cliquer pour choisir
+    </div>
+    <input type="file" id="midifile" accept=".mid,.midi,audio/midi" hidden>
+    <div class="meta" id="midimeta" hidden>
+      <span>notes <b id="mi-n">-</b></span>
+      <span>etendue <b id="mi-e">-</b></span>
+      <span>calage <b id="mi-c">-</b></span>
+    </div>
+    <div id="midiReglages" hidden>
+      <label for="midiForce">eclat des touches jouees &mdash;
+        <span id="v-mif">1.00</span></label>
+      <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1">
+      <label for="midiOffset">avance / retard &mdash;
+        <span id="v-mio">0.00</span> s</label>
+      <input type="range" id="midiOffset" min="-4" max="4" step="0.02" value="0">
+      <button class="ghost" id="midiOte">Oter ce fichier</button>
+    </div>
+    <input type="hidden" id="midi">
+    <p class="hint">Les vraies notes du morceau, une par une : sur le
+      MiniFreak c'est la touche exacte qui s'allume, sur la MPC et le Digitakt
+      le pad correspondant. Le fichier est <b>cale tout seul</b> sur les
+      attaques du morceau ; le curseur d'avance ne sert que si le calage tombe
+      un peu a cote.<br>
+      Une note trop grave ou trop aigue pour le clavier y est ramenee par
+      octaves : la melodie garde ses notes, elle change seulement d'octave.</p>
   </div>
 
   <div class="card">
@@ -1506,6 +1823,10 @@ function params() {
   const p = new URLSearchParams({
     track, t: $('#scrub').value,
     machine: $('#machine').value,
+    machines: $('#machines').value,
+    passage: $('#passage').value, passageTurb: $('#passageTurb').value,
+    midi: $('#midi').value,
+    midiForce: $('#midiForce').value, midiOffset: $('#midiOffset').value,
     palette: $('#palette').value, trait: $('#trait').value,
     bg: $('#bg').value, bgColor: $('#bgColor').value,
     bgStrength: $('#bgStrength').value, bgClear: $('#bgClear').value,
@@ -1762,6 +2083,12 @@ function deposer(url, f, quoi) {
   });
 }
 
+/* la v1 nomme ainsi son apercu, son bandeau et la duree du morceau */
+const _redessine = () => shot();
+const _etat = (m, e) => setStatus(m, e);
+const _duree = () => duration;
+/*__SEQ_MIDI__*/
+
 async function sendBackdrop(f) {
   try {
     const j = await deposer('/backdrop', f, 'du fond');
@@ -1772,6 +2099,10 @@ async function sendBackdrop(f) {
     shot();
   } catch (e) { setStatus('fond refuse : ' + e.message, true); }
 }
+$('#passage').oninput = e => { $('#v-psg').textContent = (+e.target.value).toFixed(2); shot(); };
+$('#passageTurb').oninput = e => { $('#v-psgt').textContent = (+e.target.value).toFixed(2); shot(); };
+$('#midiForce').oninput = e => { $('#v-mif').textContent = (+e.target.value).toFixed(2); shot(); };
+$('#midiOffset').oninput = e => { $('#v-mio').textContent = (+e.target.value).toFixed(2) + ' s'; shot(); };
 $('#title').oninput  = shot;
 $('#bgStrength').oninput = e => { $('#v-str').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#bgClear').oninput   = e => { $('#v-clr').textContent = (+e.target.value).toFixed(2); shot(); };
@@ -2000,7 +2331,8 @@ fetch('/config').then(r => r.json())
     $('#machine').innerHTML = (c.machines || []).map(
       m => '<option value="' + m.cle + '">' + m.nom + ' \u2014 ' + m.quoi
            + '</option>').join('');
-    $('#machine').onchange = shot;
+    $('#machine').onchange = () => { seqEcrire(); seqDessine(); shot(); };
+    seqPose('');
     QUALITES = c.qualites || {};
     $('#quality').innerHTML = Object.keys(QUALITES).map(
       k => '<option value="' + k + '">' + k + '</option>').join('');
@@ -2155,6 +2487,10 @@ function setStatus(t, bad) {
 </script>
 </body></html>
 """
+
+# Le sequenceur et le depot de melodie sont poses a leur place dans la page.
+PAGE = PAGE.replace("/*__SEQ_MIDI__*/", JS_SEQ_MIDI)
+
 
 
 def check_deps():

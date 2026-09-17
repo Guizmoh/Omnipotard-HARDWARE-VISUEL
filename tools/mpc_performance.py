@@ -44,6 +44,7 @@ from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     compute_spectro, PRESETS, QUALITES, APERCU, apercu_possible,
     MACHINES, NOMS_MACHINES,
 )
+import midi as midi_fichier          # noqa: E402 -- lecteur de fichiers MIDI
 
 
 def probe_duration(path):
@@ -163,7 +164,8 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               backdrop=None, backdrop_strength=1.00,
                               backdrop_clear=0.28, screen_dim=0.40,
                               backdrop_sharp=0.37, taille=1.0, presence=1.0,
-                              neon=1.0, reflet=0.5, tube=0.0, **bgkw):
+                              neon=1.0, reflet=0.5, tube=0.0,
+                              midi_force=1.0, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
     # la taille se pose avant tout le reste : le creux de la texture et celui
@@ -171,6 +173,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.set_taille(taille)
     r.presence = float(presence)
     r.neon, r.reflet, r.tube = float(neon), float(reflet), float(tube)
+    r.midi_force = float(midi_force)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
     r.glitch = float(glitch)
@@ -363,12 +366,61 @@ def analyze(music, start=0.0, duration=None):
             "_audio": audio, "_phi": phi}
 
 
+def preparer_midi(info, reglages):
+    """Lit le fichier MIDI et le cale sur le morceau.
+
+    Le calage se fait ici, une seule fois, dans le processus principal : les
+    taches de rendu recoivent les notes deja placees et toutes le meme
+    decalage. Le faire chacune de son cote serait plus lent et, si le calage
+    hesitait entre deux instants, elles pourraient ne pas choisir le meme.
+
+    Renvoie le dictionnaire de reglages, et y ajoute `midi_resume` : de quoi
+    dire a la page ce qui a ete lu et de combien on a cale.
+    """
+    reglages = dict(reglages)
+    chemin = reglages.pop("midi", None) or None
+    cale = reglages.pop("midi_cale", True)
+    ecart = float(reglages.pop("midi_offset", 0.0) or 0.0)
+    transpo = reglages.pop("midi_transpose", None)
+    if not chemin or not os.path.exists(chemin):
+        reglages.pop("midi_force", None)
+        return reglages, None
+    notes = midi_fichier.lire_notes(chemin)
+    infos = midi_fichier.resume(notes)
+    if not notes:
+        reglages.pop("midi_force", None)
+        return reglages, infos
+    # Les instants d'attaque du morceau sont ceux que l'analyse a releves, et
+    # ils sont comptes depuis le debut de l'extrait. Le fichier MIDI, lui, part
+    # du debut du morceau : on remet donc les attaques dans le temps du morceau
+    # avant de chercher, sinon le vrai decalage tombe hors de la fenetre des
+    # qu'on rend un extrait pris au milieu.
+    debut = float(info.get("start") or 0.0)
+    auto, nettete = (midi_fichier.caler(
+        notes, [e[0] + debut for e in info["_audio"]["events"]])
+        if cale else (0.0, 0.0))
+    # sous 1.3 de nettete il n'y a pas de correspondance : mieux vaut poser le
+    # fichier au debut de l'extrait que de decaler la melodie au hasard
+    if nettete < 1.3:
+        auto = 0.0
+    auto += debut
+    if transpo is None or transpo == "":
+        transpo = midi_fichier.transposition(notes)
+    infos.update({"cale": auto, "nettete": nettete, "transpose": int(transpo),
+                  "offset": auto + ecart})
+    reglages["midi"] = [(a, b, c, d) for a, b, c, d in notes]
+    reglages["midi_offset"] = auto + ecart
+    reglages["midi_transpose"] = int(transpo)
+    return reglages, infos
+
+
 def _renderer(info, width, height, fps, seed, curve, palette, bgkw):
     # Un prereglage peut fixer la palette ; elle arrive alors parmi les autres
     # reglages et non par son argument, d'ou ce rattrapage. On copie plutot que
     # de retirer la cle : le dictionnaire appartient a l'appelant.
     bgkw = dict(bgkw)
     palette = bgkw.pop("palette", palette)
+    bgkw, info["midi"] = preparer_midi(info, bgkw)
     return make_performance_renderer(
         width, height, fps, info["duration"], info["_audio"], info["_phi"],
         info["drops"], curve=curve, seed=seed, palette=palette, **bgkw)
@@ -527,6 +579,20 @@ def add_look_args(ap):
     ap.add_argument("--passage-turb", type=float, default=1.0, metavar="X",
                     help="ondulation du trace pendant le passage "
                          "(0 = deformation lisse)")
+    ap.add_argument("--midi", default="", metavar="FICHIER",
+                    help="fichier MIDI de la melodie : les touches du clavier "
+                         "s'allument sur les vraies notes du morceau")
+    ap.add_argument("--midi-offset", type=float, default=0.0, metavar="S",
+                    help="decalage du fichier MIDI, en secondes, ajoute au "
+                         "calage automatique (negatif = plus tot)")
+    ap.add_argument("--midi-cale", type=int, default=1, choices=(0, 1),
+                    help="1 : cale le fichier MIDI sur les attaques du "
+                         "morceau ; 0 : le prend tel quel")
+    ap.add_argument("--midi-transpose", type=int, default=None, metavar="N",
+                    help="transposition en demi-tons ; par defaut, celle qui "
+                         "met la melodie au milieu du clavier")
+    ap.add_argument("--midi-force", type=float, default=1.0, metavar="X",
+                    help="eclat des touches jouees (0 = aucune)")
     ap.add_argument("--neon", type=float, default=1.0,
                     help="force de l'eclairage du neon : 1 = d'origine, "
                          "2 = deux fois plus de lumiere autour du trait")
@@ -695,6 +761,11 @@ def look_kwargs(args):
             "glitch": args.glitch, "step_div": args.step_div,
             "machine": args.machine,
             "machines": args.machines,
+            "midi": args.midi,
+            "midi_offset": args.midi_offset,
+            "midi_cale": bool(args.midi_cale),
+            "midi_transpose": args.midi_transpose,
+            "midi_force": args.midi_force,
             "passage": args.passage,
             "passage_turb": args.passage_turb,
             "nettete": args.nettete, "taille": args.taille,
