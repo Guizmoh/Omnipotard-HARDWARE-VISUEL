@@ -114,13 +114,13 @@ def main():
 
     # 5. la v2 propose exactement les memes reglages que la v1
     import studio_v2 as V2
-    v2 = {c["id"] for o in V2.donnees() for b in o["blocs"]
-          for c in b["controles"]}
+    v2 = V2.tous_les_ids(V2.donnees())
     gronder("reglages de la v1 absents de la v2",
             (curseurs | listes) - v2 - {"preset", "clipDur", "scrub"})
     gronder("reglages inventes par la v2", v2 - tous)
     sans_niveau = {c["id"] for o in V2.donnees() for b in o["blocs"]
-                   for c in b["controles"] if c["niveau"] < 1 or c["niveau"] > 3}
+                   for c in b["controles"]
+                   if not 1 <= c["niveau"] <= 3}
     gronder("reglages de la v2 sans profondeur", sans_niveau)
 
     # 6. le rendu part des memes reglages que l'apercu, sans les recopier

@@ -1150,6 +1150,29 @@ Le reste est identique : mêmes réglages, mêmes phrases d'explication, mêmes
 fréquences annoncées, mêmes préréglages (les fournis et les vôtres), même
 moteur. Les deux pages parlent au même serveur et rendent le même fichier.
 
+### Ce que la page montre, et ce qu'elle garde pour plus tard
+
+Quatre-vingt-dix explications affichées en même temps, ce n'est pas de l'aide,
+c'est un mur. Chaque phrase **ne se montre qu'au survol** de son réglage — et
+le bouton `aide`, dans l'en-tête, les laisse toutes ouvertes pour qui découvre
+la page.
+
+Un réglage tient en trois lignes : son **nom et sa valeur sur la même ligne**
+(la valeur alignée à droite, en chiffres à chasse fixe), le **curseur**, puis —
+discrètement, en vert sombre — la **fréquence** à laquelle il partira.
+
+Et les listes « sur quoi ça part » sont **rangées dans l'effet qu'elles
+déclenchent**. Dans la page classique elles suivent leur curseur sans
+étiquette : l'œil fait le lien. Recopiées telles quelles, elles se retrouvaient
+seules, nommées par leur identifiant — `punchOn`, `shakeOn`, `partsOn`. Chaque
+effet est maintenant un seul bloc : le curseur, ce qui le déclenche, sa
+fréquence, son explication. La colonne compte **72 blocs pour 92 réglages**.
+
+Le reste est du soin : curseurs dessinés (piste fine, part remplie en vert,
+pastille qui s'allume au survol), libellés en bas de casse plutôt qu'en
+capitales, cartes en léger dégradé, en-tête collante, et l'aperçu qui reste en
+place pendant qu'on règle.
+
 ### Pourquoi les deux pages ne peuvent pas diverger
 
 La v2 **ne recopie pas** la liste des réglages : elle la **lit dans la page de
