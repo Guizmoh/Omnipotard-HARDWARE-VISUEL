@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-17.28"
+VERSION = "2026-09-17.29"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1386,18 +1386,42 @@ def build_minifreak(step=STEP):
 
 
 # ---- Elektron Digitakt II : presque carre, seize touches de declenchement.
+#
+# La disposition suit celle de la machine : le nom au-dessus de l'ecran, une
+# colonne de cinq touches le long du bord gauche a hauteur d'ecran, la grosse
+# molette de niveau et ses deux touches en haut a droite, les huit encodeurs
+# en deux rangees de quatre dans l'axe de l'ecran, un pave de six a leur
+# droite, un amas de six en bas a gauche, et les seize declencheurs a cote de
+# cet amas. La premiere version les posait au juge — ils couraient d'un bord
+# a l'autre et le nom du modele leur passait dessus.
 DK_BODY = (-1.065, -0.862, 1.065, 0.862)
-DK_ECRAN = (-0.880, 0.250, 0.230, 0.760)
-DK_WHEEL, DK_WHEEL_R = (0.700, 0.545), 0.175
-DK_ENC = [(-0.760 + (k % 4) * 0.330, 0.055 - (k // 4) * 0.230) for k in range(8)]
+DK_ECRAN = (-0.745, 0.250, 0.285, 0.720)
+DK_WHEEL, DK_WHEEL_R = (0.760, 0.560), 0.150
+# colonne de fonctions le long du bord gauche, a hauteur d'ecran
+DK_GAUCHE = [(-1.000, 0.622 - k * 0.098, -0.820, 0.700 - k * 0.098)
+             for k in range(5)]
+# deux touches sous la molette de niveau
+DK_HAUT = [(0.585, 0.255, 0.740, 0.355), (0.760, 0.255, 0.915, 0.355)]
+# huit encodeurs, deux rangees de quatre, sous l'ecran et dans son axe
+DK_ENC = [(-0.640 + (k % 4) * 0.295, 0.055 - (k // 4) * 0.240) for k in range(8)]
 DK_ENC_R = 0.082
-DK_TRIG_W, DK_TRIG_H = 0.212, 0.150
-DK_TRIG_X0, DK_TRIG_GX = -0.940, 0.030
-DK_TRIG_Y = (-0.760, -0.560)
+# pave de six touches a droite des encodeurs
+DK_DROITE = [(0.520 + (k % 2) * 0.180, 0.055 - (k // 2) * 0.120,
+              0.680 + (k % 2) * 0.180, 0.140 - (k // 2) * 0.120)
+             for k in range(6)]
+# amas de six touches en bas a gauche : fonction, fleches, transport. Sur la
+# vraie machine les declencheurs ne vont pas jusqu'au bord gauche, cet amas
+# leur prend la place — les poser sur toute la largeur se voyait tout de suite.
+DK_BAS = [(-1.000 + (k % 2) * 0.185, -0.530 - (k // 2) * 0.130,
+           -0.835 + (k % 2) * 0.185, -0.430 - (k // 2) * 0.130)
+          for k in range(6)]
+DK_TRIG_W, DK_TRIG_H = 0.172, 0.128
+DK_TRIG_X0, DK_TRIG_GX = -0.600, 0.028
+DK_TRIG_Y = (-0.760, -0.588)
 
 
 def dk_trig(k):
-    """k de 0 a 15 : deux rangees de huit, la premiere en bas."""
+    """k de 0 a 15 : deux rangees de huit, les huit premiers en haut."""
     ligne, col = divmod(k, 8)
     x0 = DK_TRIG_X0 + col * (DK_TRIG_W + DK_TRIG_GX)
     y0 = DK_TRIG_Y[1 - ligne]
@@ -1432,25 +1456,24 @@ def build_digitakt(step=STEP):
         add(Path(circle_pts(cx, cy, DK_ENC_R * 0.34), closed=True,
                  tag="qlink%d" % k, step=step))
 
-    # colonne de boutons de fonction, a droite des encodeurs
-    for k in range(6):
-        x0 = 0.760 if k % 2 else 0.560
-        y0 = -0.020 - (k // 2) * 0.150
-        add(Path(rrect_pts(x0, y0, x0 + 0.170, y0 + 0.104, 0.016),
-                 closed=True, tag="btn%d" % k, step=step))
+    # colonne de fonctions a gauche, deux touches sous la molette, le pave de
+    # six a droite des encodeurs, l'amas de six en bas a gauche
+    for k, r in enumerate(DK_GAUCHE + DK_HAUT + DK_DROITE + DK_BAS):
+        add(Path(rrect_pts(*r, r=0.018), closed=True, tag="btn%d" % k, step=step))
 
     # seize declencheurs : ils servent de pads et de pas de sequenceur
     for k in range(16):
         x0, y0, x1, y1 = dk_trig(k)
-        add(Path(rrect_pts(x0, y0, x1, y1, 0.026), closed=True,
+        add(Path(rrect_pts(x0, y0, x1, y1, 0.024), closed=True,
                  tag="pad%d" % k, step=step))
-        add(Path(rrect_pts(x0 + 0.020, y0 + 0.018, x1 - 0.020, y1 - 0.018, 0.016),
+        add(Path(rrect_pts(x0 + 0.018, y0 + 0.016, x1 - 0.018, y1 - 0.016, 0.014),
                  closed=True, tag="pad%d" % k, step=step))
 
-    # la seule bande libre : sous la molette, a droite de l'ecran
-    P += text_paths("DIGITAKT II", 0.058, 0.300, 0.296, step=step,
+    # le nom au-dessus de l'ecran, la marque dans la bande libre entre les
+    # encodeurs et les declencheurs : les deux bandes vides de la facade
+    P += text_paths("DIGITAKT II", 0.058, -1.000, 0.752, step=step,
                     center=False, tag="logo")
-    P += text_paths("OMNIPOTARD", 0.027, 0.302, 0.238, step=step,
+    P += text_paths("OMNIPOTARD", 0.030, 0.658, -0.372, step=step,
                     center=False, tag="mark", tracking=0.52)
     return P
 
