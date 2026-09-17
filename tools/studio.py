@@ -42,7 +42,8 @@ from mpc_performance import (  # noqa: E402
 )
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
-    VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs,
+    VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs, MACHINES,
+    NOMS_MACHINES,
     compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
     backdrop_quality, PRESETS, CHAMPS, AIDE, COMPTE, QUALITES, pick_split_times,
 )
@@ -149,6 +150,7 @@ def look_from(q):
         "split_count": int(float(q.get("splitCount", 3))),
         "split_on": _dans(q.get("splitOn"), DECLENCHEURS, "grosse caisse"),
         "glitch": float(q.get("glitch", 1.0)),
+        "machine": _dans(q.get("machine"), NOMS_MACHINES, "mpc"),
         "nettete": float(q.get("nettete", 1.0)),
         "taille": float(q.get("taille", 1.0)),
         "presence": float(q.get("presence", 1.0)),
@@ -381,7 +383,10 @@ class Studio:
         # La finesse du trait est fixee a la construction du moteur (elle
         # decide de l'etalement du faisceau) : la changer demande donc un
         # moteur neuf, contrairement a la couleur ou au fond qu'on repose.
-        key = (tid, w, h, bool(q.get("curve", True)), kw["nettete"])
+        # La machine decide de toute la geometrie : en changer demande un
+        # moteur neuf, comme la finesse du trait.
+        key = (tid, w, h, bool(q.get("curve", True)), kw["nettete"],
+               kw["machine"])
         with self.lock:
             r = self.renderers.get(key)
         if r is None:
@@ -413,7 +418,8 @@ class Studio:
                 "presence", "neon", "reflet", "tube")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
-                        "backdrop_sharp", "spectro", "nettete", "taille")
+                        "backdrop_sharp", "spectro", "nettete", "taille",
+                        "machine")
         # La taille se pose avant l'allure : c'est elle qui decide du creux
         # que la texture garde derriere la machine, et set_look le recalcule.
         r.taille = float(kw["taille"])
@@ -437,7 +443,7 @@ class Studio:
         stamp = (bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
                  kw["screen_dim"], round(float(t), 1),
                  kw["travel"], kw["travel_mode"], kw["backdrop_sharp"],
-                 kw["taille"])
+                 kw["taille"], kw["machine"])
         # set_look, plus haut, remet le fond a zero — il fait partie de
         # l'allure. On le repose donc ici a chaque fois, en ne le rechargeant
         # que si un de ses reglages a bouge : sans cela, tout apercu qui ne
@@ -449,7 +455,7 @@ class Studio:
                 r._bd = load_backdrop(
                     bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
                     scale=r.scale * r.taille, screen_dim=kw["screen_dim"],
-                    seek=float(t),
+                    ecran=r.ecran, seek=float(t),
                     travel=kw["travel"], travel_mode=kw["travel_mode"],
                     dur=max(tr["info"]["duration"], 1e-3),
                     blur=backdrop_quality(kw["backdrop_sharp"])[0])
@@ -755,6 +761,8 @@ class Handler(BaseHTTPRequestHandler):
                                      for t, n in groupes_declencheurs()],
                     "travellings": list(TRAVELLINGS),
                     "qualites": {k: v["quoi"] for k, v in QUALITES.items()},
+                    "machines": [{"cle": k, "nom": v["nom"], "quoi": v["quoi"]}
+                                 for k, v in MACHINES.items()],
                     "presets": {k: {CHAMPS[a]: b for a, b in v.items()}
                                 for k, v in PRESETS.items()},
                     "mes": lire_mes_reglages(),
@@ -973,6 +981,11 @@ PAGE = r"""<!doctype html>
       <span>coups <b id="m-hits">-</b></span>
       <span>paroxysmes <b id="m-drops">-</b></span>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Machine</h2>
+    <select id="machine"></select>
   </div>
 
   <div class="card">
@@ -1426,6 +1439,7 @@ async function upload(f) {
 function params() {
   const p = new URLSearchParams({
     track, t: $('#scrub').value,
+    machine: $('#machine').value,
     palette: $('#palette').value, trait: $('#trait').value,
     bg: $('#bg').value, bgColor: $('#bgColor').value,
     bgStrength: $('#bgStrength').value, bgClear: $('#bgClear').value,
@@ -1915,6 +1929,10 @@ fetch('/config').then(r => r.json())
         remplirGroupes(sel, c.declencheurs || [], def);
     remplir('#travelMode', c.travellings || [], 'avant');
     // chaque qualite dit en clair ce qu'elle coute et ce qu'elle rend
+    $('#machine').innerHTML = (c.machines || []).map(
+      m => '<option value="' + m.cle + '">' + m.nom + ' \u2014 ' + m.quoi
+           + '</option>').join('');
+    $('#machine').onchange = shot;
     QUALITES = c.qualites || {};
     $('#quality').innerHTML = Object.keys(QUALITES).map(
       k => '<option value="' + k + '">' + k + '</option>').join('');

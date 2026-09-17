@@ -789,6 +789,45 @@ défaut — mais c'est un parti pris, pas une fatalité. `--backdrop-sharp` va d
 aucun flou), avec un rapport de trente entre les deux sur le détail mesuré. La
 valeur par défaut, 0,37, reproduit exactement l'ancien comportement.
 
+### Trois machines
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --machine minifreak
+python3 tools/mpc_performance.py morceau.mp3 --machine digitakt
+```
+
+| machine | ce qu'elle a |
+| --- | --- |
+| `mpc` | MPC Live III — seize pads, bande de seize pas, grand écran tactile |
+| `minifreak` | MiniFreak — clavier 37 touches, huit potards, deux bandes tactiles |
+| `digitakt` | Digitakt II — seize déclencheurs, huit encodeurs, grand écran |
+
+Elles parlent le **même langage** : des chemins étiquetés, et des étiquettes que
+le moteur sait animer. `pad<n>` s'allume sur un coup, `step<n>` sur le pas du
+séquenceur, `qlink<n>` suit une enveloppe, `strip` porte un curseur tactile,
+`lcd` est l'écran. Une machine n'a donc pas à ressembler à une MPC pour être
+jouée comme telle : il lui suffit d'avoir des organes et de dire lesquels.
+
+Ce que chacune en fait :
+
+- sur le **MiniFreak**, les coups allument les **touches du clavier** — les
+  seize familles sont réparties sur les trente-sept touches, pour qu'une grosse
+  caisse ne rallume pas seulement le bas du meuble — et les seize pas du
+  séquenceur courent le long des blanches ;
+- sur le **Digitakt II**, les seize déclencheurs servent de pads **et** de pas
+  à la fois, exactement comme sur la vraie : un coup les allume, le séquenceur
+  les balaie ;
+- le creux ménagé derrière la machine et la dalle opaque suivent l'écran de la
+  machine choisie, pas celui de la MPC.
+
+Un piège qui a coûté un rendu : le moteur est recopié tel quel dans chaque
+tâche de rendu sous Windows, et une `lambda` ne se recopie pas. Les deux
+nouvelles machines en avaient une pour leur remplissage de touche, et le rendu
+s'arrêtait sur `Can't pickle <lambda>` dès qu'on quittait la MPC. Ce sont
+maintenant des fonctions nommées, et le moteur ne garde que le **nom** de sa
+machine — le plan, lui, vit dans le registre. Vérifié : les trois machines
+rendent les mêmes images en fork, en spawn et sur un seul processus.
+
 ### Le néon : éclairage, surface qui le reflète, tube de verre
 
 Ce qu'on voit autour du trait n'est pas le trait : c'est sa lumière renvoyée

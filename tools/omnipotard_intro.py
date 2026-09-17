@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-16.22"
+VERSION = "2026-09-17.23"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -225,6 +225,9 @@ PRESETS = {
 # ==========================================================================
 
 AIDE = {
+    "machine": "La machine dessinee. Chacune a ses organes : les pads de la "
+               "MPC, les touches du MiniFreak, les declencheurs du Digitakt. "
+               "Les coups les allument de la meme facon.",
     "preset": "Repose tous les curseurs sur un point de depart. Tout reste "
               "modifiable ensuite. « Mes reglages » sont les votres, gardes "
               "d'une fois sur l'autre.",
@@ -471,7 +474,7 @@ def backdrop_quality(sharp):
     return blur, div
 
 
-def _backdrop_mask(w, h, strength, clear, scale, screen_dim):
+def _backdrop_mask(w, h, strength, clear, scale, screen_dim, ecran=None):
     """Le multiplicateur applique au fond : dosage, creux derriere la machine,
     et dalle opaque. Il ne depend que du format, donc on le calcule une fois —
     y compris pour une video, ou il servira sur chaque image."""
@@ -485,10 +488,11 @@ def _backdrop_mask(w, h, strength, clear, scale, screen_dim):
     if screen_dim > 0:
         # la dalle est opaque : sans cela le ciel de la photo passe au travers
         # et l'ecran de la machine a l'air d'etre en verre.
-        px0 = w * 0.5 + SCREEN[0] * sc
-        px1 = w * 0.5 + SCREEN[2] * sc
-        py0 = h * 0.5 - SCREEN[3] * sc            # l'axe y est inverse a l'ecran
-        py1 = h * 0.5 - SCREEN[1] * sc
+        ecr = ecran if ecran else SCREEN
+        px0 = w * 0.5 + ecr[0] * sc
+        px1 = w * 0.5 + ecr[2] * sc
+        py0 = h * 0.5 - ecr[3] * sc               # l'axe y est inverse a l'ecran
+        py1 = h * 0.5 - ecr[1] * sc
         soft = max(2.0, 0.018 * sc)
         mx = np.clip(np.minimum(xx - px0, px1 - xx) / soft, 0.0, 1.0)
         my = np.clip(np.minimum(yy - py0, py1 - yy) / soft, 0.0, 1.0)
@@ -526,7 +530,7 @@ class StillBackdrop:
 
 def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
                   screen_dim=0.40, seek=0.0, travel=0.0, travel_mode="avant",
-                  dur=1.0):
+                  dur=1.0, ecran=None):
     """Charge une image de fond et la prepare pour la dalle.
 
     Passe par ffmpeg, donc accepte tout ce qu'il lit (jpg, png, webp, et meme
@@ -568,7 +572,8 @@ def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
     if blur > 0:
         img = np.stack([gauss(img[:, :, c], blur) for c in range(3)], axis=-1)
     return StillBackdrop(np.ascontiguousarray(img, dtype=np.float32),
-                         _backdrop_mask(w, h, strength, clear, scale, screen_dim),
+                         _backdrop_mask(w, h, strength, clear, scale,
+                                        screen_dim, ecran),
                          dur=dur, travel=travel, travel_mode=travel_mode)
 
 
@@ -635,7 +640,7 @@ class VideoBackdrop:
 
     def __init__(self, path, w, h, fps, duration, strength=0.80, clear=0.45,
                  scale=None, blur=2.2, screen_dim=0.40, cache_dir=None,
-                 travel=0.0, travel_mode="avant", div=None):
+                 travel=0.0, travel_mode="avant", div=None, ecran=None):
         try:
             from PIL import Image                # noqa: F401 -- verifie tot
         except ImportError:
@@ -644,7 +649,8 @@ class VideoBackdrop:
                 "A installer une seule fois avec :  pip install pillow  "
                 "(une image fixe en fond, elle, fonctionne sans)")
         self.w, self.h = w, h
-        self.mask = _backdrop_mask(w, h, strength, clear, scale, screen_dim)
+        self.mask = _backdrop_mask(w, h, strength, clear, scale, screen_dim,
+                                   ecran)
         self.fps = float(fps)
         self.DIV = int(div) if div else VideoBackdrop.DIV
         self.dur = max(float(duration), 1e-3)
@@ -1259,9 +1265,244 @@ def pad_fill(k, nlines=7):
                       for y in np.linspace(y0 + m * 0.8, y1 - m * 0.8, nlines)])
 
 
+# ==========================================================================
+#  Deux autres machines
+#
+#  Elles parlent le meme langage que la MPC : des chemins etiquetes, et des
+#  etiquettes que le moteur sait animer — « pad<n> » s'allume sur un coup,
+#  « step<n> » sur le pas du sequenceur, « qlink<n> » suit une enveloppe,
+#  « strip » le curseur tactile, « lcd » l'ecran. Une machine n'a donc pas a
+#  ressembler a une MPC pour etre jouee comme telle ; il lui suffit d'avoir
+#  des organes et de dire lesquels.
+# ==========================================================================
+
+# ---- Arturia MiniFreak : un clavier 37 touches, large et plat.
+MF_BODY = (-1.560, -0.612, 1.560, 0.612)
+MF_CLAV = (-1.512, -0.588, 1.512, -0.040)     # la zone du clavier
+MF_ECRAN = (-0.040, 0.140, 0.700, 0.520)
+MF_TOUCHE = ((MF_CLAV[2] - MF_CLAV[0]) / 22.0)      # 22 touches blanches
+# noires : apres do, re, fa, sol, la de chaque octave
+MF_NOIRES = (0, 1, 3, 4, 5)
+
+
+def mf_blanche(i):
+    x0 = MF_CLAV[0] + i * MF_TOUCHE
+    return x0 + 0.004, MF_CLAV[1] + 0.012, x0 + MF_TOUCHE - 0.004, MF_CLAV[3]
+
+
+def mf_noire(i):
+    """La i-eme touche noire, posee a cheval sur deux blanches."""
+    oct_, k = divmod(i, 5)
+    blanche = oct_ * 7 + MF_NOIRES[k]
+    x = MF_CLAV[0] + (blanche + 1) * MF_TOUCHE
+    l = MF_TOUCHE * 0.58
+    y0 = MF_CLAV[1] + (MF_CLAV[3] - MF_CLAV[1]) * 0.42
+    return x - l * 0.5, y0, x + l * 0.5, MF_CLAV[3]
+
+
+MF_KNOBS = [(-1.330 + k * 0.158, 0.352) for k in range(8)]
+MF_KNOB_R = 0.062
+MF_MACRO = (1.216, 0.236)
+MF_MACRO_R = 0.116
+MF_STRIPS = ((-1.500, 0.040, -0.900, 0.128), (-1.500, 0.184, -0.900, 0.272))
+MF_BTN = [(-0.040 + k * 0.106, -0.006, 0.050 + k * 0.106, 0.070) for k in range(7)]
+
+
+def build_minifreak(step=STEP):
+    """Le MiniFreak : panneau de commandes en haut, clavier en bas."""
+    P = []
+    add = P.append
+    add(Path(rrect_pts(*MF_BODY, r=0.050), closed=True, tag="body", step=step))
+    add(Path(rrect_pts(MF_BODY[0] + 0.026, MF_BODY[1] + 0.026,
+                       MF_BODY[2] - 0.026, MF_BODY[3] - 0.026, 0.036),
+             closed=True, tag="body", step=step))
+    # ligne de separation entre le panneau et le clavier
+    add(Path([(MF_BODY[0] + 0.030, MF_CLAV[3] + 0.014),
+              (MF_BODY[2] - 0.030, MF_CLAV[3] + 0.014)], tag="body", step=step))
+
+    # les 22 blanches, puis les 15 noires : une seule suite de pads, etalee
+    # sur tout le clavier pour qu'un coup de grosse caisse ne rallume pas
+    # seulement le bas du meuble
+    touches = [mf_blanche(i) for i in range(22)] + [mf_noire(i) for i in range(15)]
+    ordre = sorted(range(len(touches)), key=lambda i: touches[i][0])
+    for rang, i in enumerate(ordre):
+        k = (rang * 16) // len(touches)
+        add(Path(rrect_pts(*touches[i], r=0.012), closed=True,
+                 tag="pad%d" % k, step=step))
+
+    # ecran
+    add(Path(rrect_pts(*MF_ECRAN, r=0.020), closed=True, tag="lcd", step=step))
+    add(Path(rrect_pts(MF_ECRAN[0] + 0.022, MF_ECRAN[1] + 0.022,
+                       MF_ECRAN[2] - 0.022, MF_ECRAN[3] - 0.022, 0.012),
+             closed=True, tag="lcd", step=step))
+
+    # huit potards, et la grosse molette de droite
+    for k, (cx, cy) in enumerate(MF_KNOBS):
+        add(Path(circle_pts(cx, cy, MF_KNOB_R), closed=True,
+                 tag="qlink%d" % k, step=step))
+        add(Path([(cx, cy + MF_KNOB_R * 0.30), (cx, cy + MF_KNOB_R * 0.92)],
+                 tag="qlink%d" % k, step=step))
+    add(Path(circle_pts(*MF_MACRO, r=MF_MACRO_R), closed=True, tag="wheel", step=step))
+    add(Path(circle_pts(*MF_MACRO, r=MF_MACRO_R * 0.42), closed=True,
+             tag="wheel", step=step))
+
+    # les deux bandes tactiles
+    for r in MF_STRIPS:
+        add(Path(rrect_pts(*r, r=0.034), closed=True, tag="strip", step=step))
+        for j in range(7):
+            x = r[0] + 0.040 + (r[2] - r[0] - 0.080) * j / 6.0
+            add(Path([(x, r[1] + 0.018), (x, r[3] - 0.018)], tag="strip", step=step))
+
+    # rangee de boutons sous l'ecran
+    for k, r in enumerate(MF_BTN):
+        add(Path(rrect_pts(*r, r=0.014), closed=True, tag="btn%d" % k, step=step))
+
+    # le marquage se tient au-dessus de la grosse molette, seul endroit du
+    # panneau ou il ne mord ni sur l'ecran ni sur les potards
+    P += text_paths("MINIFREAK", 0.058, 0.965, 0.452, step=step, center=False,
+                    tag="logo")
+    P += text_paths("OMNIPOTARD", 0.028, 0.967, 0.396, step=step, center=False,
+                    tag="mark", tracking=0.52)
+    return P
+
+
+# ---- Elektron Digitakt II : presque carre, seize touches de declenchement.
+DK_BODY = (-1.065, -0.862, 1.065, 0.862)
+DK_ECRAN = (-0.880, 0.250, 0.230, 0.760)
+DK_WHEEL, DK_WHEEL_R = (0.700, 0.545), 0.175
+DK_ENC = [(-0.760 + (k % 4) * 0.330, 0.055 - (k // 4) * 0.230) for k in range(8)]
+DK_ENC_R = 0.082
+DK_TRIG_W, DK_TRIG_H = 0.212, 0.150
+DK_TRIG_X0, DK_TRIG_GX = -0.940, 0.030
+DK_TRIG_Y = (-0.760, -0.560)
+
+
+def dk_trig(k):
+    """k de 0 a 15 : deux rangees de huit, la premiere en bas."""
+    ligne, col = divmod(k, 8)
+    x0 = DK_TRIG_X0 + col * (DK_TRIG_W + DK_TRIG_GX)
+    y0 = DK_TRIG_Y[1 - ligne]
+    return x0, y0, x0 + DK_TRIG_W, y0 + DK_TRIG_H
+
+
+def build_digitakt(step=STEP):
+    """Le Digitakt II : grand ecran, huit encodeurs, seize declencheurs."""
+    P = []
+    add = P.append
+    add(Path(rrect_pts(*DK_BODY, r=0.040), closed=True, tag="body", step=step))
+    add(Path(rrect_pts(DK_BODY[0] + 0.024, DK_BODY[1] + 0.024,
+                       DK_BODY[2] - 0.024, DK_BODY[3] - 0.024, 0.028),
+             closed=True, tag="body", step=step))
+
+    add(Path(rrect_pts(*DK_ECRAN, r=0.022), closed=True, tag="lcd", step=step))
+    add(Path(rrect_pts(DK_ECRAN[0] + 0.024, DK_ECRAN[1] + 0.024,
+                       DK_ECRAN[2] - 0.024, DK_ECRAN[3] - 0.024, 0.014),
+             closed=True, tag="lcd", step=step))
+    add(Path([(DK_ECRAN[0] + 0.024, DK_ECRAN[3] - 0.100),
+              (DK_ECRAN[2] - 0.024, DK_ECRAN[3] - 0.100)], tag="lcd", step=step))
+
+    # la molette de niveau, et les huit encodeurs
+    add(Path(circle_pts(*DK_WHEEL, r=DK_WHEEL_R), closed=True, tag="wheel", step=step))
+    add(Path(circle_pts(*DK_WHEEL, r=DK_WHEEL_R * 0.62), closed=True,
+             tag="wheel", step=step))
+    add(Path(circle_pts(*DK_WHEEL, r=DK_WHEEL_R * 0.22), closed=True,
+             tag="wheel", step=step))
+    for k, (cx, cy) in enumerate(DK_ENC):
+        add(Path(circle_pts(cx, cy, DK_ENC_R), closed=True,
+                 tag="qlink%d" % k, step=step))
+        add(Path(circle_pts(cx, cy, DK_ENC_R * 0.34), closed=True,
+                 tag="qlink%d" % k, step=step))
+
+    # colonne de boutons de fonction, a droite des encodeurs
+    for k in range(6):
+        x0 = 0.760 if k % 2 else 0.560
+        y0 = -0.020 - (k // 2) * 0.150
+        add(Path(rrect_pts(x0, y0, x0 + 0.170, y0 + 0.104, 0.016),
+                 closed=True, tag="btn%d" % k, step=step))
+
+    # seize declencheurs : ils servent de pads et de pas de sequenceur
+    for k in range(16):
+        x0, y0, x1, y1 = dk_trig(k)
+        add(Path(rrect_pts(x0, y0, x1, y1, 0.026), closed=True,
+                 tag="pad%d" % k, step=step))
+        add(Path(rrect_pts(x0 + 0.020, y0 + 0.018, x1 - 0.020, y1 - 0.018, 0.016),
+                 closed=True, tag="pad%d" % k, step=step))
+
+    # la seule bande libre : sous la molette, a droite de l'ecran
+    P += text_paths("DIGITAKT II", 0.058, 0.300, 0.296, step=step,
+                    center=False, tag="logo")
+    P += text_paths("OMNIPOTARD", 0.027, 0.302, 0.238, step=step,
+                    center=False, tag="mark", tracking=0.52)
+    return P
+
+
 def rect_fill(x0, y0, x1, y1, nlines=4, m=0.008):
     return np.vstack([np.stack([np.linspace(x0 + m, x1 - m, 24), np.full(24, y)], axis=1)
                       for y in np.linspace(y0 + m, y1 - m, nlines)])
+
+
+def _remplir(r, nlines=5, m=0.022):
+    """Le remplissage lumineux d'une touche, quelle que soit la machine."""
+    return rect_fill(r[0], r[1], r[2], r[3], nlines, m)
+
+
+# Ces deux-la sont des fonctions nommees et non des lambdas : le moteur est
+# recopie tel quel dans chaque tache de rendu sous Windows, et une lambda ne
+# se recopie pas — le rendu s'arretait sur « Can't pickle <lambda> » des qu'on
+# choisissait une autre machine que la MPC.
+def _remplir_mf(k):
+    return _remplir(mf_blanche(min(21, k + 3)), 4, 0.010)
+
+
+def _remplir_dk(k):
+    return _remplir(dk_trig(k), 5, 0.030)
+
+
+# Ce que le moteur a besoin de savoir d'une machine : ou est son ecran, quels
+# rectangles s'allument sur un coup, lesquels suivent le sequenceur, ou sont
+# ses potards et sa bande tactile. Le trace, lui, est libre : deux machines
+# n'ont pas a se ressembler pour etre jouees pareil.
+MACHINES = {
+    "mpc": {
+        "nom": "MPC Live III",
+        "build": build_mpc,
+        "ecran": SCREEN,
+        "pads": [pad_rect(k // 4, k % 4) for k in range(16)],
+        "remplir": pad_fill,
+        "pas": [step_rect(k) for k in range(16)],
+        "potards": [(cx, cy, QLINK_R) for cx, cy in QLINK],
+        "bande": STRIP,
+        "quoi": "l'originale : seize pads, bande de pas, grand ecran tactile",
+    },
+    "minifreak": {
+        "nom": "MiniFreak",
+        "build": build_minifreak,
+        "ecran": MF_ECRAN,
+        # les touches du clavier s'allument sur les coups ; les seize pas du
+        # sequenceur courent le long des blanches
+        "pads": [mf_blanche(min(21, k + 3)) for k in range(16)],
+        "remplir": _remplir_mf,
+        "pas": [mf_blanche(int(i * 21 / 15.0)) for i in range(16)],
+        "potards": [(cx, cy, MF_KNOB_R) for cx, cy in MF_KNOBS],
+        "bande": MF_STRIPS[0],
+        "quoi": "clavier 37 touches : les notes s'allument, les pas courent "
+                "le long des blanches",
+    },
+    "digitakt": {
+        "nom": "Digitakt II",
+        "build": build_digitakt,
+        "ecran": DK_ECRAN,
+        # les seize declencheurs servent de pads et de pas, comme sur la vraie
+        "pads": [dk_trig(k) for k in range(16)],
+        "remplir": _remplir_dk,
+        "pas": [dk_trig(k) for k in range(16)],
+        "potards": [(cx, cy, DK_ENC_R) for cx, cy in DK_ENC],
+        "bande": None,
+        "quoi": "seize declencheurs qui font pads et pas a la fois, huit "
+                "encodeurs",
+    },
+}
+NOMS_MACHINES = tuple(MACHINES)
 
 
 # ==========================================================================
@@ -1838,7 +2079,8 @@ STEP_LIT = frozenset(KICKS + RIMS + HATS + PERCS + SKANKS)
 class Renderer:
     def __init__(self, w, h, fps, duration, audio, curve=True, seed=7,
                  palette="vert", subtitle=SUB_TXT, bg=None, bg_color=None,
-                 bg_strength=1.0, bg_clear=0.55, bg_anim=0.0, nettete=1.0):
+                 bg_strength=1.0, bg_clear=0.55, bg_anim=0.0, nettete=1.0,
+                 machine="mpc"):
         self.W, self.H = w, h
         self.fps = fps
         self.dur = duration
@@ -1908,7 +2150,9 @@ class Renderer:
         self._masques = {}
 
         # ---- geometrie
-        self.mpc = build_mpc()
+        self.machine = (str(machine) if str(machine) in MACHINES else "mpc")
+        self.ecran = self.mach["ecran"]
+        self.mpc = self.mach["build"]()
         (self.tP, self.tN, self.tkind,
          self.ts, self.tlen) = build_title_curve("OMNIPOTARD", TITLE_H, 0.0)
         tx = self.tP[self.tkind == TRAIT][:, 0]
@@ -2118,6 +2362,15 @@ class Renderer:
             return t                            # ce paquet-la reste en ordre
         j = g * PAQUET + int(r.permutation(PAQUET)[b])
         return min(max(t + (j - i) * L, 0.0), self.dur - 1e-3)
+
+    @property
+    def mach(self):
+        """Le plan de la machine dessinee.
+
+        Garde par son nom et non par son contenu : le dictionnaire porte des
+        fonctions, et le moteur voyage jusqu'aux taches de rendu.
+        """
+        return MACHINES[self.machine]
 
     def _masque(self, nom, defaut="grosse caisse"):
         """Les evenements que ce declencheur retient, une fois pour toutes.
@@ -2781,42 +3034,51 @@ class Renderer:
         if melt >= 0.99:
             return
 
+        mach = self.mach
+
         # pads allumes : remplissage
         for k, v in flashes.items():
-            x0, _, _, _ = pad_rect(k // 4, k % 4)
-            mk = float(self.morph_at(x0, sweep_x))
+            if k >= len(mach["pads"]):
+                continue
+            mk = float(self.morph_at(mach["pads"][k][0], sweep_x))
             if mk > 0.4 and v > 0.05:
-                self._dyn(beam, pad_fill(k), 1.05 * v * mk, collapse, melt, t)
+                self._dyn(beam, mach["remplir"](k), 1.05 * v * mk, collapse, melt, t)
 
-        # bande de 16 pas : le pas courant s'allume
-        if live and 0 <= step < 16:
-            x0, y0, x1, y1 = step_rect(step)
+        # bande de pas : le pas courant s'allume
+        if live and 0 <= step < len(mach["pas"]):
+            x0, y0, x1, y1 = mach["pas"][step]
             mk = float(self.morph_at(x0, sweep_x))
             if mk > 0.4:
                 self._dyn(beam, rect_fill(x0, y0, x1, y1, 4), 0.95 * mk, collapse, melt, t)
 
-        # Q-Links : index qui tourne + bandeau qui se remplit
-        for k, (cx, cy) in enumerate(QLINK):
+        # potards : index qui tourne
+        for k, (cx, cy, kr) in enumerate(mach["potards"]):
             if self.morph_at(cx, sweep_x) < 0.5:
                 continue
             v = np.clip(0.18 + 0.62 * (e_low if k % 2 == 0 else e_high)
                         + 0.20 * math.sin(t * 1.7 + k), 0.0, 1.0)
             a = math.radians(225.0 - 270.0 * v)
-            P, _, _ = resample([(cx + QLINK_R * 0.36 * math.cos(a),
-                                 cy + QLINK_R * 0.36 * math.sin(a)),
-                                (cx + QLINK_R * 0.86 * math.cos(a),
-                                 cy + QLINK_R * 0.86 * math.sin(a))])
+            P, _, _ = resample([(cx + kr * 0.36 * math.cos(a),
+                                 cy + kr * 0.36 * math.sin(a)),
+                                (cx + kr * 0.86 * math.cos(a),
+                                 cy + kr * 0.86 * math.sin(a))])
             self._dyn(beam, P, 1.15, collapse, melt, t)
 
-        # touch strip : curseur lumineux
-        if self.morph_at(STRIP[0], sweep_x) > 0.5:
-            sy = STRIP[1] + (STRIP[3] - STRIP[1]) * np.clip(0.12 + 0.8 * e_high, 0, 1)
-            self._dyn(beam, rect_fill(STRIP[0] + 0.014, sy - 0.026,
-                                      STRIP[2] - 0.014, sy + 0.026, 4),
-                      0.85, collapse, melt, t)
+        # bande tactile : curseur lumineux
+        bande = mach["bande"]
+        if bande is not None and self.morph_at(bande[0], sweep_x) > 0.5:
+            large = (bande[2] - bande[0]) > (bande[3] - bande[1])
+            if large:
+                # bande couchee : le curseur va de gauche a droite
+                sx = bande[0] + (bande[2] - bande[0]) * np.clip(0.12 + 0.8 * e_high, 0, 1)
+                r = (sx - 0.026, bande[1] + 0.010, sx + 0.026, bande[3] - 0.010)
+            else:
+                sy = bande[1] + (bande[3] - bande[1]) * np.clip(0.12 + 0.8 * e_high, 0, 1)
+                r = (bande[0] + 0.014, sy - 0.026, bande[2] - 0.014, sy + 0.026)
+            self._dyn(beam, rect_fill(*r, nlines=4), 0.85, collapse, melt, t)
 
         # ecran : forme d'onde du morceau + niveaux
-        sx0, sy0, sx1, sy1 = SCREEN
+        sx0, sy0, sx1, sy1 = self.ecran
         if self.morph_at(sx0, sweep_x) > 0.5 and t < tl.start("zoom"):
             m = 0.05
             x_hi = sx1 - m if self.morph_at(sx1, sweep_x) > 0.5 else min(sx1 - m, sweep_x)

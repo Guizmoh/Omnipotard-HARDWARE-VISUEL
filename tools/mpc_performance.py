@@ -42,6 +42,7 @@ from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     fit_jobs, DECLENCHEURS, hasard_events, TRAVELLINGS,
     python_trop_petit,
     compute_spectro, PRESETS, QUALITES, APERCU, apercu_possible,
+    MACHINES, NOMS_MACHINES,
 )
 
 
@@ -216,7 +217,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
         r.backdrop = make_backdrop(
             backdrop, w, h, fps, duration, strength=backdrop_strength,
             clear=backdrop_clear, scale=r.scale * r.taille,
-            screen_dim=screen_dim,
+            screen_dim=screen_dim, ecran=r.ecran,
             travel=r.travel, travel_mode=r.travel_mode, sharp=backdrop_sharp)
     # La machine est deja entierement deployee et joue en continu : on
     # neutralise tout ce qui, dans le moteur de l'intro, appartient au
@@ -509,6 +510,8 @@ def add_look_args(ap):
                          "(plafonne par la duree : un au plus toutes les 25 s)")
     ap.add_argument("--split-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI",
                     help="coups autorises a declencher le dedoublement")
+    ap.add_argument("--machine", default="mpc", choices=sorted(MACHINES),
+                    help="la machine dessinee : mpc, minifreak ou digitakt")
     ap.add_argument("--neon", type=float, default=1.0,
                     help="force de l'eclairage du neon : 1 = d'origine, "
                          "2 = deux fois plus de lumiere autour du trait")
@@ -675,6 +678,7 @@ def look_kwargs(args):
             "wobble": args.wobble, "split": args.split, "split_px": args.split_px,
             "split_count": args.split_count, "split_on": args.split_on,
             "glitch": args.glitch, "step_div": args.step_div,
+            "machine": args.machine,
             "nettete": args.nettete, "taille": args.taille,
             "presence": args.presence, "neon": args.neon,
             "reflet": args.reflet, "tube": args.tube,
