@@ -1118,7 +1118,9 @@ const _duree = () => duree;
   // et le plan gardait l'ancienne machine en tete.
   const m = $('#machine');
   if (m) m.addEventListener('change', () => { seqEcrire(); seqDessine(); });
-  seqPose('');
+  // Les elements existent enfin : c'est ici, et pas plus tot, que le code
+  // partage peut s'y brancher.
+  seqBrancher();
 })();
 
 """

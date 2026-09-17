@@ -1140,7 +1140,15 @@ function seqPose(txt) {
   seqEcrire(); seqDessine();
 }
 
-$('#seqPlus').onclick = () => {
+/* Le branchement, appele par chaque page quand ses elements existent : la v1
+   les a dans sa page, la v2 les fabrique. Le poser au fil du texte marchait
+   pour l'une et pas pour l'autre, et l'erreur — une propriete posee sur rien —
+   coupait la fin du script sans le moindre message. */
+function seqBrancher() {
+  const plus = $('#seqPlus'), mdrop = $('#midiDrop'), mfile = $('#midifile');
+  if (!plus || !mdrop || !mfile) return;
+
+  plus.onclick = () => {
   const dernier = SEQ.length ? SEQ[SEQ.length - 1].t : 0;
   const noms = seqMachines();
   const prec = SEQ.length ? SEQ[SEQ.length - 1].m : $('#machine').value;
@@ -1150,7 +1158,7 @@ $('#seqPlus').onclick = () => {
   seqEcrire(); seqDessine(); _redessine();
 };
 
-$('#seqAuto').onclick = () => {
+  $('#seqAuto').onclick = () => {
   const chaque = Math.max(4, +$('#seqChaque').value || 30);
   const noms = seqMachines(), fin = _duree() || chaque * 4;
   SEQ = [];
@@ -1163,23 +1171,24 @@ $('#seqAuto').onclick = () => {
 };
 
 /* ---------- melodie : le fichier MIDI ---------- */
-const mdrop = $('#midiDrop'), mfile = $('#midifile');
-mdrop.onclick = () => mfile.click();
-mdrop.ondragover = e => { e.preventDefault(); mdrop.classList.add('over'); };
-mdrop.ondragleave = () => mdrop.classList.remove('over');
-mdrop.ondrop = e => { e.preventDefault(); mdrop.classList.remove('over');
-                      if (e.dataTransfer.files[0]) sendMidi(e.dataTransfer.files[0]); };
-mfile.onchange = () => mfile.files[0] && sendMidi(mfile.files[0]);
+  mdrop.onclick = () => mfile.click();
+  mdrop.ondragover = e => { e.preventDefault(); mdrop.classList.add('over'); };
+  mdrop.ondragleave = () => mdrop.classList.remove('over');
+  mdrop.ondrop = e => { e.preventDefault(); mdrop.classList.remove('over');
+                        if (e.dataTransfer.files[0]) sendMidi(e.dataTransfer.files[0]); };
+  mfile.onchange = () => mfile.files[0] && sendMidi(mfile.files[0]);
+  $('#midiOte').onclick = () => { midiOte(); _redessine(); };
+  seqPose('');
+}
 
 function midiOte() {
   $('#midi').value = '';
   midiAvis();
   $('#midimeta').hidden = true;
   $('#midiReglages').hidden = true;
-  mdrop.innerHTML = '<b>Deposer un fichier MIDI</b>.mid, .midi<br>'
+  $('#midiDrop').innerHTML = '<b>Deposer un fichier MIDI</b>.mid, .midi<br>'
     + 'ou cliquer pour choisir';
 }
-$('#midiOte').onclick = () => { midiOte(); _redessine(); };
 
 async function sendMidi(f) {
   try {
@@ -1194,7 +1203,8 @@ async function sendMidi(f) {
                                                         : ' (rien trouve)');
     $('#midimeta').hidden = false;
     $('#midiReglages').hidden = false;
-    mdrop.innerHTML = '<b>' + j.name + '</b>cliquer pour changer de melodie';
+    $('#midiDrop').innerHTML = '<b>' + j.name
+      + '</b>cliquer pour changer de melodie';
     midiAvis();
     _etat(j.notes + ' notes lues dans ' + j.name);
     _redessine();
@@ -2347,7 +2357,7 @@ fetch('/config').then(r => r.json())
       m => '<option value="' + m.cle + '">' + m.nom + ' \u2014 ' + m.quoi
            + '</option>').join('');
     $('#machine').onchange = () => { seqEcrire(); seqDessine(); shot(); };
-    seqPose('');
+    seqDessine();
     QUALITES = c.qualites || {};
     $('#quality').innerHTML = Object.keys(QUALITES).map(
       k => '<option value="' + k + '">' + k + '</option>').join('');
@@ -2504,7 +2514,7 @@ function setStatus(t, bad) {
 """
 
 # Le sequenceur et le depot de melodie sont poses a leur place dans la page.
-PAGE = PAGE.replace("/*__SEQ_MIDI__*/", JS_SEQ_MIDI)
+PAGE = PAGE.replace("/*__SEQ_MIDI__*/", JS_SEQ_MIDI + "\nseqBrancher();\n")
 
 
 
