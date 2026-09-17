@@ -1073,6 +1073,54 @@ l'écran et **n'arrivaient jamais dans le fichier final**, sans le moindre
 message. Le contrôle a été écrit après coup, et la première chose qu'il ait
 faite a été de retrouver cette liste oubliée.
 
+## Ce qui a rendu le calcul deux fois plus rapide
+
+Mesuré sur la même machine, la même image, à la suite — une image chargée
+(tube de verre, spectrogramme, étincelles, anneau, texture de grille) :
+
+| définition | avant | après | gain |
+| --- | --- | --- | --- |
+| 960×540 | 220,6 ms | **150,0 ms** | −32 % |
+| 1920×1080 | 827,8 ms | **478,9 ms** | −42 % |
+
+L'image n'a pas changé : l'écart maximal est de **1 niveau sur 255**, ce que
+seule une soustraction voit. Tout ce qui suit est une réécriture, pas un
+compromis de qualité.
+
+**Le flou gaussien tournait en double précision.** Son noyau était calculé en
+`float64`, et un seul coefficient `float64` multiplié par une image `float32`
+suffit à faire remonter tout le calcul en double : deux fois plus d'octets à
+promener à chaque passe, et une conversion à la fin. Le noyau est maintenant
+ramené à la précision de l'image. Et comme il est symétrique, les deux côtés
+d'un même coefficient s'additionnent avant d'être multipliés, ce qui épargne
+une passe par paire. La fonction est passée de **217 à 63 ms** par image en
+1080p.
+
+**La déformation du tube lisait l'image par le chemin lent.** `image[indices]`
+et `np.take(image, indices)` font la même chose, mais la seconde a une
+implémentation spécialisée : mesuré sur une bande de 1080p, **19,3 ms contre
+5,7**. Les quatre coins de l'interpolation bilinéaire passent par là à chaque
+image.
+
+**Trois multiplications de la taille de l'image, par image, pour rien.** Les
+quatre poids de cette interpolation sont figés — ils ne dépendent que du
+format — et le masque des bords y est maintenant replié. Le peigne des
+scanlines et le vignettage aussi : le vignettage demandait une puissance
+fractionnaire sur deux millions de pixels à chaque image. Les précalculer ne
+coûte pas de mémoire de pointe, puisque cela supprime aussi les tableaux
+temporaires qu'ils créaient.
+
+**Et trois autres coins qui n'en étaient pas.** Les quatre lectures de
+l'interpolation sont le même indice lu un peu plus loin : quatre vues décalées
+du même tableau suffisent, là où l'on fabriquait trois tableaux d'entiers de la
+taille de la bande à chaque image.
+
+Deux pistes essayées et **abandonnées faute de gain mesurable** : remplacer
+`np.zeros` par `np.empty` pour la toile (le système rend des pages déjà à zéro,
+cela ne coûtait rien), et construire l'agrandissement du grain par diffusion
+plutôt que par deux `repeat` (plus lent, le remodelage d'une vue diffusée
+repasse par un chemin générique). Elles ne sont pas dans le code.
+
 ## STUDIO v2 — la même machine, une page plus claire
 
 ```
