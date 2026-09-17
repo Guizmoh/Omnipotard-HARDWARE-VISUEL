@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-17.31"
+VERSION = "2026-09-17.32"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1559,19 +1559,27 @@ MACHINES = {
         "nom": "MiniFreak",
         "build": build_minifreak,
         "ecran": MF_ECRAN,
-        # les touches du clavier s'allument sur les coups ; les seize pas du
-        # sequenceur courent le long des blanches
+        # Faute de melodie, les touches s'allument sur les coups : sans cela
+        # le clavier resterait mort tout le morceau.
         "pads": [mf_blanche(min(21, k + 3)) for k in range(16)],
         "remplir": _remplir_mf,
-        "pas": [mf_blanche(int(i * 21 / 15.0)) for i in range(16)],
+        # Pas de rangee de pas : un clavier n'a pas de sequenceur qui court le
+        # long de ses touches. La premiere version y faisait defiler les seize
+        # pas du morceau, ce qui n'existe sur aucune machine et brouillait les
+        # notes.
+        "pas": [],
         "potards": [(cx, cy, MF_KNOB_R) for cx, cy in MF_KNOBS],
         "bande": MF_STRIPS[0],
         # les 37 touches, une par demi-ton : c'est la machine qui joue
         # vraiment la melodie
         "touches": mf_touches(),
         "note0": 36,
-        "quoi": "clavier 37 touches : les notes s'allument, les pas courent "
-                "le long des blanches",
+        # Machine melodique : ses touches sont des notes, pas des pads. Des
+        # qu'un fichier MIDI est charge, elles lui appartiennent — les coups de
+        # batterie cessent de les allumer, sinon on ne voit plus laquelle joue.
+        "melodique": True,
+        "quoi": "clavier 37 touches : il joue la melodie du fichier MIDI, ou "
+                "s'allume sur les coups a defaut",
     },
     "digitakt": {
         "nom": "Digitakt II",
@@ -3407,6 +3415,20 @@ class Renderer:
         px, py = self.to_px(P, collapse)
         beam.add(px, py, w)
 
+    def _touche(self, beam, r, remplissage, w, collapse, melt, t):
+        """Une touche enfoncee : son remplissage, et son contour epaissi.
+
+        Le halo seul ne distingue pas une touche de sa voisine — sur trente-
+        sept touches serrees, une note allumee se perdait dans la rangee. Il
+        faut que le trait lui-meme s'epaississe : d'ou le contour redessine, et
+        un second rentre a l'interieur.
+        """
+        self._dyn(beam, remplissage, 2.10 * w, collapse, melt, t)
+        self._dyn(beam, rrect_pts(*r, r=0.012), 2.70 * w, collapse, melt, t)
+        self._dyn(beam, rrect_pts(r[0] + 0.012, r[1] + 0.012,
+                                  r[2] - 0.012, r[3] - 0.012, 0.008),
+                  1.55 * w, collapse, melt, t)
+
     def _melt(self, P, u, t):
         """La machine fond dans la forme d'onde du morceau."""
         k = ease_in_out(u)
@@ -3617,6 +3639,12 @@ class Renderer:
             return
 
         mach = self.mach
+        # Sur une machine melodique, les touches appartiennent a la melodie des
+        # qu'il y en a une : seize coups de batterie repartis sur trente-sept
+        # touches allumaient la moitie du clavier, et la note jouee se perdait
+        # au milieu.
+        if self.midi is not None and mach.get("melodique"):
+            flashes = {}
 
         # pads allumes : remplissage
         for k, v in flashes.items():
@@ -3624,7 +3652,25 @@ class Renderer:
                 continue
             mk = float(self.morph_at(mach["pads"][k][0], sweep_x))
             if mk > 0.4 and v > 0.05:
-                self._dyn(beam, mach["remplir"](k), 1.05 * v * mk, collapse, melt, t)
+                if mach.get("melodique"):
+                    # Sur un clavier, un coup se lit comme une touche
+                    # enfoncee, faute de melodie pour le faire. Sans cela le
+                    # clavier restait immobile tout le morceau : c'est la
+                    # rangee de pas, retiree parce qu'aucun clavier n'en a,
+                    # qui lui donnait jusqu'ici son mouvement.
+                    #
+                    # Les coups sont pour la plupart faibles — la moitie sous
+                    # un dixieme, mesure sur le morceau d'essai. Une grille de
+                    # pads les rend quand meme, parce que seize pads voisins
+                    # s'allument ensemble et que leurs halos s'ajoutent ; une
+                    # touche de clavier est seule. On redresse donc la courbe :
+                    # un coup ordinaire passe de 0,08 a 0,31, et le plus fort
+                    # reste sous la saturation.
+                    self._touche(beam, mach["pads"][k], mach["remplir"](k),
+                                 1.05 * (v ** 0.45) * mk, collapse, melt, t)
+                else:
+                    self._dyn(beam, mach["remplir"](k), 1.05 * v * mk,
+                              collapse, melt, t)
 
         # ---- les notes du fichier MIDI : la touche jouee s'allume, contour
         # compris. On la redessine plutot que de lui donner une etiquette a
@@ -3641,15 +3687,13 @@ class Renderer:
                 mk = float(self.morph_at(r[0], sweep_x))
                 if mk <= 0.4:
                     continue
-                # le nombre de lignes suit la hauteur de la touche : quatre
-                # sur un pad de MPC, neuf sur une blanche de clavier, qui est
+                # le nombre de lignes suit la hauteur de la touche : cinq sur
+                # un pad de MPC, douze sur une blanche de clavier, qui est
                 # trois fois plus haute. Un nombre fixe donnait soit un pad
                 # sature, soit une touche a peine teintee.
-                lignes = int(min(9, max(3, round((r[3] - r[1]) / 0.045))))
-                self._dyn(beam, _remplir(r, lignes, 0.010), 1.35 * v * mk,
-                          collapse, melt, t)
-                self._dyn(beam, rrect_pts(*r, r=0.012), 1.70 * v * mk,
-                          collapse, melt, t)
+                lignes = int(min(12, max(4, round((r[3] - r[1]) / 0.038))))
+                self._touche(beam, r, _remplir(r, lignes, 0.010), v * mk,
+                             collapse, melt, t)
 
         # bande de pas : le pas courant s'allume
         if live and 0 <= step < len(mach["pas"]):

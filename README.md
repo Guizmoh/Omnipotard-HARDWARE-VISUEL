@@ -868,10 +868,13 @@ jouée comme telle : il lui suffit d'avoir des organes et de dire lesquels.
 
 Ce que chacune en fait :
 
-- sur le **MiniFreak**, les coups allument les **touches du clavier** — les
-  seize familles sont réparties sur les trente-sept touches, pour qu'une grosse
-  caisse ne rallume pas seulement le bas du meuble — et les seize pas du
-  séquenceur courent le long des blanches ;
+- sur le **MiniFreak**, le clavier joue des **notes**. Avec un fichier MIDI
+  chargé, c'est la touche exacte de la mélodie qui s'enfonce, et elle seule ;
+  sans fichier, les coups du morceau frappent les touches — les seize familles
+  sont réparties sur les trente-sept touches, pour qu'une grosse caisse ne
+  rallume pas seulement le bas du meuble. Le clavier n'a **pas** de rangée de
+  pas : aucune machine ne fait défiler un séquenceur sur ses touches de piano,
+  et cela brouillait la note jouée ;
 - sur le **Digitakt II**, les seize déclencheurs servent de pads **et** de pas
   à la fois, exactement comme sur la vraie : un coup les allume, le séquenceur
   les balaie ;
