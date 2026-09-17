@@ -452,8 +452,13 @@ machine change.
 ### Mélodie : un fichier MIDI
 
 Déposer un **.mid** dans la carte *Mélodie* fait jouer les vraies notes du
-morceau par la machine : sur le MiniFreak c'est la touche exacte qui s'allume,
-sur la MPC et le Digitakt le pad correspondant.
+morceau sur le **clavier du MiniFreak** : c'est la touche exacte qui s'enfonce,
+et elle seule — les coups de batterie cessent alors d'allumer les touches.
+
+La MPC et le Digitakt n'ont pas de clavier, et le fichier n'y change rien.
+Plaquer une mélodie sur seize pads de batterie ne donnait rien de lisible :
+trois choses s'y disputaient les mêmes cellules — les coups, les pas et les
+notes.
 
 Le fichier est **calé tout seul** sur le morceau. Le studio ne compare pas des
 sons mais des instants d'attaque : ceux du fichier MIDI d'un côté, ceux relevés
@@ -461,9 +466,10 @@ dans l'audio de l'autre, et il cherche le glissement qui en fait coïncider le
 plus. La carte affiche le décalage trouvé et s'il est sûr ; le curseur
 **avance / retard** ne sert que s'il tombe un peu à côté.
 
-Une note trop grave ou trop aiguë pour le clavier y est ramenée par octaves :
-la mélodie garde ses notes, elle change seulement d'octave. C'est ce qui permet
-à seize pads de rendre une mélodie écrite sur cinq octaves.
+Une note trop grave ou trop aiguë pour les trente-sept touches y est ramenée
+par octaves : la mélodie garde ses notes, elle change seulement d'octave. C'est
+ce qui permet à un clavier de trois octaves de rendre une mélodie qui en
+parcourt cinq.
 
 Les formats 0 et 1 sont lus, avec leur carte des tempos (un morceau dont le
 tempo change en route reste en place). Rien à installer : le lecteur tient dans
@@ -473,6 +479,8 @@ tempo change en route reste en place). Rien à installer : le lecteur tient dans
 python3 tools/mpc_performance.py morceau.mp3 --machine minifreak \
   --midi melodie.mid --midi-force 1.2
 ```
+
+Avec `--machine mpc` ou `--machine digitakt`, `--midi` est sans effet.
 
 ### Couleur
 

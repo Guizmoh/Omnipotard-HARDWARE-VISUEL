@@ -1086,6 +1086,17 @@ function seqEcrire() {
     ? '0:00=' + $('#machine').value + ', '
       + SEQ.map(e => seqTemps(e.t) + '=' + e.m).join(', ')
     : '';
+  midiAvis();
+}
+
+/* La melodie ne se joue que sur un clavier. Si le plan n'en contient aucun,
+   le fichier est bien charge mais rien ne s'allumera : autant le dire tout de
+   suite plutot que de laisser chercher. */
+function midiAvis() {
+  const a = $('#midiAvis');
+  if (!a) return;
+  const plan = ($('#machines').value || '') + ' ' + $('#machine').value;
+  a.hidden = !$('#midi').value || plan.indexOf('minifreak') >= 0;
 }
 
 function seqDessine() {
@@ -1162,6 +1173,7 @@ mfile.onchange = () => mfile.files[0] && sendMidi(mfile.files[0]);
 
 function midiOte() {
   $('#midi').value = '';
+  midiAvis();
   $('#midimeta').hidden = true;
   $('#midiReglages').hidden = true;
   mdrop.innerHTML = '<b>Deposer un fichier MIDI</b>.mid, .midi<br>'
@@ -1183,6 +1195,7 @@ async function sendMidi(f) {
     $('#midimeta').hidden = false;
     $('#midiReglages').hidden = false;
     mdrop.innerHTML = '<b>' + j.name + '</b>cliquer pour changer de melodie';
+    midiAvis();
     _etat(j.notes + ' notes lues dans ' + j.name);
     _redessine();
   } catch (e) { _etat('melodie refusee : ' + e.message, true); }
@@ -1278,7 +1291,7 @@ PAGE = r"""<!doctype html>
   .seq .seqx{padding:7px 11px;line-height:1}
   .seq .unite{color:var(--dim);font-size:11px;letter-spacing:.06em}
   /* « hidden » ne coupe rien des qu'une autre regle donne un display */
-  #midimeta[hidden], #midiReglages[hidden]{display:none}
+  #midimeta[hidden], #midiReglages[hidden], #midiAvis[hidden]{display:none}
   a.dl{display:block;text-align:center;background:var(--acc);color:#04180c;
     padding:10px;border-radius:5px;text-decoration:none;font-weight:700;
     letter-spacing:.1em;text-transform:uppercase}
@@ -1362,11 +1375,13 @@ PAGE = r"""<!doctype html>
       <button class="ghost" id="midiOte">Oter ce fichier</button>
     </div>
     <input type="hidden" id="midi">
-    <p class="hint">Les vraies notes du morceau, une par une : sur le
-      MiniFreak c'est la touche exacte qui s'allume, sur la MPC et le Digitakt
-      le pad correspondant. Le fichier est <b>cale tout seul</b> sur les
-      attaques du morceau ; le curseur d'avance ne sert que si le calage tombe
-      un peu a cote.<br>
+    <p class="hint err" id="midiAvis" hidden>Aucun MiniFreak dans le plan des machines : la melodie ne sera jouee nulle part. Choisissez-le comme machine du debut, ou ajoutez-le au sequenceur.</p>
+    <p class="hint">Les vraies notes du morceau, une par une, jouees sur le
+      <b>clavier du MiniFreak</b> : c'est la touche exacte qui s'enfonce. La
+      MPC et le Digitakt n'ont pas de clavier &mdash; leurs pads restent a la
+      batterie, et le fichier n'y change rien.<br>
+      Il est <b>cale tout seul</b> sur les attaques du morceau ; le curseur
+      d'avance ne sert que si le calage tombe un peu a cote.<br>
       Une note trop grave ou trop aigue pour le clavier y est ramenee par
       octaves : la melodie garde ses notes, elle change seulement d'octave.</p>
   </div>

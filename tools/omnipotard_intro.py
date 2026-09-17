@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-17.32"
+VERSION = "2026-09-17.33"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -236,12 +236,15 @@ AIDE = {
     "passageTurb": "L'ondulation du trace pendant la deformation. A zero les "
                    "traits glissent proprement d'une forme a l'autre ; plus "
                    "haut, ils serpentent comme un faisceau derange.",
-    "midiForce": "L'eclat des touches jouees par le fichier MIDI. A zero le "
-                 "fichier est charge mais rien ne s'allume.",
+    "midiForce": "L'eclat des touches du clavier jouees par le fichier MIDI. "
+                 "A zero le fichier est charge mais rien ne s'allume. La "
+                 "melodie ne se joue que sur le MiniFreak : la MPC et le "
+                 "Digitakt n'ont pas de clavier, leurs pads restent a la "
+                 "batterie.",
     "midiOffset": "Avance ou retarde le fichier MIDI, en secondes, par "
                   "rapport au calage trouve tout seul. A utiliser si les "
                   "touches s'allument un peu avant ou un peu apres la "
-                  "melodie.",
+                  "melodie entendue.",
     "preset": "Repose tous les curseurs sur un point de depart. Tout reste "
               "modifiable ensuite. « Mes reglages » sont les votres, gardes "
               "d'une fois sur l'autre.",
@@ -1548,11 +1551,6 @@ MACHINES = {
         "pas": [step_rect(k) for k in range(16)],
         "potards": [(cx, cy, QLINK_R) for cx, cy in QLINK],
         "bande": STRIP,
-        # ce qu'une note du fichier MIDI allume, du grave a l'aigu, et la
-        # hauteur de la premiere. Sur une MPC les pads partent du do grave,
-        # c'est la note 36 depuis toujours.
-        "touches": [pad_rect(k // 4, k % 4) for k in range(16)],
-        "note0": 36,
         "quoi": "l'originale : seize pads, bande de pas, grand ecran tactile",
     },
     "minifreak": {
@@ -1570,14 +1568,18 @@ MACHINES = {
         "pas": [],
         "potards": [(cx, cy, MF_KNOB_R) for cx, cy in MF_KNOBS],
         "bande": MF_STRIPS[0],
-        # les 37 touches, une par demi-ton : c'est la machine qui joue
-        # vraiment la melodie
+        # Les 37 touches, une par demi-ton. C'est cette cle qui fait d'une
+        # machine une machine melodique : ses touches sont des notes, pas des
+        # pads. Des qu'un fichier MIDI est charge, elles lui appartiennent — les
+        # coups de batterie cessent de les allumer, sinon on ne voit plus
+        # laquelle joue.
+        #
+        # Les deux autres machines n'en ont pas, et c'est voulu : plaquer une
+        # melodie sur seize pads de batterie ne donnait rien de lisible, trois
+        # choses se disputant les memes cellules — les coups, les pas et les
+        # notes.
         "touches": mf_touches(),
         "note0": 36,
-        # Machine melodique : ses touches sont des notes, pas des pads. Des
-        # qu'un fichier MIDI est charge, elles lui appartiennent — les coups de
-        # batterie cessent de les allumer, sinon on ne voit plus laquelle joue.
-        "melodique": True,
         "quoi": "clavier 37 touches : il joue la melodie du fichier MIDI, ou "
                 "s'allume sur les coups a defaut",
     },
@@ -1591,8 +1593,6 @@ MACHINES = {
         "pas": [dk_trig(k) for k in range(16)],
         "potards": [(cx, cy, DK_ENC_R) for cx, cy in DK_ENC],
         "bande": None,
-        "touches": [dk_trig(k) for k in range(16)],
-        "note0": 36,
         "quoi": "seize declencheurs qui font pads et pas a la fois, huit "
                 "encodeurs",
     },
@@ -3639,11 +3639,12 @@ class Renderer:
             return
 
         mach = self.mach
-        # Sur une machine melodique, les touches appartiennent a la melodie des
-        # qu'il y en a une : seize coups de batterie repartis sur trente-sept
-        # touches allumaient la moitie du clavier, et la note jouee se perdait
-        # au milieu.
-        if self.midi is not None and mach.get("melodique"):
+        # Sur une machine melodique — celle qui declare des touches — elles
+        # appartiennent a la melodie des qu'il y en a une : seize coups de
+        # batterie repartis sur trente-sept touches allumaient la moitie du
+        # clavier, et la note jouee se perdait au milieu.
+        melodique = mach.get("touches") is not None
+        if melodique and self.midi is not None:
             flashes = {}
 
         # pads allumes : remplissage
@@ -3652,7 +3653,7 @@ class Renderer:
                 continue
             mk = float(self.morph_at(mach["pads"][k][0], sweep_x))
             if mk > 0.4 and v > 0.05:
-                if mach.get("melodique"):
+                if melodique:
                     # Sur un clavier, un coup se lit comme une touche
                     # enfoncee, faute de melodie pour le faire. Sans cela le
                     # clavier restait immobile tout le morceau : c'est la
@@ -3681,7 +3682,7 @@ class Renderer:
         # ont pas le meme nombre, et une note tomberait n'importe ou sur une
         # facade en train de se deformer.
         touches = mach.get("touches")
-        if touches is not None and self.midi is not None:
+        if melodique and self.midi is not None:
             for k, v in self.notes_midi(t, touches, mach.get("note0", 36)).items():
                 r = touches[k]
                 mk = float(self.morph_at(r[0], sweep_x))

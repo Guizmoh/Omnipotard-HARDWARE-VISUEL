@@ -376,6 +376,9 @@ PAGE = r"""<!doctype html>
   .niveaux button.on{background:var(--acc);color:#04120a;font-weight:700}
   .cache{display:none}
 
+  .avis{color:var(--mal)}
+  #midimeta[hidden], #midiReglages[hidden], #midiAvis[hidden]{display:none}
+
   /* ---------- sequenceur de machines ----------
      Une ligne par changement : « a [temps] [machine] [x] ». Sans colonnes,
      chaque element prenait toute la largeur et une ligne faisait quatre
@@ -498,7 +501,8 @@ PAGE = r"""<!doctype html>
   <div class="bloc serre">
     <h2>Melodie (fichier MIDI)</h2>
     <div class="drop" id="midiDrop"><b>Deposer un fichier MIDI</b>
-      .mid, .midi &mdash; les vraies notes s'allument sur le clavier</div>
+      .mid, .midi &mdash; les vraies notes jouees sur le clavier du
+      MiniFreak</div>
     <input type="file" id="midifile" accept=".mid,.midi,audio/midi" hidden>
     <div class="meta" id="midimeta" hidden>
       <span>notes <b id="mi-n">-</b></span>
@@ -509,6 +513,7 @@ PAGE = r"""<!doctype html>
       <div id="midiCurseurs"></div>
       <button id="midiOte" style="margin-top:9px">oter la melodie</button>
     </div>
+    <p class="note avis" id="midiAvis" hidden>Aucun MiniFreak dans le plan des machines : la melodie ne sera jouee nulle part. Choisissez-le comme machine du debut, ou ajoutez-le au sequenceur.</p>
     <input type="hidden" id="midi">
   </div>
   <div class="bloc serre">
@@ -1106,6 +1111,12 @@ const _duree = () => duree;
   }
   // la carte qui les portait est vide : majNiveau la fait disparaitre
   majNiveau();
+  // La machine du debut est la premiere entree du plan : en changer doit le
+  // reecrire. Le gestionnaire commun de la v2 ne fait que redessiner l'apercu,
+  // et le plan gardait l'ancienne machine en tete.
+  const m = $('#machine');
+  if (m) m.addEventListener('change', () => { seqEcrire(); seqDessine(); });
+  seqPose('');
 })();
 /*__SEQ_MIDI__*/
 """
