@@ -292,6 +292,19 @@ def purger_apercus(garder=3):
             pass
 
 
+def _entier(v, defaut):
+    """Un nombre venu de la page, ou la valeur par defaut.
+
+    Une liste restee vide envoie une chaine vide ou un null : mieux vaut un
+    rendu a trente images par seconde qu'un « int() argument must be... »
+    au milieu d'un rendu.
+    """
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return int(defaut)
+
+
 def backdrop_path(name):
     """Chemin du fond depose, ou None. Le nom vient de la page, donc on le
     ramene a un simple nom de fichier dans le dossier prevu."""
@@ -508,7 +521,7 @@ class Studio:
                 full = tr["info"]["duration"]
                 info = (tr["info"] if start <= 0.01 and (not dur or dur >= full - 0.01)
                         else analyze(tr["path"], start, dur))
-                job["total"] = int(round(info["duration"] * int(q.get("fps", 30))))
+                job["total"] = int(round(info["duration"] * _entier(q.get("fps"), 30)))
                 job["state"] = "rendu"
 
                 def prog(done, total, el):
@@ -519,9 +532,9 @@ class Studio:
                 # compression : imposer un CRF ici annulerait le reglage.
                 crf = q.get("crf")
                 render_video(tr["path"], job["out"], info=info,
-                             width=int(q.get("width", 1920)),
-                             height=int(q.get("height", 1080)),
-                             fps=int(q.get("fps", 30)),
+                             width=_entier(q.get("width"), 1920),
+                             height=_entier(q.get("height"), 1080),
+                             fps=_entier(q.get("fps"), 30),
                              crf=int(crf) if crf else None,
                              quality=("apercu" if job["apercu"] else
                                       _dans(q.get("quality"), QUALITES,
@@ -749,6 +762,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path in ("/", "/index.html"):
                 return self._send(200, "text/html; charset=utf-8", PAGE.encode("utf-8"))
+            if u.path == "/v2":
+                # importee ici et non en tete : la v2 lit les controles de
+                # cette page-ci, les deux modules se tiennent par la main
+                from studio_v2 import page as page_v2
+                return self._send(200, "text/html; charset=utf-8",
+                                  page_v2().encode("utf-8"))
             if u.path == "/config":
                 return self._json({
                     "version": version(),
@@ -985,6 +1004,7 @@ PAGE = r"""<!doctype html>
 
   <div class="card">
     <h2>Machine</h2>
+    <label for="machine">la machine dessinee</label>
     <select id="machine"></select>
   </div>
 
@@ -2113,6 +2133,9 @@ def main():
     ap.add_argument("--host", default="127.0.0.1",
                     help="127.0.0.1 par defaut : rien n'est expose au reseau")
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--v2", action="store_true",
+                    help="ouvrir la page v2 : moins de reglages a l'ecran, "
+                         "rangee par onglets, tout reste accessible")
     ap.add_argument("track", nargs="?", help="morceau a charger au demarrage")
     args = ap.parse_args()
 
@@ -2125,7 +2148,7 @@ def main():
               % (args.track, info["bpm"], len(info["drops"])))
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    url = "http://%s:%d" % (args.host, args.port)
+    url = "http://%s:%d%s" % (args.host, args.port, "/v2" if args.v2 else "")
     print("Studio Omnipotard  ->  %s" % url)
     print("Ctrl-C pour arreter. Les videos sont ecrites dans out/studio/.")
     if not args.no_browser:

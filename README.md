@@ -1073,6 +1073,57 @@ l'écran et **n'arrivaient jamais dans le fichier final**, sans le moindre
 message. Le contrôle a été écrit après coup, et la première chose qu'il ait
 faite a été de retrouver cette liste oubliée.
 
+## STUDIO v2 — la même machine, une page plus claire
+
+```
+double-cliquer   Lancer-le-studio-v2.bat        (Windows)
+                 Lancer-le-studio-v2.command    (macOS, Linux)
+en ligne         python3 tools/studio_v2.py
+l'adresse        http://127.0.0.1:8765/v2   (la page classique reste sur /)
+```
+
+La v1 pose ses quatre-vingt-dix réglages les uns sous les autres. Tout y est,
+mais il faut déjà savoir ce qu'on cherche. La v2 **ne retire rien — elle
+range**.
+
+**Trois profondeurs**, dans l'en-tête. `simple` montre **21** réglages, `réglé`
+**68**, `tout` les **92**. Rien n'est supprimé : ce qui est caché est à un clic.
+Et un réglage ajouté plus tard n'a pas besoin qu'on pense à lui : il apparaît
+au niveau `tout` tant qu'on ne lui a pas donné de place plus haut.
+
+**Six onglets** — Machine, Couleurs, Réactions, Avaries, Matière, Rendu — au
+lieu d'une colonne de douze cartes à dérouler.
+
+**L'aperçu reste sous les yeux** pendant qu'on règle, collé en haut de sa
+colonne, avec le dépôt du fond, la lecture en mouvement et le rendu juste en
+dessous.
+
+Le reste est identique : mêmes réglages, mêmes phrases d'explication, mêmes
+fréquences annoncées, mêmes préréglages (les fournis et les vôtres), même
+moteur. Les deux pages parlent au même serveur et rendent le même fichier.
+
+### Pourquoi les deux pages ne peuvent pas diverger
+
+La v2 **ne recopie pas** la liste des réglages : elle la **lit dans la page de
+la v1** au démarrage — l'identifiant, le libellé, les bornes, le pas, la valeur
+d'usine, les choix des listes, et jusqu'au déclencheur choisi par défaut pour
+chaque effet. Ajouter un curseur à la v1 le fait apparaître dans la v2 sans y
+toucher.
+
+`tools/verifier_studio.py` le vérifie : tout réglage de la v1 doit se retrouver
+dans la v2, la v2 ne doit rien inventer, et chaque réglage doit avoir une
+profondeur.
+
+Deux défauts que cette lecture a fait apparaître tout de suite, et qui
+n'existaient que dans la v2 :
+
+- la liste des **images par seconde** s'écrit `<option>30</option>` dans la v1,
+  sans attribut `value`. L'extraction ne la voyait pas et la v2 lançait le
+  rendu **sans cadence** — le serveur s'arrêtait sur `int() argument must be…`
+  au milieu du travail. La valeur est maintenant le texte lui-même à défaut
+  d'attribut, et le serveur retombe sur trente images par seconde plutôt que
+  d'échouer.
+
 ## STUDIO WEB — une page HTML, rien a installer
 
 `tools/build_web_studio.py` fabrique **un seul fichier HTML autonome** : on

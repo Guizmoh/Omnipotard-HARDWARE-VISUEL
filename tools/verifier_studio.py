@@ -112,13 +112,24 @@ def main():
     gronder("curseurs sans phrase d'aide", curseurs - set(AIDE))
     gronder("frequences annoncees pour un reglage inexistant", set(COMPTE) - tous)
 
-    # 5. le rendu part des memes reglages que l'apercu, sans les recopier
+    # 5. la v2 propose exactement les memes reglages que la v1
+    import studio_v2 as V2
+    v2 = {c["id"] for o in V2.donnees() for b in o["blocs"]
+          for c in b["controles"]}
+    gronder("reglages de la v1 absents de la v2",
+            (curseurs | listes) - v2 - {"preset", "clipDur", "scrub"})
+    gronder("reglages inventes par la v2", v2 - tous)
+    sans_niveau = {c["id"] for o in V2.donnees() for b in o["blocs"]
+                   for c in b["controles"] if c["niveau"] < 1 or c["niveau"] > 3}
+    gronder("reglages de la v2 sans profondeur", sans_niveau)
+
+    # 6. le rendu part des memes reglages que l'apercu, sans les recopier
     corps = S.PAGE.split("$('#go').onclick", 1)[1][:900]
     if "Object.fromEntries(params())" not in corps:
         soucis.append("le rendu ne repart pas de params() : deux listes de "
                       "reglages a tenir a jour, donc une qui prendra du retard")
 
-    # 6. les prereglages posent des valeurs sur des curseurs qui existent
+    # 7. les prereglages posent des valeurs sur des curseurs qui existent
     gronder("prereglages : noms inconnus du moteur",
             {n for v in PRESETS.values() for n in v} - set(CHAMPS))
     gronder("prereglages : curseurs inconnus de la page",
