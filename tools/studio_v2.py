@@ -37,7 +37,10 @@ import studio as S                                            # noqa: E402
 HORS_ONGLETS = ("Morceau", "Prereglage", "Apercu")
 
 ONGLETS = (
-    ("Machine", ("Machine", "Trait")),
+    # La carte de la melodie est rangee avec la machine : ses deux curseurs
+    # rejoignent ensuite, par le script, la carte ou l'on depose le fichier.
+    # Sans cette ligne ils tombaient dans un onglet « Divers » a eux seuls.
+    ("Machine", ("Machine", "Melodie (fichier MIDI)", "Trait")),
     ("Couleurs", ("Couleur du trait", "Fond", "Image ou video de fond")),
     ("Reactions", ("Reactions au son",)),
     ("Avaries", ("Avaries d'image",)),
@@ -1101,6 +1104,8 @@ const _duree = () => duree;
     const c = document.querySelector('[data-champ="' + id + '"]');
     if (c && cible) cible.appendChild(c);
   }
+  // la carte qui les portait est vide : majNiveau la fait disparaitre
+  majNiveau();
 })();
 /*__SEQ_MIDI__*/
 """

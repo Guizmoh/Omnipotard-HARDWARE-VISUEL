@@ -1326,7 +1326,7 @@ PAGE = r"""<!doctype html>
     </div>
 
     <label for="passage">duree de la deformation &mdash;
-      <span id="v-psg">1.90</span> s</label>
+      <span id="v-psg">1.90 s</span></label>
     <input type="range" id="passage" min="0" max="6" step="0.1" value="1.9">
     <label for="passageTurb">ondulation pendant la deformation &mdash;
       <span id="v-psgt">1.00</span></label>
@@ -1357,7 +1357,7 @@ PAGE = r"""<!doctype html>
         <span id="v-mif">1.00</span></label>
       <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1">
       <label for="midiOffset">avance / retard &mdash;
-        <span id="v-mio">0.00</span> s</label>
+        <span id="v-mio">0.00 s</span></label>
       <input type="range" id="midiOffset" min="-4" max="4" step="0.02" value="0">
       <button class="ghost" id="midiOte">Oter ce fichier</button>
     </div>
@@ -2099,7 +2099,7 @@ async function sendBackdrop(f) {
     shot();
   } catch (e) { setStatus('fond refuse : ' + e.message, true); }
 }
-$('#passage').oninput = e => { $('#v-psg').textContent = (+e.target.value).toFixed(2); shot(); };
+$('#passage').oninput = e => { $('#v-psg').textContent = (+e.target.value).toFixed(2) + ' s'; shot(); };
 $('#passageTurb').oninput = e => { $('#v-psgt').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#midiForce').oninput = e => { $('#v-mif').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#midiOffset').oninput = e => { $('#v-mio').textContent = (+e.target.value).toFixed(2) + ' s'; shot(); };
