@@ -246,6 +246,10 @@ def frame_performance(r, t, duration):
         pas = float(r.cadence) / r.fps
         t = int(t / pas) * pas
     t = r.tape_time(r.scramble_time(r.stutter_time(t)))
+    # Le sequenceur de machines dit laquelle est a l'image a cet instant. On
+    # le fait ici et pas seulement au trace : l'anneau de choc et les
+    # etincelles partent du dessin, et partent donc du bon.
+    r.poser_machine(t)
     # l'image respire sur l'instrument choisi, et peut aussi etre bousculee
     r._zoom = 1.0 + r.punch * r.hit_env(t, r.punch_on, fall=9.0)
     r._cam_z = 1.0                            # jamais de zoom dans l'ecran
@@ -512,6 +516,17 @@ def add_look_args(ap):
                     help="coups autorises a declencher le dedoublement")
     ap.add_argument("--machine", default="mpc", choices=sorted(MACHINES),
                     help="la machine dessinee : mpc, minifreak ou digitakt")
+    ap.add_argument("--machines", default="", metavar="PLAN",
+                    help="sequenceur de machines : a partir de quel instant "
+                         "laquelle est a l'image, par exemple "
+                         "\"0=mpc, 0:32=digitakt, 1:05=minifreak\". Vide, "
+                         "c'est --machine du debut a la fin")
+    ap.add_argument("--passage", type=float, default=1.9, metavar="S",
+                    help="duree de la deformation d'une machine a l'autre, "
+                         "en secondes (0 = changement sec)")
+    ap.add_argument("--passage-turb", type=float, default=1.0, metavar="X",
+                    help="ondulation du trace pendant le passage "
+                         "(0 = deformation lisse)")
     ap.add_argument("--neon", type=float, default=1.0,
                     help="force de l'eclairage du neon : 1 = d'origine, "
                          "2 = deux fois plus de lumiere autour du trait")
@@ -679,6 +694,9 @@ def look_kwargs(args):
             "split_count": args.split_count, "split_on": args.split_on,
             "glitch": args.glitch, "step_div": args.step_div,
             "machine": args.machine,
+            "machines": args.machines,
+            "passage": args.passage,
+            "passage_turb": args.passage_turb,
             "nettete": args.nettete, "taille": args.taille,
             "presence": args.presence, "neon": args.neon,
             "reflet": args.reflet, "tube": args.tube,

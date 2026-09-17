@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-17.29"
+VERSION = "2026-09-17.30"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1555,6 +1555,302 @@ NOMS_MACHINES = tuple(MACHINES)
 
 
 # ==========================================================================
+#  Passer d'une machine a l'autre
+#
+#  Le trace de la premiere se deforme jusqu'a devenir celui de la seconde.
+#  Trois choses decident de la lisibilite du passage.
+#
+#  **Qui devient qui.** Apparier les chemins par leur seule position donnait
+#  une bouillie : un potard rond se changeait en trait de clavier, un logo en
+#  pave de touches. Les organes sont apparies par famille — un chassis devient
+#  un chassis, un pad un declencheur, un potard un encodeur — et seulement
+#  ensuite par position.
+#
+#  **Combien de points.** Les aligner sur le plus long tassait six cents points
+#  sur un trait qui n'en demandait que trente ; le faisceau etant additif, ce
+#  trait devenait une barre blanche. Le nombre de points suit donc la longueur.
+#
+#  **Ce qui ne se deforme pas.** Un D ne devient pas un M en passant par des
+#  formes intermediaires : il passe par de la bouillie. Les textes se croisent
+#  sur place, portes par la facade qui bouge sous eux. De meme un organe sans
+#  equivalent se retire dans son propre centre plutot que de filer vers celui
+#  de l'autre machine, ce qui tirait un trait lumineux en travers.
+# ==========================================================================
+
+# Les familles d'organes, dans l'ordre ou on les apparie.
+FAMILLES_ORGANES = (
+    ("corps", ("body",)),
+    ("ecran", ("lcd",)),
+    ("pad", ("pad", "step")),
+    ("potard", ("qlink", "wheel", "vol")),
+    ("bande", ("strip", "stripbtn")),
+    ("bouton", ("btn", "btnx")),
+    ("texte", ("logo", "mark")),
+)
+
+
+class Fondu:
+    """Un chemin intermediaire : ce que le moteur attend d'un Path."""
+
+    __slots__ = ("P", "N", "s", "ph", "tag", "alpha")
+
+    def __init__(self, P, N, s, ph, tag, alpha=1.0):
+        self.P, self.N, self.s, self.ph, self.tag = P, N, s, ph, tag
+        self.alpha = alpha
+
+
+class RemplirPads:
+    """Le remplissage lumineux d'un pad intermediaire.
+
+    Une classe et non une lambda : le moteur voyage jusqu'aux taches de rendu,
+    et une lambda ne se recopie pas.
+    """
+
+    __slots__ = ("pads",)
+
+    def __init__(self, pads):
+        self.pads = pads
+
+    def __call__(self, k):
+        return _remplir(self.pads[k], 5, 0.026)
+
+
+def _famille_organe(tag):
+    nom = tag.rstrip("0123456789").rstrip(":")
+    for f, prefixes in FAMILLES_ORGANES:
+        if nom in prefixes:
+            return f
+    return "divers"
+
+
+def _cle_organe(p):
+    """Le rang d'un chemin dans sa famille : rangee, puis colonne."""
+    c = p.P.mean(axis=0)
+    return (-round(float(c[1]), 1), float(c[0]))
+
+
+def _paires_organes(a, b):
+    """Qui devient qui : par famille d'abord, par position ensuite."""
+    par_famille = {}
+    for cote, chemins in ((0, a), (1, b)):
+        for p in chemins:
+            par_famille.setdefault(_famille_organe(p.tag), ([], []))[cote].append(p)
+    paires, restes = [], ([], [])
+    for f in list(par_famille):
+        ga, gb = par_famille[f]
+        ga.sort(key=_cle_organe)
+        gb.sort(key=_cle_organe)
+        n = min(len(ga), len(gb))
+        paires += list(zip(ga[:n], gb[:n]))
+        restes[0].extend(ga[n:])
+        restes[1].extend(gb[n:])
+    # ce qui n'a pas trouve sa famille se rabat sur ce qui reste
+    restes[0].sort(key=_cle_organe)
+    restes[1].sort(key=_cle_organe)
+    n = min(len(restes[0]), len(restes[1]))
+    paires += list(zip(restes[0][:n], restes[1][:n]))
+    return paires, restes[0][n:], restes[1][n:]
+
+
+def _relire_chemin(P, n):
+    """Le meme chemin, relu a n points."""
+    if len(P) == n:
+        return P
+    u = np.linspace(0.0, 1.0, n)
+    v = np.linspace(0.0, 1.0, len(P))
+    return np.stack([np.interp(u, v, P[:, 0]), np.interp(u, v, P[:, 1])], axis=1)
+
+
+def _cadre_trace(chemins):
+    """Le rectangle qui contient une machine."""
+    P = np.vstack([p.P for p in chemins])
+    return (float(P[:, 0].min()), float(P[:, 1].min()),
+            float(P[:, 0].max()), float(P[:, 1].max()))
+
+
+def _porte_cadre(P, de, vers):
+    """Le meme trace, rapporte d'un cadre a l'autre."""
+    sx = (vers[2] - vers[0]) / max(1e-6, de[2] - de[0])
+    sy = (vers[3] - vers[1]) / max(1e-6, de[3] - de[1])
+    return np.stack([vers[0] + (P[:, 0] - de[0]) * sx,
+                     vers[1] + (P[:, 1] - de[1]) * sy], axis=1)
+
+
+class Passage:
+    """Le passage d'une machine a une autre, prepare une fois pour toutes."""
+
+    def __init__(self, cle_a, cle_b):
+        self.ma, self.mb = MACHINES[cle_a], MACHINES[cle_b]
+        a, b = self.ma["build"](), self.mb["build"]()
+        # les textes sont mis de cote tout de suite : ils se croisent, ils ne
+        # se deforment pas, et ils ne doivent pas non plus servir de partenaire
+        # a un organe qui chercherait le sien.
+        ta = [q for q in a if _famille_organe(q.tag) == "texte"]
+        tb = [q for q in b if _famille_organe(q.tag) == "texte"]
+        a = [q for q in a if _famille_organe(q.tag) != "texte"]
+        b = [q for q in b if _famille_organe(q.tag) != "texte"]
+        self.cadre_a, self.cadre_b = _cadre_trace(a), _cadre_trace(b)
+        paires, seuls_a, seuls_b = _paires_organes(a, b)
+
+        r = np.random.default_rng(5)
+        self.mues = [(pa.P.astype(np.float32), pb.P.astype(np.float32),
+                      pa.N, pa.s, pa.ph, pa.tag, r.uniform(2.0, 9.0, 2))
+                     for pa, pb in paires]
+        self.seuls = [(q.P.astype(np.float32),
+                       q.P.mean(axis=0).astype(np.float32),
+                       q.N, q.s, q.ph, q.tag, cote, r.uniform(2.0, 9.0, 2))
+                      for cote, groupe in ((0, seuls_a), (1, seuls_b))
+                      for q in groupe]
+        self.textes = [(q.P.astype(np.float32), q.N, q.s, q.ph, q.tag, cote)
+                       for cote, groupe in ((0, ta), (1, tb)) for q in groupe]
+
+    def chemins(self, u, t, turbulence=1.0):
+        """Le trace a l'instant u du passage (0 = machine A, 1 = machine B)."""
+        e = u * u * (3.0 - 2.0 * u)
+        amp = float(np.sin(math.pi * u)) ** 1.3 * 0.048 * turbulence
+        # tout se chevauche au milieu du passage : trente-deux pads glissent
+        # sur seize declencheurs. Le faisceau etant additif, le centre partait
+        # au blanc ; la lumiere baisse donc d'un tiers au plus fort, et revient
+        # a un aux deux bouts.
+        creux = 1.0 - 0.30 * float(np.sin(math.pi * u)) ** 1.5
+        cadre = tuple(x + (y - x) * e for x, y in zip(self.cadre_a, self.cadre_b))
+        out = []
+
+        def trouble(P, s, n, k1, k2):
+            """L'ondulation du passage, le long du chemin."""
+            if amp <= 1e-4:
+                return P
+            ss = np.linspace(0.0, float(s[-1] if len(s) else 1.0), n)
+            return P + np.stack([amp * np.sin(ss * k1 + t * 3.1),
+                                 amp * np.cos(ss * k2 - t * 2.6)], axis=1)
+
+        # ---- les organes qui ont trouve leur equivalent : ils se deforment
+        for Pa, Pb, N, s, ph, tag, (k1, k2) in self.mues:
+            n = max(2, int(round(len(Pa) + (len(Pb) - len(Pa)) * e)))
+            P = _relire_chemin(Pa, n) * (1.0 - e) + _relire_chemin(Pb, n) * e
+            out.append(Fondu(trouble(P, s, n, k1, k2).astype(np.float32),
+                             _relire_chemin(N, n),
+                             np.linspace(0.0, float(s[-1] if len(s) else 1.0), n),
+                             ph, tag, alpha=creux))
+
+        # ---- les solitaires : ils se retirent chez eux en s'eteignant
+        for P0, c, N, s, ph, tag, cote, (k1, k2) in self.seuls:
+            v = (1.0 - e) if cote == 0 else e
+            if v <= 0.02:
+                continue
+            P = c + (P0 - c) * (0.35 + 0.65 * v)
+            out.append(Fondu(trouble(P, s, len(P0), k1, k2).astype(np.float32),
+                             N, s, ph, tag, alpha=creux * v * v))
+
+        # ---- les textes : celui de A s'efface sur place pendant que celui de
+        # B se leve a la sienne, tous deux portes par la facade qui glisse et
+        # s'etire sous eux, et tremblant d'un seul tenant avec elle.
+        fa = 1.0 - smoothstep(0.08, 0.46, u)
+        fb = smoothstep(0.54, 0.92, u)
+        for P0, N, s, ph, tag, cote in self.textes:
+            v = fa if cote == 0 else fb
+            if v <= 0.02:
+                continue
+            P = _porte_cadre(P0, self.cadre_a if cote == 0 else self.cadre_b, cadre)
+            if amp > 1e-4:
+                P = P + np.array([amp * 0.55 * math.sin(ph * 3.0 + t * 3.1),
+                                  amp * 0.55 * math.cos(ph * 4.0 - t * 2.6)])
+            out.append(Fondu(P.astype(np.float32), N, s, ph, tag,
+                             alpha=creux * v))
+        return out
+
+    def plan(self, u):
+        """Le plan intermediaire : ecran, pads et pas suivent le trace."""
+        e = u * u * (3.0 - 2.0 * u)
+
+        def melange(x, y):
+            return tuple(float(p + (q - p) * e) for p, q in zip(x, y))
+
+        a, b = self.ma, self.mb
+        pads = [melange(x, y) for x, y in zip(a["pads"], b["pads"])]
+        pas = [melange(x, y) for x, y in zip(a["pas"], b["pas"])]
+        n = min(len(a["potards"]), len(b["potards"]))
+        pot = [melange(a["potards"][k], b["potards"][k]) for k in range(n)]
+        bande = (melange(a["bande"], b["bande"]) if a["bande"] and b["bande"]
+                 else (a["bande"] if e < 0.5 else b["bande"]))
+        return {"nom": "passage", "ecran": melange(a["ecran"], b["ecran"]),
+                "pads": pads, "remplir": RemplirPads(pads),
+                "pas": pas, "potards": pot, "bande": bande, "quoi": ""}
+
+
+def lire_temps(txt):
+    """Un instant, ecrit en secondes (90) ou en minutes (1:30)."""
+    txt = str(txt).strip().replace(",", ".")
+    if not txt:
+        return None
+    try:
+        if ":" in txt:
+            m, sec = txt.rsplit(":", 1)
+            return float(int(m or 0)) * 60.0 + float(sec or 0)
+        return float(txt)
+    except ValueError:
+        return None
+
+
+def ecrire_temps(v):
+    """L'ecriture inverse : 95.0 donne 1:35."""
+    v = max(0.0, float(v))
+    m, sec = divmod(int(round(v)), 60)
+    return "%d:%02d" % (m, sec)
+
+
+def lire_plan_machines(txt, defaut="mpc", duree=None):
+    """Le sequenceur de machines : a partir de quel instant laquelle est a
+    l'image.
+
+    S'ecrit « 0=mpc, 0:32=digitakt, 1:05=minifreak ». Les separateurs sont
+    larges a dessein : la page du studio ecrit proprement, mais un reglage
+    enregistre a la main doit passer aussi.
+    """
+    defaut = defaut if defaut in MACHINES else "mpc"
+    plan = []
+    for bout in str(txt or "").replace(";", ",").replace("\n", ",").split(","):
+        bout = bout.strip()
+        if not bout:
+            continue
+        for sep in ("=", ">", "@"):
+            bout = bout.replace(sep, " ")
+        morceaux = bout.split()
+        if len(morceaux) == 1:
+            quand, nom = "0", morceaux[0]
+        else:
+            quand, nom = morceaux[0], morceaux[-1]
+        nom = nom.strip().lower()
+        quand = lire_temps(quand)
+        if quand is None or nom not in MACHINES:
+            continue
+        if duree is not None and quand >= duree:
+            continue
+        plan.append((max(0.0, quand), nom))
+    if not plan:
+        return [(0.0, defaut)]
+    plan.sort(key=lambda e: e[0])
+    # deux machines au meme instant : la derniere ecrite gagne. Et une machine
+    # annoncee deux fois de suite ne fait pas de passage.
+    propre = []
+    for quand, nom in plan:
+        if propre and abs(propre[-1][0] - quand) < 1e-6:
+            propre[-1] = (quand, nom)
+        elif propre and propre[-1][1] == nom:
+            continue
+        else:
+            propre.append((quand, nom))
+    if propre[0][0] > 0.0:
+        propre.insert(0, (0.0, defaut if defaut != propre[0][1] else propre[0][1]))
+    return propre
+
+
+def ecrire_plan_machines(plan):
+    """L'ecriture inverse, telle que la page la relit."""
+    return ", ".join("%s=%s" % (ecrire_temps(q), n) for q, n in plan)
+
+
+# ==========================================================================
 #  La courbe du titre : un seul trait continu, de la ligne de base au mot
 # ==========================================================================
 
@@ -2129,7 +2425,7 @@ class Renderer:
     def __init__(self, w, h, fps, duration, audio, curve=True, seed=7,
                  palette="vert", subtitle=SUB_TXT, bg=None, bg_color=None,
                  bg_strength=1.0, bg_clear=0.55, bg_anim=0.0, nettete=1.0,
-                 machine="mpc"):
+                 machine="mpc", machines=None, passage=1.9, passage_turb=1.0):
         self.W, self.H = w, h
         self.fps = fps
         self.dur = duration
@@ -2199,7 +2495,18 @@ class Renderer:
         self._masques = {}
 
         # ---- geometrie
+        #
+        # Le sequenceur de machines : a partir de quel instant laquelle est a
+        # l'image. Une seule entree — le cas ordinaire — et rien ne change de
+        # tout le rendu : pas de passage a calculer, pas de trace a refaire.
         self.machine = (str(machine) if str(machine) in MACHINES else "mpc")
+        self.plan_mach = lire_plan_machines(machines, self.machine, duration)
+        self.machine = self.plan_mach[0][1]
+        self.passage = max(0.0, float(passage))
+        self.passage_turb = float(passage_turb)
+        self._passages = {}                  # prepares a la demande
+        self._cle_mach = (self.machine, None, 0.0)
+        self._plan = None                    # plan intermediaire, en passage
         self.ecran = self.mach["ecran"]
         self.mpc = self.mach["build"]()
         (self.tP, self.tN, self.tkind,
@@ -2416,10 +2723,69 @@ class Renderer:
     def mach(self):
         """Le plan de la machine dessinee.
 
-        Garde par son nom et non par son contenu : le dictionnaire porte des
-        fonctions, et le moteur voyage jusqu'aux taches de rendu.
+        Hors passage il est garde par son nom et non par son contenu : le
+        dictionnaire porte des fonctions, et le moteur voyage jusqu'aux taches
+        de rendu. Pendant un passage c'est un plan intermediaire, fabrique
+        pour l'image en cours.
         """
-        return MACHINES[self.machine]
+        return self._plan if self._plan is not None else MACHINES[self.machine]
+
+    def etape_machine(self, t):
+        """Quelle machine est a l'image a l'instant t.
+
+        Renvoie (nom_a, nom_b, u). Hors passage, nom_b vaut None. Pendant un
+        passage, u va de 0 (encore A) a 1 (deja B) ; le passage se termine a
+        l'instant inscrit au sequenceur, il le precede donc.
+        """
+        plan = self.plan_mach
+        i = 0
+        while i + 1 < len(plan) and t >= plan[i + 1][0]:
+            i += 1
+        a = plan[i][1]
+        if i + 1 >= len(plan) or self.passage <= 1e-6:
+            return a, None, 0.0
+        debut = plan[i + 1][0] - self.passage
+        b = plan[i + 1][1]
+        if t < debut or b == a:
+            return a, None, 0.0
+        return a, b, min(1.0, max(0.0, (t - debut) / self.passage))
+
+    def _le_passage(self, a, b):
+        """Le passage de a vers b, prepare a la premiere image qui en a
+        besoin. Chaque tache de rendu prepare les siens : ils pesent plus lourd
+        que le temps de les refaire."""
+        if self._passages is None:
+            self._passages = {}
+        p = self._passages.get((a, b))
+        if p is None:
+            p = self._passages[(a, b)] = Passage(a, b)
+        return p
+
+    def poser_machine(self, t):
+        """Pose la machine de l'instant : son trace, son plan, son ecran.
+
+        Appelee au debut de chaque image. Hors passage rien n'est recalcule
+        tant que la machine ne change pas, donc un rendu a machine unique ne
+        paie rien du tout.
+        """
+        a, b, u = self.etape_machine(t)
+        cle = (a, b, t if b is not None else 0.0)
+        if cle == self._cle_mach:
+            return
+        self._cle_mach = cle
+        if b is None:
+            if self.machine != a or self._plan is not None:
+                self.machine = a
+                self._plan = None
+                self.mpc = MACHINES[a]["build"]()
+                self.ecran = MACHINES[a]["ecran"]
+                self._pool = None
+            return
+        p = self._le_passage(a, b)
+        self._plan = p.plan(u)
+        self.mpc = p.chemins(u, t, self.passage_turb)
+        self.ecran = self._plan["ecran"]
+        self._pool = None
 
     def _masque(self, nom, defaut="grosse caisse"):
         """Les evenements que ce declencheur retient, une fois pour toutes.
@@ -2599,6 +2965,12 @@ class Renderer:
     # sur un « object has no attribute ». Avec ces replis il repart sur la
     # valeur d'origine, et la page, elle, previent qu'il faut relancer.
     machine = "mpc"
+    plan_mach = ((0.0, "mpc"),)
+    passage = 1.9
+    passage_turb = 1.0
+    _plan = None
+    _cle_mach = None
+    _passages = None
     ecran = SCREEN
     taille = 1.0
     presence = 1.0
@@ -2623,6 +2995,8 @@ class Renderer:
         """
         etat = {k: v for k, v in self.__dict__.items() if k not in self._WARP}
         etat["_mono"] = None          # ne sert qu'a relisser la courbe
+        etat["_passages"] = {}        # chaque tache prepare les siens
+        etat["_pool"] = None          # se refait en une fraction de seconde
         return etat
 
     def __setstate__(self, state):
@@ -3077,7 +3451,15 @@ class Renderer:
                 beam.add(px, py, (1.25 if j == 0 else 0.30) * (0.6 ** j))
 
     def _machine(self, beam, t, collapse, sweep_x, melt, rng, shake):
-        """La MPC Live III : trace revele par le balayage, organes pilotes par le son."""
+        """La machine a l'image : trace revele par le balayage, organes pilotes
+        par le son.
+
+        Elle commence par se poser : le sequenceur dit laquelle des trois est
+        a l'image a cet instant, et si elle est en train de se deformer vers
+        la suivante. Les echos, dessines a des instants anterieurs, montrent
+        donc la machine telle qu'elle etait alors.
+        """
+        self.poser_machine(t)
         tl = self.tl
         live = t >= tl.start("groove") - 0.05
         flashes = self.pad_flashes(t) if live else {}
