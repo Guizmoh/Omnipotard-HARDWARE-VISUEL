@@ -1389,6 +1389,43 @@ def mf_blanche_contour(i):
     return P
 
 
+def _lignes(r, serre=0.030, m=0.010):
+    """Un rectangle rempli de lignes horizontales, espacees de `serre`.
+
+    Ecrit ici et non plus bas avec les autres remplissages : le clavier se
+    construit au chargement du module, avant eux.
+    """
+    x0, y0, x1, y1 = r
+    n = max(2, int(round((y1 - y0 - 2 * m) / serre)))
+    return np.vstack([np.stack([np.linspace(x0 + m, x1 - m, 24),
+                                np.full(24, y)], axis=1)
+                      for y in np.linspace(y0 + m, y1 - m, n)])
+
+
+def mf_blanche_remplir(i, serre=0.030):
+    """Le remplissage d'une blanche : toute la touche, echancrure comprise.
+
+    Ne remplir que la partie large laissait le haut de la touche eteint, et
+    une note jouee n'avait l'air qu'a moitie enfoncee. On suit donc la vraie
+    forme — large en bas, etroite entre les noires — avec le meme ecart entre
+    les lignes de part et d'autre, pour que le passage ne se voie pas.
+    """
+    x0, yb, x1, yt = mf_blanche(i)
+    demi = MF_NOIRE_L * 0.5
+    bord = MF_CLAV[0] + i * MF_TOUCHE
+    xg = bord + demi + 0.004 if _mf_noire_a(i - 1) else x0
+    xd = bord + MF_TOUCHE - demi - 0.004 if _mf_noire_a(i) else x1
+    yn, m = MF_NOIRE_Y, 0.010
+    out = []
+    for (a_, b_, ya, yb_) in ((x0, x1, yb + m, yn - m * 0.4),
+                              (xg, xd, yn + m * 0.4, yt - m)):
+        n = max(2, int(round((yb_ - ya) / serre)))
+        for y in np.linspace(ya, yb_, n):
+            out.append(np.stack([np.linspace(a_ + m, b_ - m, 24),
+                                 np.full(24, y)], axis=1))
+    return np.vstack(out)
+
+
 def mf_noire(i):
     """La i-eme touche noire, posee a cheval sur deux blanches."""
     oct_, k = divmod(i, 5)
@@ -1396,6 +1433,42 @@ def mf_noire(i):
     x = MF_CLAV[0] + (blanche + 1) * MF_TOUCHE
     return (x - MF_NOIRE_L * 0.5, MF_NOIRE_Y,
             x + MF_NOIRE_L * 0.5, MF_CLAV[3])
+
+
+def arrondir(P, r, n=6):
+    """Arrondit les angles d'un contour ferme.
+
+    Chaque sommet est recule le long de ses deux aretes, et les deux points
+    obtenus sont relies par une courbe qui passe pres de l'ancien sommet. Les
+    angles rentrants s'arrondissent comme les sortants, ce qu'il faut ici :
+    une touche blanche est echancree, et ses coins rentrants doivent s'adoucir
+    comme les autres.
+
+    Le rayon est rabattu a la moitie de la plus courte arete, sans quoi deux
+    angles voisins se mangeraient l'un l'autre sur une echancrure etroite.
+    """
+    P = np.asarray(P, dtype=np.float64)
+    if len(P) > 1 and np.allclose(P[0], P[-1]):
+        P = P[:-1]
+    m = len(P)
+    if m < 3 or r <= 0.0:
+        return _boucle(P)
+    t = np.linspace(0.0, 1.0, n)[:, None]
+    out = []
+    for i in range(m):
+        v = P[i]
+        a, b = P[i - 1], P[(i + 1) % m]
+        da, db = a - v, b - v
+        la, lb = float(np.hypot(*da)), float(np.hypot(*db))
+        if la < 1e-9 or lb < 1e-9:
+            out.append(v[None, :])
+            continue
+        d = min(r, la * 0.5, lb * 0.5)
+        p1, p2 = v + da / la * d, v + db / lb * d
+        # courbe de Bezier quadratique : elle part de p1, tend vers le sommet,
+        # et arrive en p2 — exactement l'allure d'un coin adouci
+        out.append((1 - t) ** 2 * p1 + 2 * (1 - t) * t * v + t ** 2 * p2)
+    return _boucle(np.vstack(out))
 
 
 def _boucle(P):
@@ -1416,18 +1489,22 @@ def mf_clavier():
     noire est posee a cheval entre deux blanches, donc son bord gauche tombe
     entre les leurs.
     """
-    t = [(mf_blanche(i)[0], mf_blanche_bas(i), _boucle(mf_blanche_contour(i)))
+    t = [(mf_blanche(i)[0], mf_blanche(i),
+          arrondir(mf_blanche_contour(i), 0.012),
+          mf_blanche_remplir(i))
          for i in range(22)]
-    t += [(mf_noire(i)[0], mf_noire(i), _boucle(rrect_pts(*mf_noire(i), r=0.012)))
+    t += [(mf_noire(i)[0], mf_noire(i),
+           _boucle(rrect_pts(*mf_noire(i), r=0.012)),
+           _lignes(mf_noire(i), 0.030))
           for i in range(15)]
     t.sort(key=lambda e: e[0])
-    return [(r, c) for _, r, c in t]
+    return [(r, c, f) for _, r, c, f in t]
 
 
 MF_CLAVIER = mf_clavier()
 # les seize touches que les coups de batterie allument, faute de melodie :
 # des blanches, reparties sur tout le clavier
-MF_PADS = [[k for k, (r, _) in enumerate(MF_CLAVIER)
+MF_PADS = [[k for k, (r, _, _) in enumerate(MF_CLAVIER)
             if abs(r[0] - mf_blanche(i)[0]) < 1e-9][0]
            for i in (min(21, j + 3) for j in range(16))]
 
@@ -1455,7 +1532,7 @@ def build_minifreak(step=STEP):
     # les 37 touches, du grave a l'aigu : une seule suite de pads, etalee sur
     # tout le clavier pour qu'un coup de grosse caisse ne rallume pas seulement
     # le bas du meuble. Les contours sont deja fermes.
-    for rang, (_, contour) in enumerate(MF_CLAVIER):
+    for rang, (_, contour, _) in enumerate(MF_CLAVIER):
         add(Path(contour, tag="pad%d" % ((rang * 16) // len(MF_CLAVIER)),
                  step=step))
 
@@ -1603,7 +1680,7 @@ def _remplir(r, nlines=5, m=0.022):
 # se recopie pas — le rendu s'arretait sur « Can't pickle <lambda> » des qu'on
 # choisissait une autre machine que la MPC.
 def _remplir_mf(k):
-    return _remplir(MF_CLAVIER[MF_PADS[k]][0], 5, 0.010)
+    return MF_CLAVIER[MF_PADS[k]][2]
 
 
 def _remplir_dk(k):
@@ -1652,8 +1729,11 @@ MACHINES = {
         # melodie sur seize pads de batterie ne donnait rien de lisible, trois
         # choses se disputant les memes cellules — les coups, les pas et les
         # notes.
-        "touches": [r for r, _ in MF_CLAVIER],
-        "contours": [c for _, c in MF_CLAVIER],
+        "touches": [r for r, _, _ in MF_CLAVIER],
+        "contours": [c for _, c, _ in MF_CLAVIER],
+        # le remplissage suit la vraie forme : une blanche
+        # s'allume jusqu'en haut, entre les noires
+        "remplis": [f for _, _, f in MF_CLAVIER],
         "note0": 36,
         "quoi": "clavier 37 touches : il joue la melodie du fichier MIDI, ou "
                 "s'allume sur les coups a defaut",
@@ -3502,12 +3582,14 @@ class Renderer:
         son rectangle : une blanche de clavier est echancree sous les noires,
         et la rallumer en rectangle aurait remis le trait qu'on vient d'oter.
         """
-        self._dyn(beam, remplissage, 2.10 * w, collapse, melt, t)
-        self._dyn(beam, rrect_pts(*r, r=0.012) if contour is None else contour,
-                  2.70 * w, collapse, melt, t)
-        self._dyn(beam, rrect_pts(r[0] + 0.012, r[1] + 0.012,
-                                  r[2] - 0.012, r[3] - 0.012, 0.008),
-                  1.55 * w, collapse, melt, t)
+        self._dyn(beam, remplissage, 2.60 * w, collapse, melt, t)
+        cont = rrect_pts(*r, r=0.012) if contour is None else contour
+        self._dyn(beam, cont, 3.20 * w, collapse, melt, t)
+        # le contour repasse une seconde fois, legerement decale : c'est ce qui
+        # donne au trait son epaisseur, la ou un simple gain ne fait qu'elargir
+        # le halo
+        self._dyn(beam, cont + np.array([0.0, 0.004]), 1.90 * w,
+                  collapse, melt, t)
 
     def _melt(self, P, u, t):
         """La machine fond dans la forme d'onde du morceau."""
@@ -3774,10 +3856,17 @@ class Renderer:
                 # un pad de MPC, douze sur une blanche de clavier, qui est
                 # trois fois plus haute. Un nombre fixe donnait soit un pad
                 # sature, soit une touche a peine teintee.
-                lignes = int(min(12, max(4, round((r[3] - r[1]) / 0.038))))
-                cont = mach.get("contours")
-                self._touche(beam, r, _remplir(r, lignes, 0.010), v * mk,
-                             collapse, melt, t,
+                # Le remplissage de la machine quand elle en fournit un : il
+                # suit la vraie forme de la touche, echancrure comprise. Sans
+                # lui, le haut d'une blanche restait eteint et la note n'avait
+                # l'air qu'a moitie enfoncee.
+                remplis, cont = mach.get("remplis"), mach.get("contours")
+                if remplis is not None:
+                    fond = remplis[k]
+                else:
+                    lignes = int(min(12, max(4, round((r[3] - r[1]) / 0.038))))
+                    fond = _remplir(r, lignes, 0.010)
+                self._touche(beam, r, fond, v * mk, collapse, melt, t,
                              contour=cont[k] if cont else None)
 
         # bande de pas : le pas courant s'allume

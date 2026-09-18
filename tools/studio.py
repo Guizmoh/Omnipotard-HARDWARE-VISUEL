@@ -1770,9 +1770,12 @@ PAGE = r"""<!doctype html>
           <option value="1280x720">720p</option>
           <option value="1080x1080">carre 1080</option>
           <option value="1080x1920">vertical 1080</option>
+          <option value="568x320">320p &mdash; essai rapide</option>
+          <option value="320x568">320p vertical &mdash; essai rapide</option>
         </select></div>
       <div><label for="fps">images/s</label>
-        <select id="fps"><option>30</option><option>60</option><option>24</option></select></div>
+        <select id="fps"><option>30</option><option>60</option><option>24</option>
+          <option>12</option></select></div>
     </div>
     <label for="quality">qualite du fichier</label>
     <select id="quality"></select>

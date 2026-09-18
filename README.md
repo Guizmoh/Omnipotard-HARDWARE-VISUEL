@@ -1,4 +1,4 @@
-# Glitch-visualisateur — intro OMNIPOTARD
+# Omnipotard — HARDWARE VISUEL
 
 Générateur d'une intro vidéo « oscilloscope » (vert fluo sur noir) pour les clips
 **Omnipotard** : un balayage d'oscillateur dessine une MPC Live III, la machine
@@ -382,8 +382,8 @@ et il suffit de supprimer le dossier pour tout enlever.
 En ligne de commande, c'est :
 
 ```bash
-git clone https://github.com/Guizmoh/Glitch-visualisateur.git
-cd Glitch-visualisateur
+git clone https://github.com/Guizmoh/Omnipotard-HARDWARE-VISUEL.git
+cd Omnipotard-HARDWARE-VISUEL
 pip install numpy pillow          # ffmpeg : voir « Rendu » plus haut
 python3 tools/studio.py
 # le navigateur s'ouvre sur http://127.0.0.1:8765

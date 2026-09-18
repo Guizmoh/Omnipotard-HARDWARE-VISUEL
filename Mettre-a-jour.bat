@@ -30,8 +30,8 @@ findstr /b "VERSION = " tools\omnipotard_intro.py
 echo.
 pause
 
-set "ZIPURL=https://github.com/Guizmoh/Glitch-visualisateur/archive/refs/heads/claude/omnipotard-intro-video-5bj8zu.zip"
-set "RACINE=Glitch-visualisateur-claude-omnipotard-intro-video-5bj8zu"
+set "ZIPURL=https://github.com/Guizmoh/Omnipotard-HARDWARE-VISUEL/archive/refs/heads/main.zip"
+set "RACINE=Omnipotard-HARDWARE-VISUEL-main"
 
 echo   Telechargement...
 REM Mettre-a-jour.bat ne se remplace pas lui-meme : cmd.exe relit le fichier
@@ -43,7 +43,7 @@ if errorlevel 1 (
     echo.
     echo   La mise a jour a echoue. Pas de connexion, ou GitHub injoignable.
     echo   Vous pouvez aussi telecharger le dossier a la main ici :
-    echo   https://github.com/Guizmoh/Glitch-visualisateur
+    echo   https://github.com/Guizmoh/Omnipotard-HARDWARE-VISUEL
     echo.
     pause
     exit /b 1

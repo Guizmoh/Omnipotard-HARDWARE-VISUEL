@@ -6,8 +6,8 @@
 
 cd "$(dirname "$0")" || exit 1
 
-ZIPURL="https://github.com/Guizmoh/Glitch-visualisateur/archive/refs/heads/claude/omnipotard-intro-video-5bj8zu.zip"
-RACINE="Glitch-visualisateur-claude-omnipotard-intro-video-5bj8zu"
+ZIPURL="https://github.com/Guizmoh/Omnipotard-HARDWARE-VISUEL/archive/refs/heads/main.zip"
+RACINE="Omnipotard-HARDWARE-VISUEL-main"
 
 # Ce fichier doit etre DANS le dossier du projet, a cote de
 # Lancer-le-studio.command. Lance ailleurs, il y deverserait tout le projet.
