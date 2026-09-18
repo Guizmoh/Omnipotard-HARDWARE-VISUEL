@@ -463,9 +463,35 @@ notes.
 Le fichier est pris **tel quel**. Un MIDI exporté du même projet que le morceau
 est déjà à l'heure : son décalage vaut zéro, et c'est ce qu'on lui laisse.
 
-Pour le vérifier, la carte annonce l'instant de la **première note**. Comparez-le
-à l'instant où la mélodie s'entend dans le morceau ; s'il y a un écart, le
-curseur **avance / retard** (± 10 s, au centième) le rattrape.
+Pour le vérifier, la carte annonce à quel instant **de la vidéo** tombe la
+première note. Lancez l'aperçu là et regardez si la touche s'allume avec le
+son — aucun calcul ne le dit mieux que cette comparaison-là. La ligne prévient
+aussi quand la note tombe hors du plan rendu, ce qui arrive vite : un fichier
+dont la première note est à 5 s et un plan qui démarre à 30 s ne montrent rien.
+
+#### Si c'est décalé : les boutons, pas le curseur
+
+Six boutons décalent le fichier d'exactement **un quart de temps, un temps ou
+une mesure** du morceau. C'est le bon outil, et la mesure dit pourquoi. Sur le
+fichier d'essai (170 notes) comparé au morceau :
+
+| ce qu'on mesure | valeur |
+| --- | --- |
+| écart de phase sur la grille de doubles-croches | **0,033 s** (pour un pas de 0,176 s) |
+| rapport des tempos MIDI / audio | **0,998** — soit 0,06 s de dérive sur 35 s |
+
+Autrement dit un MIDI exporté d'un projet tombe **déjà** sur la grille du
+morceau. Ce qui manque n'est jamais un réglage fin, c'est un **nombre entier de
+temps**. Les boutons explorent exactement cette inconnue sans jamais sortir de
+la grille ; le curseur au millième, lui, ne sert qu'à rattraper un fichier qui
+n'est pas sur la grille du tout.
+
+Le curseur va de ± 60 s (et non ± 10 s : un fichier peut couvrir une section
+prise loin dans le morceau) et le pas des boutons n'est pas arrondi — arrondir
+au centième ajoutait cinq millisecondes d'erreur par clic, de quoi sortir de la
+grille au bout d'une quinzaine.
+
+#### Pourquoi le calage automatique ne peut pas marcher
 
 Une case **chercher le décalage tout seul** existe, décochée par défaut. Elle
 compare les attaques du fichier à celles du morceau. Mesuré sur le morceau
@@ -483,8 +509,25 @@ raison tient en une phrase : les attaques relevées dans l'audio sont surtout de
 coups de batterie — six mille sept cents sur quatre minutes — là où une mélodie
 ne porte que quelques centaines de notes tenues, qui ne tombent pas dessus.
 
+Chercher par les **hauteurs** plutôt que par les attaques ne sauve rien : la
+méthode a été essayée sur le fichier d'essai, un motif de doubles-croches
+répété sur une seule note. Comparé au morceau entier, les huit meilleurs
+décalages se tiennent à **3 % les uns des autres** et s'étalent sur dix-huit
+secondes, espacés d'exactement un temps. Un tel motif ressemble à lui-même
+partout dans le morceau : aucun algorithme ne peut choisir, et un qui prétend
+le faire se trompe en silence.
+
 À ne cocher que pour une piste de **batterie**, où il retrouve le décalage
 exactement.
+
+#### Les notes tenues relâchent au bout de 1,2 s
+
+Une nappe ou un accord plaqué gardait sa touche allumée aussi longtemps que la
+note durait. Au bout de trois ou quatre secondes la moitié du clavier restait
+éclairée et la note qui venait d'être jouée ne se distinguait plus. Passé
+`TENUE_MAX` (1,2 s), la touche relâche donc comme si la note s'arrêtait là : le
+son continue, le clavier passe à la suite. Une note plus courte n'est pas
+touchée.
 
 Une note trop grave ou trop aiguë pour les trente-sept touches y est ramenée
 par octaves : la mélodie garde ses notes, elle change seulement d'octave. C'est

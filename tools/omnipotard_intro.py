@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-18.2"
+VERSION = "2026-09-18.3"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1402,15 +1402,28 @@ def _lignes(r, serre=0.030, m=0.010):
                       for y in np.linspace(y0 + m, y1 - m, n)])
 
 
-# Brightness constants for key illumination
-ECLAT_TOUCHE = 0.60  # dense surface brightness
-ECLAT_TRAIT = 0.95   # stripe overlay brightness
-TOUCHE_SERRE = 0.0030  # dense grid spacing (tight)
-TRAIT_SERRE = 0.030    # stripe spacing (0.030 spacing with 24 points per line)
+# Une touche enfoncee s'allume en deux couches. La nappe serree remplit la
+# surface : a 0,0030 les points tombent a un pixel et demi l'un de l'autre en
+# 1080p, l'etalement du faisceau les rejoint, et la touche est pleine. Les
+# traits, dix fois plus espaces, repassent par-dessus : sans eux la touche
+# n'etait qu'une tache, avec eux seuls elle avait l'air rayee plutot
+# qu'allumee. La nappe etant dix fois plus dense, elle pese d'autant moins
+# par point — c'est la lumiere par unite de surface qui compte.
+ECLAT_TOUCHE = 0.60
+ECLAT_TRAIT = 0.95
+TOUCHE_SERRE = 0.0030
+TRAIT_SERRE = 0.030
+
+# Combien de temps une touche reste allumee, au plus. Une note tenue — nappe,
+# accord plaque — gardait sa touche eclairee aussi longtemps qu'elle durait :
+# au bout de quelques secondes la moitie du clavier restait allumee et la note
+# qui venait d'etre jouee ne se distinguait plus. Passe ce delai la touche
+# relache, meme si le son continue.
+TENUE_MAX = 1.2
 
 
 def _grille(r, m=0.009):
-    """Dense point grid for smooth key illumination surface."""
+    """Un rectangle rempli d'une nappe de points serree."""
     x0, y0, x1, y1 = r
     serre = TOUCHE_SERRE
     nx = max(2, int(round((x1 - x0 - 2 * m) / serre)))
@@ -1421,10 +1434,11 @@ def _grille(r, m=0.009):
 
 
 def mf_blanche_remplir(i, serre=TRAIT_SERRE):
-    """Stripe overlay for white key: horizontal lines with visible texture.
+    """Les traits d'une blanche : la couche qui repasse sur la nappe.
 
-    Used on top of the dense illumination grid to provide visual stripes
-    while maintaining the bright surface underneath.
+    Meme forme que la nappe — large en bas, etroite entre les noires — mais
+    dix fois plus espacee, pour que le trait se voie encore sur la surface
+    pleine.
     """
     x0, yb, x1, yt = mf_blanche(i)
     demi = MF_NOIRE_L * 0.5
@@ -1443,7 +1457,11 @@ def mf_blanche_remplir(i, serre=TRAIT_SERRE):
 
 
 def mf_blanche_surface(i):
-    """Dense grid fill for white key surface."""
+    """La nappe d'une blanche : toute la touche, echancrure comprise.
+
+    Ne remplir que la partie large laissait le haut de la touche eteint, et
+    une note jouee n'avait l'air qu'a moitie enfoncee.
+    """
     x0, yb, x1, yt = mf_blanche(i)
     demi = MF_NOIRE_L * 0.5
     bord = MF_CLAV[0] + i * MF_TOUCHE
@@ -1464,7 +1482,7 @@ def mf_noire(i):
 
 
 def mf_noire_surface(i):
-    """Dense grid fill for black key surface."""
+    """La nappe d'une noire : un simple rectangle, rien ne l'entame."""
     return _grille(mf_noire(i))
 
 
@@ -1522,11 +1540,9 @@ def mf_clavier():
     noire est posee a cheval entre deux blanches, donc son bord gauche tombe
     entre les leurs.
 
-    Returns: 4-tuples (r, c, f_surface, f_stripes) where:
-    - r: illumination rectangle
-    - c: contour polygon
-    - f_surface: dense grid for smooth bright illumination
-    - f_stripes: sparser stripe overlay for texture
+    Pour chaque touche, quatre choses : le rectangle qui s'allume, le contour
+    a tracer, la nappe serree qui remplit la surface et les traits qui
+    repassent dessus.
     """
     t = [(mf_blanche(i)[0], mf_blanche(i),
           arrondir(mf_blanche_contour(i), 0.012),
@@ -1573,7 +1589,7 @@ def build_minifreak(step=STEP):
     # les 37 touches, du grave a l'aigu : une seule suite de pads, etalee sur
     # tout le clavier pour qu'un coup de grosse caisse ne rallume pas seulement
     # le bas du meuble. Les contours sont deja fermes.
-    for rang, (_, contour, _) in enumerate(MF_CLAVIER):
+    for rang, (_, contour, _, _) in enumerate(MF_CLAVIER):
         add(Path(contour, tag="pad%d" % ((rang * 16) // len(MF_CLAVIER)),
                  step=step))
 
@@ -1780,8 +1796,9 @@ MACHINES = {
         # notes.
         "touches": [r for r, _, _, _ in MF_CLAVIER],
         "contours": [c for _, c, _, _ in MF_CLAVIER],
-        # le remplissage suit la vraie forme : une blanche
-        # s'allume jusqu'en haut, entre les noires (dense surface + stripes)
+        # le remplissage suit la vraie forme : une blanche s'allume jusqu'en
+        # haut, entre les noires. Deux couches : la nappe qui remplit, les
+        # traits qui repassent dessus.
         "remplis": [f for _, _, f, _ in MF_CLAVIER],
         "traits": [fs for _, _, _, fs in MF_CLAVIER],
         "note0": 36,
@@ -2937,6 +2954,12 @@ class Renderer:
         mt = t + self.midi_offset
         deb, fin, haut, force = (self.midi[:, 0], self.midi[:, 1],
                                  self.midi[:, 2], self.midi[:, 3])
+        # Une nappe ou un accord tenu laissait sa touche allumee des dizaines
+        # de secondes : au bout de trois ou quatre, la moitie du clavier reste
+        # eclairee et on ne voit plus quelle note vient d'etre jouee. Passe
+        # TENUE_MAX la touche relache donc comme si la note s'arretait la — le
+        # son continue, le clavier passe a la suite.
+        fin = np.minimum(fin, deb + TENUE_MAX)
         vus = (mt >= deb) & (mt < fin + 0.30)
         if not np.any(vus):
             return {}
@@ -3638,8 +3661,8 @@ class Renderer:
         son rectangle : une blanche de clavier est echancree sous les noires,
         et la rallumer en rectangle aurait remis le trait qu'on vient d'oter.
 
-        `traits` is optional: sparser stripe overlay on top of the main fill,
-        creating visible texture while maintaining the bright surface.
+        `traits` repasse une seconde couche, plus espacee, par-dessus la
+        nappe : la surface reste pleine, mais le trait s'y voit encore.
         """
         self._dyn(beam, remplissage, ECLAT_TOUCHE * w, collapse, melt, t)
         if traits is not None:

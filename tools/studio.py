@@ -1195,6 +1195,11 @@ function seqBrancher() {
   seqPose('');
 }
 
+/* L'instant de la premiere note du fichier MIDI, dans le temps du morceau.
+   null tant qu'aucun fichier n'est charge. Declare ici parce que les deux
+   studios partagent ce bloc. */
+let MIDI_DEBUT = null;
+
 /* Un instant, ecrit au centieme : c'est ce qui permet de comparer la premiere
    note du fichier a ce qu'on entend. Arrondi a la seconde, « 5 s » ne disait
    pas si le fichier tombait a 5,00 ou a 5,49. */
@@ -1206,6 +1211,7 @@ function instant(s) {
 
 function midiOte() {
   $('#midi').value = '';
+  MIDI_DEBUT = null;
   midiAvis();
   $('#midimeta').hidden = true;
   $('#midiReglages').hidden = true;
@@ -1220,6 +1226,10 @@ async function sendMidi(f) {
     $('#mi-n').textContent = j.notes;
     $('#mi-e').textContent = j.grave + ' \u2192 ' + j.aigu;
     $('#mi-c').textContent = instant(j.debut);
+    // la v2 partage ce code mais n'a pas le rappel de calage : on ne l'appelle
+    // que si la page en question le porte
+    MIDI_DEBUT = +j.debut || 0;
+    if (typeof majOffset === 'function') majOffset();
     $('#midimeta').hidden = false;
     $('#midiReglages').hidden = false;
     $('#midiDrop').innerHTML = '<b>' + j.name
@@ -1400,7 +1410,16 @@ PAGE = r"""<!doctype html>
       <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1">
       <label for="midiOffset">avance / retard &mdash;
         <span id="v-mio">0.00 s</span></label>
-      <input type="range" id="midiOffset" min="-10" max="10" step="0.01" value="0">
+      <input type="range" id="midiOffset" min="-60" max="60" step="0.001" value="0">
+      <div class="row" id="midiPas">
+        <button class="ghost" data-pas="-4">&minus;1 mesure</button>
+        <button class="ghost" data-pas="-1">&minus;1 temps</button>
+        <button class="ghost" data-pas="-0.25">&minus;1/4</button>
+        <button class="ghost" data-pas="0.25">+1/4</button>
+        <button class="ghost" data-pas="1">+1 temps</button>
+        <button class="ghost" data-pas="4">+1 mesure</button>
+      </div>
+      <p class="hint" id="midiOu">&nbsp;</p>
       <label class="coche"><input type="checkbox" id="midiCale">
         chercher le decalage tout seul</label>
       <button class="ghost" id="midiOte">Oter ce fichier</button>
@@ -1412,15 +1431,28 @@ PAGE = r"""<!doctype html>
       MPC et le Digitakt n'ont pas de clavier &mdash; leurs pads restent a la
       batterie, et le fichier n'y change rien.<br>
       Le fichier est pris <b>tel quel</b> : un MIDI exporte du meme projet que
-      le morceau est deja a l'heure, son decalage vaut zero. Pour le verifier,
-      comparez la <b>premiere note</b> annoncee ci-dessus a l'instant ou la
-      melodie s'entend dans le morceau ; s'il y a un ecart, le curseur
-      d'avance le rattrape.<br>
+      le morceau est deja a l'heure, son decalage vaut zero. La ligne sous les
+      boutons dit a quel instant de la video tombe la premiere note : lancez
+      l'apercu la, et regardez si la touche s'allume avec le son.<br>
+      <b>Si c'est decale</b>, servez-vous des boutons plutot que du curseur.
+      Mesure sur un fichier exporte d'un projet : sa grille tombe deja sur
+      celle du morceau a trois centiemes pres, et le tempo des deux concorde a
+      0,2 % &mdash; ce qui manque n'est donc pas un reglage fin, c'est un
+      nombre entier de temps. Les boutons decalent d'exactement un temps ou une
+      mesure du morceau : on clique jusqu'a ce que ca tombe juste, sans jamais
+      sortir de la grille. Le curseur ne sert qu'a rattraper un fichier qui,
+      lui, n'est pas sur la grille.<br>
       <b>Chercher le decalage tout seul</b> compare les attaques du fichier a
       celles du morceau. Mesure : sur un fichier percussif il retrouve le
       decalage exactement ; sur une melodie il se trompe a tous les coups, et
-      sans qu'on puisse s'en apercevoir. A ne cocher que pour une piste de
-      batterie.<br>
+      sans qu'on puisse s'en apercevoir &mdash; un motif de doubles-croches
+      repetitif ressemble a lui-meme partout dans le morceau, et les
+      decalages candidats se tiennent alors a 3 % les uns des autres. A ne
+      cocher que pour une piste de batterie.<br>
+      Une note <b>tenue</b> n'allume pas sa touche indefiniment : au bout de
+      1,2 s la touche relache, meme si le son continue. Sans cela une nappe
+      gardait la moitie du clavier allumee et on ne voyait plus quelle note
+      venait d'etre jouee.<br>
       Une note trop grave ou trop aigue pour le clavier y est ramenee par
       octaves : la melodie garde ses notes, elle change seulement d'octave.</p>
   </div>
@@ -1869,6 +1901,7 @@ async function upload(f) {
     $('#dur').placeholder = 'tout';
     $('#go').disabled = false;
     $('#lire').disabled = false;
+    majOffset();          // le tempo et la longueur viennent d'arriver
     setStatus(j.name + ' — ' + j.bpm.toFixed(1) + ' BPM, ' + drops.length +
       ' paroxysme(s) : les glitchs tomberont la.');
     shot();
@@ -2160,7 +2193,54 @@ async function sendBackdrop(f) {
 $('#passage').oninput = e => { $('#v-psg').textContent = (+e.target.value).toFixed(2) + ' s'; shot(); };
 $('#passageTurb').oninput = e => { $('#v-psgt').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#midiForce').oninput = e => { $('#v-mif').textContent = (+e.target.value).toFixed(2); shot(); };
-$('#midiOffset').oninput = e => { $('#v-mio').textContent = (+e.target.value).toFixed(2) + ' s'; shot(); };
+/* Ou tombe la premiere note dans la video, une fois le decalage applique.
+   C'est le seul chiffre verifiable a l'oeil : on lance l'apercu a cet
+   instant-la et on regarde si la touche s'allume avec le son. Le moteur
+   calcule mt = t + depart + decalage, donc la note ecrite a `debut` dans le
+   fichier tombe a `debut - depart - decalage` dans la video. */
+function majOffset() {
+  const d = +$('#midiOffset').value || 0;
+  $('#v-mio').textContent = d.toFixed(2) + ' s';
+  const ou = $('#midiOu');
+  if (!ou) return;
+  if (MIDI_DEBUT === null) { ou.innerHTML = '&nbsp;'; return; }
+  const depart = +$('#start').value || 0;
+  const t = MIDI_DEBUT - depart - d;
+  // la longueur rendue, pas celle du morceau : le champ est vide quand on
+  // rend tout, et le plan s'arrete alors a la fin du morceau
+  const plan = +$('#dur').value || Math.max(0, (duration || 0) - depart);
+  if (t < 0)
+    ou.innerHTML = 'premiere note <b>' + instant(-t)
+      + ' avant le debut du plan</b> : on ne la verra pas';
+  else if (plan > 0 && t > plan)
+    ou.innerHTML = 'premiere note a <b>' + instant(t)
+      + '</b>, soit apres la fin du plan : on ne la verra pas';
+  else
+    ou.innerHTML = 'premiere note a <b>' + instant(t) + '</b> dans la video';
+}
+$('#midiOffset').oninput = () => { majOffset(); shot(); };
+/* Le depart et la duree deplacent la fenetre rendue, donc l'instant ou la
+   premiere note y tombe : le rappel se refait. */
+$('#start').oninput = majOffset;
+$('#dur').oninput = majOffset;
+/* Les boutons decalent d'un nombre entier de temps du morceau. La phase du
+   fichier est presque toujours deja bonne — un MIDI exporte du meme projet
+   tombe sur la grille — et ce qui manque est le nombre de temps. Bouger par
+   temps entiers explore exactement cette inconnue sans jamais sortir de la
+   grille, ce qu'un curseur au centieme de seconde ne sait pas faire. */
+for (const b of document.querySelectorAll('#midiPas button')) {
+  b.onclick = () => {
+    const temps = 60 / Math.max(1, (FRAPPES && FRAPPES.bpm) || 120);
+    const el = $('#midiOffset');
+    const v = (+el.value || 0) + (+b.dataset.pas) * temps;
+    // pas d'arrondi ici : le curseur va au millieme, et arrondir au centieme
+    // ajoutait cinq millisecondes d'erreur par clic — de quoi sortir de la
+    // grille au bout d'une quinzaine
+    el.value = Math.min(+el.max, Math.max(+el.min, v));
+    majOffset();
+    shot();
+  };
+}
 $('#title').oninput  = shot;
 $('#bgStrength').oninput = e => { $('#v-str').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#bgClear').oninput   = e => { $('#v-clr').textContent = (+e.target.value).toFixed(2); shot(); };
