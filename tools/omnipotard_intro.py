@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-18.3"
+VERSION = "2026-09-18.2"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1389,31 +1389,30 @@ def mf_blanche_contour(i):
     return P
 
 
-# Ecart entre deux points d'un remplissage de touche, en unites du monde.
-#
-# A 0,030 — l'ecart d'origine — les lignes restaient separees d'une douzaine de
-# pixels en 1080p : la touche avait l'air rayee, pas allumee. Il faut descendre
-# a l'echelle du faisceau, dont l'etalement vaut environ un pixel : a 0,0030 les
-# points tombent a un pixel et demi l'un de l'autre et leurs halos se rejoignent.
-# Le meme ecart est pris dans les deux sens, pour que la lumiere soit egale
-# partout.
-#
-# La grille etant dix-huit fois plus dense que les anciennes lignes, le poids de
-# chaque point baisse d'autant : c'est la lumiere par unite de surface qui
-# compte, pas le nombre de points. ECLAT_TOUCHE la fixe, et se regle a l'oeil.
-TOUCHE_SERRE = 0.0030
-
-
-ECLAT_TOUCHE = 0.60
-
-
-def _grille(r, serre=TOUCHE_SERRE, m=0.009):
-    """Un rectangle rempli d'une grille de points reguliere.
+def _lignes(r, serre=0.030, m=0.010):
+    """Un rectangle rempli de lignes horizontales, espacees de `serre`.
 
     Ecrit ici et non plus bas avec les autres remplissages : le clavier se
     construit au chargement du module, avant eux.
     """
     x0, y0, x1, y1 = r
+    n = max(2, int(round((y1 - y0 - 2 * m) / serre)))
+    return np.vstack([np.stack([np.linspace(x0 + m, x1 - m, 24),
+                                np.full(24, y)], axis=1)
+                      for y in np.linspace(y0 + m, y1 - m, n)])
+
+
+# Brightness constants for key illumination
+ECLAT_TOUCHE = 0.60  # dense surface brightness
+ECLAT_TRAIT = 0.95   # stripe overlay brightness
+TOUCHE_SERRE = 0.0030  # dense grid spacing (tight)
+TRAIT_SERRE = 0.030    # stripe spacing (0.030 spacing with 24 points per line)
+
+
+def _grille(r, m=0.009):
+    """Dense point grid for smooth key illumination surface."""
+    x0, y0, x1, y1 = r
+    serre = TOUCHE_SERRE
     nx = max(2, int(round((x1 - x0 - 2 * m) / serre)))
     ny = max(2, int(round((y1 - y0 - 2 * m) / serre)))
     xs = np.linspace(x0 + m, x1 - m, nx)
@@ -1421,22 +1420,38 @@ def _grille(r, serre=TOUCHE_SERRE, m=0.009):
                       for y in np.linspace(y0 + m, y1 - m, ny)])
 
 
-def mf_blanche_remplir(i, serre=TOUCHE_SERRE):
-    """Le remplissage d'une blanche : toute la touche, echancrure comprise.
+def mf_blanche_remplir(i, serre=TRAIT_SERRE):
+    """Stripe overlay for white key: horizontal lines with visible texture.
 
-    Ne remplir que la partie large laissait le haut de la touche eteint, et
-    une note jouee n'avait l'air qu'a moitie enfoncee. On suit donc la vraie
-    forme — large en bas, etroite entre les noires — avec le meme ecart de
-    part et d'autre, pour que le passage ne se voie pas.
+    Used on top of the dense illumination grid to provide visual stripes
+    while maintaining the bright surface underneath.
     """
     x0, yb, x1, yt = mf_blanche(i)
     demi = MF_NOIRE_L * 0.5
     bord = MF_CLAV[0] + i * MF_TOUCHE
     xg = bord + demi + 0.004 if _mf_noire_a(i - 1) else x0
     xd = bord + MF_TOUCHE - demi - 0.004 if _mf_noire_a(i) else x1
+    yn, m = MF_NOIRE_Y, 0.010
+    out = []
+    for (a_, b_, ya, yb_) in ((x0, x1, yb + m, yn - m * 0.4),
+                              (xg, xd, yn + m * 0.4, yt - m)):
+        n = max(2, int(round((yb_ - ya) / serre)))
+        for y in np.linspace(ya, yb_, n):
+            out.append(np.stack([np.linspace(a_ + m, b_ - m, 24),
+                                 np.full(24, y)], axis=1))
+    return np.vstack(out)
+
+
+def mf_blanche_surface(i):
+    """Dense grid fill for white key surface."""
+    x0, yb, x1, yt = mf_blanche(i)
+    demi = MF_NOIRE_L * 0.5
+    bord = MF_CLAV[0] + i * MF_TOUCHE
+    xg = bord + demi + 0.004 if _mf_noire_a(i - 1) else x0
+    xd = bord + MF_TOUCHE - demi - 0.004 if _mf_noire_a(i) else x1
     yn = MF_NOIRE_Y
-    return np.vstack([_grille((x0, yb, x1, yn + 0.004), serre),
-                      _grille((xg, yn - 0.004, xd, yt), serre)])
+    return np.vstack([_grille((x0, yb, x1, yn + 0.004)),
+                      _grille((xg, yn - 0.004, xd, yt))])
 
 
 def mf_noire(i):
@@ -1446,6 +1461,11 @@ def mf_noire(i):
     x = MF_CLAV[0] + (blanche + 1) * MF_TOUCHE
     return (x - MF_NOIRE_L * 0.5, MF_NOIRE_Y,
             x + MF_NOIRE_L * 0.5, MF_CLAV[3])
+
+
+def mf_noire_surface(i):
+    """Dense grid fill for black key surface."""
+    return _grille(mf_noire(i))
 
 
 def arrondir(P, r, n=6):
@@ -1501,23 +1521,31 @@ def mf_clavier():
     Les ranger par abscisse suffit a les mettre dans l'ordre chromatique : une
     noire est posee a cheval entre deux blanches, donc son bord gauche tombe
     entre les leurs.
+
+    Returns: 4-tuples (r, c, f_surface, f_stripes) where:
+    - r: illumination rectangle
+    - c: contour polygon
+    - f_surface: dense grid for smooth bright illumination
+    - f_stripes: sparser stripe overlay for texture
     """
     t = [(mf_blanche(i)[0], mf_blanche(i),
           arrondir(mf_blanche_contour(i), 0.012),
+          mf_blanche_surface(i),
           mf_blanche_remplir(i))
          for i in range(22)]
     t += [(mf_noire(i)[0], mf_noire(i),
            _boucle(rrect_pts(*mf_noire(i), r=0.012)),
-           _grille(mf_noire(i)))
+           mf_noire_surface(i),
+           _lignes(mf_noire(i), 0.030))
           for i in range(15)]
     t.sort(key=lambda e: e[0])
-    return [(r, c, f) for _, r, c, f in t]
+    return [(r, c, f, fs) for _, r, c, f, fs in t]
 
 
 MF_CLAVIER = mf_clavier()
 # les seize touches que les coups de batterie allument, faute de melodie :
 # des blanches, reparties sur tout le clavier
-MF_PADS = [[k for k, (r, _, _) in enumerate(MF_CLAVIER)
+MF_PADS = [[k for k, (r, _, _, _) in enumerate(MF_CLAVIER)
             if abs(r[0] - mf_blanche(i)[0]) < 1e-9][0]
            for i in (min(21, j + 3) for j in range(16))]
 
@@ -1725,6 +1753,7 @@ MACHINES = {
         # le clavier resterait mort tout le morceau.
         "pads": [MF_CLAVIER[j][0] for j in MF_PADS],
         "pads_contour": [MF_CLAVIER[j][1] for j in MF_PADS],
+        "pads_traits": [MF_CLAVIER[j][3] for j in MF_PADS],
         "remplir": _remplir_mf,
         # Pas de rangee de pas : un clavier n'a pas de sequenceur qui court le
         # long de ses touches. La premiere version y faisait defiler les seize
@@ -1749,11 +1778,12 @@ MACHINES = {
         # melodie sur seize pads de batterie ne donnait rien de lisible, trois
         # choses se disputant les memes cellules — les coups, les pas et les
         # notes.
-        "touches": [r for r, _, _ in MF_CLAVIER],
-        "contours": [c for _, c, _ in MF_CLAVIER],
+        "touches": [r for r, _, _, _ in MF_CLAVIER],
+        "contours": [c for _, c, _, _ in MF_CLAVIER],
         # le remplissage suit la vraie forme : une blanche
-        # s'allume jusqu'en haut, entre les noires
-        "remplis": [f for _, _, f in MF_CLAVIER],
+        # s'allume jusqu'en haut, entre les noires (dense surface + stripes)
+        "remplis": [f for _, _, f, _ in MF_CLAVIER],
+        "traits": [fs for _, _, _, fs in MF_CLAVIER],
         "note0": 36,
         "quoi": "clavier 37 touches : il joue la melodie du fichier MIDI, ou "
                 "s'allume sur les coups a defaut",
@@ -3596,7 +3626,7 @@ class Renderer:
         px, py = self.to_px(P, collapse)
         beam.add(px, py, w)
 
-    def _touche(self, beam, r, remplissage, w, collapse, melt, t, contour=None):
+    def _touche(self, beam, r, remplissage, w, collapse, melt, t, contour=None, traits=None):
         """Une touche enfoncee : son remplissage, et son contour epaissi.
 
         Le halo seul ne distingue pas une touche de sa voisine — sur trente-
@@ -3607,8 +3637,13 @@ class Renderer:
         `contour` permet de redessiner la vraie forme de la touche plutot que
         son rectangle : une blanche de clavier est echancree sous les noires,
         et la rallumer en rectangle aurait remis le trait qu'on vient d'oter.
+
+        `traits` is optional: sparser stripe overlay on top of the main fill,
+        creating visible texture while maintaining the bright surface.
         """
         self._dyn(beam, remplissage, ECLAT_TOUCHE * w, collapse, melt, t)
+        if traits is not None:
+            self._dyn(beam, traits, ECLAT_TRAIT * w, collapse, melt, t)
         cont = rrect_pts(*r, r=0.012) if contour is None else contour
         self._dyn(beam, cont, 3.20 * w, collapse, melt, t)
         # le contour repasse une seconde fois, legerement decale : c'est ce qui
@@ -3888,9 +3923,11 @@ class Renderer:
                     # un coup ordinaire passe de 0,08 a 0,31, et le plus fort
                     # reste sous la saturation.
                     cont = mach.get("pads_contour")
+                    pads_traits = mach.get("pads_traits")
                     self._touche(beam, mach["pads"][k], mach["remplir"](k),
                                  1.05 * (v ** 0.45) * mk, collapse, melt, t,
-                                 contour=cont[k] if cont else None)
+                                 contour=cont[k] if cont else None,
+                                 traits=pads_traits[k] if pads_traits else None)
                 else:
                     self._dyn(beam, mach["remplir"](k), 1.05 * v * mk,
                               collapse, melt, t)
@@ -3919,13 +3956,15 @@ class Renderer:
                 # lui, le haut d'une blanche restait eteint et la note n'avait
                 # l'air qu'a moitie enfoncee.
                 remplis, cont = mach.get("remplis"), mach.get("contours")
+                traits = mach.get("traits")
                 if remplis is not None:
                     fond = remplis[k]
                 else:
                     lignes = int(min(12, max(4, round((r[3] - r[1]) / 0.038))))
                     fond = _remplir(r, lignes, 0.010)
                 self._touche(beam, r, fond, v * mk, collapse, melt, t,
-                             contour=cont[k] if cont else None)
+                             contour=cont[k] if cont else None,
+                             traits=traits[k] if traits else None)
 
         # bande de pas : le pas courant s'allume
         if live and 0 <= step < len(mach["pas"]):
