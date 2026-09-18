@@ -16,6 +16,11 @@ out/omnipotard_intro_4k.mp4
 # tous les rendus de la MPC : regenerables via tools/mpc_performance.py
 out/mpc_*.mp4
 
+# Toutes les videos rendues : elles se refont a l'identique avec les outils du
+# depot, et versionnees elles pesaient cent vingt-quatre megaoctets d'historique
+# pour des fichiers que personne ne relit.
+out/*.mp4
+
 # atelier du studio : morceaux deposes et rendus (tools/studio.py)
 out/studio/
 # page assemblee : regenerable via tools/build_web_studio.py

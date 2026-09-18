@@ -213,7 +213,7 @@ Les options se combinent : `--palette orange --subtitle "DAWLESS MUSIC"`.
 
 | fichier | usage |
 |---|---|
-| `out/omnipotard_intro_1080p60_web.mp4` | version légère — partage, réseaux, prévisualisation |
+| `out/omnipotard_intro_1080p60_web.mp4` | version légère — partage, réseaux, prévisualisation — **non versionnée** |
 | `out/omnipotard_poster.png` | image fixe du titre (vignette) |
 | `out/omnipotard_intro_1080p60.mp4` | master CRF 19 (~22 Mo) pour le montage — **non versionné** : `python3 tools/omnipotard_intro.py -o out/omnipotard_intro_1080p60.mp4 --crf 19` |
 
