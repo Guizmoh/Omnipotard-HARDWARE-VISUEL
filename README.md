@@ -902,7 +902,15 @@ Ce que chacune en fait :
   sont réparties sur les trente-sept touches, pour qu'une grosse caisse ne
   rallume pas seulement le bas du meuble. Le clavier n'a **pas** de rangée de
   pas : aucune machine ne fait défiler un séquenceur sur ses touches de piano,
-  et cela brouillait la note jouée ;
+  et cela brouillait la note jouée.
+
+  Les blanches sont **échancrées** là où une noire s'appuie dessus, comme sur
+  un vrai clavier. Tracées en rectangles pleine hauteur, elles passaient sous
+  les noires et la couture entre deux blanches traversait chaque noire par le
+  milieu : elle avait l'air coupée en deux. Le tracé et l'allumage sortent
+  d'une seule liste, pour qu'ils ne puissent pas diverger — la blanche se
+  trace échancrée, mais c'est sa partie large, celle qu'on voit, qui
+  s'allume ;
 - sur le **Digitakt II**, les seize déclencheurs servent de pads **et** de pas
   à la fois, exactement comme sur la vraie : un coup les allume, le séquenceur
   les balaie ;
