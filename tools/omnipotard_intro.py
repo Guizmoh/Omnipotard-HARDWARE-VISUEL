@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-18.1"
+VERSION = "2026-09-18.2"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1701,6 +1701,7 @@ MACHINES = {
         "pas": [step_rect(k) for k in range(16)],
         "potards": [(cx, cy, QLINK_R) for cx, cy in QLINK],
         "bande": STRIP,
+        "bords": (BODY[0], BODY[2]),
         "quoi": "l'originale : seize pads, bande de pas, grand ecran tactile",
     },
     "minifreak": {
@@ -1719,6 +1720,12 @@ MACHINES = {
         "pas": [],
         "potards": [(cx, cy, MF_KNOB_R) for cx, cy in MF_KNOBS],
         "bande": MF_STRIPS[0],
+        "bords": (MF_BODY[0], MF_BODY[2]),
+        # La ligne d'horizon : le fil du morceau se cale dessus plutot que de
+        # passer derriere a douze pixels de la. C'est la separation entre le
+        # panneau et le clavier — les deux bouts du fil, a gauche et a droite,
+        # la prolongent alors au lieu de la rater de peu.
+        "ligne": MF_CLAV[3] + 0.014,
         # Les 37 touches, une par demi-ton. C'est cette cle qui fait d'une
         # machine une machine melodique : ses touches sont des notes, pas des
         # pads. Des qu'un fichier MIDI est charge, elles lui appartiennent — les
@@ -1748,6 +1755,7 @@ MACHINES = {
         "pas": [dk_trig(k) for k in range(16)],
         "potards": [(cx, cy, DK_ENC_R) for cx, cy in DK_ENC],
         "bande": None,
+        "bords": (DK_BODY[0], DK_BODY[2]),
         "quoi": "seize declencheurs qui font pads et pas a la fois, huit "
                 "encodeurs",
     },
@@ -1974,7 +1982,12 @@ class Passage:
         pot = [melange(a["potards"][k], b["potards"][k]) for k in range(n)]
         bande = (melange(a["bande"], b["bande"]) if a["bande"] and b["bande"]
                  else (a["bande"] if e < 0.5 else b["bande"]))
+        ligne = (a.get("ligne", 0.0)
+                 + (b.get("ligne", 0.0) - a.get("ligne", 0.0)) * e)
+        bords = melange(a.get("bords", (BODY[0], BODY[2])),
+                        b.get("bords", (BODY[0], BODY[2])))
         return {"nom": "passage", "ecran": melange(a["ecran"], b["ecran"]),
+                "ligne": ligne, "bords": bords,
                 "pads": pads, "remplir": RemplirPads(pads),
                 "pas": pas, "potards": pot, "bande": bande, "quoi": ""}
 
@@ -3599,10 +3612,28 @@ class Renderer:
         out[:, 0] = P[:, 0] + 0.05 * k * np.sin(P[:, 1] * 9.0 + t * 3.0)
         return out
 
+    def bords_machine(self):
+        """Ou s'arrete le chassis de la machine a l'image, en largeur.
+
+        Mis a l'echelle : le fil du morceau tient la largeur de l'ecran, la
+        machine peut etre retrecie, et c'est bien le chassis dessine qui doit
+        masquer le fil.
+        """
+        g, d = self.mach.get("bords", (BODY[0], BODY[2]))
+        k = float(self.taille)
+        return g * k, d * k
+
     def body_mask(self, x, sweep_x, melt):
-        """1 la ou le chassis de la machine masque le fil d'onde."""
-        inside = (smoothstep(BODY[0] - 0.05, BODY[0] + 0.03, x)
-                  * (1.0 - smoothstep(BODY[2] - 0.03, BODY[2] + 0.05, x)))
+        """1 la ou le chassis de la machine masque le fil d'onde.
+
+        Il prenait les bords de la MPC quelle que soit la machine. Le MiniFreak
+        etant plus large, le fil lui passait par-dessus le chassis sur un bon
+        centimetre ; le Digitakt, plus etroit, se voyait couper le fil bien
+        avant son bord.
+        """
+        g, d = self.bords_machine()
+        inside = (smoothstep(g - 0.05, g + 0.03, x)
+                  * (1.0 - smoothstep(d - 0.03, d + 0.05, x)))
         return inside * self.morph_at(x, sweep_x) * (1.0 - melt)
 
     def _wave_line(self, beam, t, collapse, alpha, xf=None, sweep_x=None,
@@ -3620,15 +3651,29 @@ class Renderer:
             a *= self.morph_at(xs, sweep_x)      # nait a mesure que le clip fond
         hit = self.bass_hit(t)
         a = a * self._cam_z
-        P = np.stack([xs, self.wave_y(xs, t)], axis=1)
+        # La machine peut offrir une ligne d'horizon : le fil s'y cale, et ses
+        # deux bouts prolongent alors un trait du dessin au lieu de passer
+        # derriere a cote. Sans elle, le fil reste sur l'axe de l'image.
+        ligne = float(self.mach.get("ligne", 0.0) or 0.0)
+        # En arrivant sur la machine, le fil s'aplatit et se pose exactement
+        # sur sa ligne d'horizon : sans cela il la croisait au lieu de la
+        # prolonger, et le raccord ne se voyait pas.
+        k = 1.0
+        if ligne:
+            g, d = self.bords_machine()
+            loin = np.where(xs < g, g - xs, np.where(xs > d, xs - d, 0.0))
+            k = smoothstep(0.0, 0.20, loin)
+        P = np.stack([xs, self.wave_y(xs, t) * k + ligne], axis=1)
         px, py = self.to_px(P, collapse)
         beam.add(px, py, 0.85 * a * (1.0 + 0.85 * hit))
         # trainee : le trait d'il y a quelques images, de plus en plus pale.
         # Sa longueur suit le nombre d'instruments qui jouent — un passage
         # charge bave derriere lui, un passage depouille reste net.
         ntr = int(round(self.trail * self.density(t) * 7))
+        kp = k                                   # meme aplatissement pour la trainee
         for k in range(1, ntr + 1):
-            Q = np.stack([xs, self.wave_y(xs, t - k * 0.034)], axis=1)
+            Q = np.stack([xs, self.wave_y(xs, t - k * 0.034) * kp + ligne],
+                         axis=1)
             qx, qy = self.to_px(Q, collapse)
             beam.add(qx, qy, 0.62 * a * (1.0 - k / (ntr + 1.0)) ** 1.7)
         if thick:
