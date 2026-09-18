@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-18.2"
+VERSION = "2026-09-18.3"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1389,41 +1389,54 @@ def mf_blanche_contour(i):
     return P
 
 
-def _lignes(r, serre=0.030, m=0.010):
-    """Un rectangle rempli de lignes horizontales, espacees de `serre`.
+# Ecart entre deux points d'un remplissage de touche, en unites du monde.
+#
+# A 0,030 — l'ecart d'origine — les lignes restaient separees d'une douzaine de
+# pixels en 1080p : la touche avait l'air rayee, pas allumee. Il faut descendre
+# a l'echelle du faisceau, dont l'etalement vaut environ un pixel : a 0,0030 les
+# points tombent a un pixel et demi l'un de l'autre et leurs halos se rejoignent.
+# Le meme ecart est pris dans les deux sens, pour que la lumiere soit egale
+# partout.
+#
+# La grille etant dix-huit fois plus dense que les anciennes lignes, le poids de
+# chaque point baisse d'autant : c'est la lumiere par unite de surface qui
+# compte, pas le nombre de points. ECLAT_TOUCHE la fixe, et se regle a l'oeil.
+TOUCHE_SERRE = 0.0030
+
+
+ECLAT_TOUCHE = 0.60
+
+
+def _grille(r, serre=TOUCHE_SERRE, m=0.009):
+    """Un rectangle rempli d'une grille de points reguliere.
 
     Ecrit ici et non plus bas avec les autres remplissages : le clavier se
     construit au chargement du module, avant eux.
     """
     x0, y0, x1, y1 = r
-    n = max(2, int(round((y1 - y0 - 2 * m) / serre)))
-    return np.vstack([np.stack([np.linspace(x0 + m, x1 - m, 24),
-                                np.full(24, y)], axis=1)
-                      for y in np.linspace(y0 + m, y1 - m, n)])
+    nx = max(2, int(round((x1 - x0 - 2 * m) / serre)))
+    ny = max(2, int(round((y1 - y0 - 2 * m) / serre)))
+    xs = np.linspace(x0 + m, x1 - m, nx)
+    return np.vstack([np.stack([xs, np.full(nx, y)], axis=1)
+                      for y in np.linspace(y0 + m, y1 - m, ny)])
 
 
-def mf_blanche_remplir(i, serre=0.030):
+def mf_blanche_remplir(i, serre=TOUCHE_SERRE):
     """Le remplissage d'une blanche : toute la touche, echancrure comprise.
 
     Ne remplir que la partie large laissait le haut de la touche eteint, et
     une note jouee n'avait l'air qu'a moitie enfoncee. On suit donc la vraie
-    forme — large en bas, etroite entre les noires — avec le meme ecart entre
-    les lignes de part et d'autre, pour que le passage ne se voie pas.
+    forme — large en bas, etroite entre les noires — avec le meme ecart de
+    part et d'autre, pour que le passage ne se voie pas.
     """
     x0, yb, x1, yt = mf_blanche(i)
     demi = MF_NOIRE_L * 0.5
     bord = MF_CLAV[0] + i * MF_TOUCHE
     xg = bord + demi + 0.004 if _mf_noire_a(i - 1) else x0
     xd = bord + MF_TOUCHE - demi - 0.004 if _mf_noire_a(i) else x1
-    yn, m = MF_NOIRE_Y, 0.010
-    out = []
-    for (a_, b_, ya, yb_) in ((x0, x1, yb + m, yn - m * 0.4),
-                              (xg, xd, yn + m * 0.4, yt - m)):
-        n = max(2, int(round((yb_ - ya) / serre)))
-        for y in np.linspace(ya, yb_, n):
-            out.append(np.stack([np.linspace(a_ + m, b_ - m, 24),
-                                 np.full(24, y)], axis=1))
-    return np.vstack(out)
+    yn = MF_NOIRE_Y
+    return np.vstack([_grille((x0, yb, x1, yn + 0.004), serre),
+                      _grille((xg, yn - 0.004, xd, yt), serre)])
 
 
 def mf_noire(i):
@@ -1495,7 +1508,7 @@ def mf_clavier():
          for i in range(22)]
     t += [(mf_noire(i)[0], mf_noire(i),
            _boucle(rrect_pts(*mf_noire(i), r=0.012)),
-           _lignes(mf_noire(i), 0.030))
+           _grille(mf_noire(i)))
           for i in range(15)]
     t.sort(key=lambda e: e[0])
     return [(r, c, f) for _, r, c, f in t]
@@ -3595,7 +3608,7 @@ class Renderer:
         son rectangle : une blanche de clavier est echancree sous les noires,
         et la rallumer en rectangle aurait remis le trait qu'on vient d'oter.
         """
-        self._dyn(beam, remplissage, 2.60 * w, collapse, melt, t)
+        self._dyn(beam, remplissage, ECLAT_TOUCHE * w, collapse, melt, t)
         cont = rrect_pts(*r, r=0.012) if contour is None else contour
         self._dyn(beam, cont, 3.20 * w, collapse, melt, t)
         # le contour repasse une seconde fois, legerement decale : c'est ce qui
