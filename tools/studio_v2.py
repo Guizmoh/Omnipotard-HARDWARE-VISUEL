@@ -68,7 +68,8 @@ REGLE = SIMPLE | {
     "echo", "echoN", "echoDelay", "couleurs", "spectro",
     "cadence", "haloDoux", "poussiere", "flottement",
     "tranches", "tranchesOn", "stut", "stutOn", "kaleido", "kaleidoOn",
-    "scramble", "scrLen", "passageTurb", "midiOffset", "midiCale",
+    "scramble", "scrLen", "passageTurb", "midiOffset", "midiTempo",
+    "midiCale",
 }
 
 
@@ -1107,7 +1108,7 @@ const _duree = () => duree;
     champMachine.insertAdjacentElement('afterend', d);
   }
   const cible = $('#midiCurseurs');
-  for (const id of ['midiForce', 'midiOffset', 'midiCale']) {
+  for (const id of ['midiForce', 'midiOffset', 'midiTempo', 'midiCale']) {
     const c = document.querySelector('[data-champ="' + id + '"]');
     if (c && cible) cible.appendChild(c);
   }

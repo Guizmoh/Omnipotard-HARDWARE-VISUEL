@@ -279,3 +279,80 @@ def transposition(notes, note0=36, touches=37):
     median = hauteurs[len(hauteurs) // 2]
     cible = note0 + touches // 2
     return int(12 * round((cible - median) / 12.0))
+
+
+def deriver(notes, instants, battement, largeur=0.06, pas=1e-6):
+    """De combien etirer le fichier pour qu'il tienne le tempo du morceau.
+
+    Un fichier dont la grille n'a pas tout a fait le tempo du morceau se cale
+    au debut puis s'en ecarte peu a peu : c'est une derive, et aucun decalage
+    ne la rattrape. On mesure donc les deux grilles et on rend leur rapport.
+
+    **Contrairement a `caler`, cette mesure-ci est fiable sur une melodie**, et
+    la raison est nette : chercher un decalage revient a choisir *laquelle* des
+    mesures du morceau est la bonne, ce qu'un motif repetitif ne permet pas ;
+    chercher un tempo ne demande que l'ecart *entre* les attaques, que le meme
+    motif repetitif donne au contraire tres bien. Mesure sur le fichier
+    d'essai, un motif de doubles-croches sur une seule note :
+
+        morceau entier   85,0006 BPM (nettete 32,8)  melodie 85,1633 (9,7)
+        90 s d'extrait   85,0064 BPM (nettete 16,7)  melodie 85,1633 (9,7)
+        45 s d'extrait   85,0330 BPM (nettete  9,4)  melodie 85,1633 (9,7)
+
+    Le morceau converge vers 85,000 — un tempo rond, comme presque toujours —
+    et la melodie ne bouge pas d'un millieme. Le rapport cherche vaut +0,19 %,
+    soit sept centiemes de seconde au bout de trente-cinq : de quoi voir la
+    touche s'allumer a cote de la note. Plus l'extrait est long, plus la
+    mesure est juste : c'est un ecart entre attaques, il se moyenne.
+
+    On somme `exp(2i.pi.t/p)` plutot que de compter ce qui tombe sur une
+    grille : la somme complexe ne depend pas de la phase, la ou une grille
+    posee a zero aurait rate le vrai sommet — mesure, elle donnait 0,1765 s au
+    lieu de 0,1765 (0,2 % d'erreur, soit tout ce qu'on cherche a corriger).
+
+    `battement` sert seulement a savoir ou chercher : on balaie +-`largeur`
+    autour du quart de battement. Sans ce garde-fou la mesure partirait une
+    fois sur deux sur la moitie ou le double du vrai pas.
+
+    Renvoie (rapport, pas du morceau, pas du fichier, nettete). Le rapport
+    vaut 1 quand rien n'est mesurable — le fichier est alors pris tel quel.
+    """
+    import numpy as np
+    m = np.asarray([n[0] for n in notes], dtype=np.float64)
+    a = np.asarray(instants, dtype=np.float64)
+    autour = float(battement) / 4.0
+    if len(m) < 8 or len(a) < 8 or autour <= 0.0:
+        return 1.0, autour, autour, 0.0
+
+    def reponse(t, g):
+        """La reponse de la grille a chaque periode de `g`.
+
+        Par paquets : la matrice entiere ferait deux gigaoctets sur un morceau
+        de quatre minutes, ou l'on compte pres de sept mille attaques.
+        """
+        out = np.empty(len(g))
+        for i in range(0, len(g), 256):
+            bloc = g[i:i + 256]
+            out[i:i + 256] = np.abs(
+                np.exp(2j * np.pi * t[:, None] / bloc[None, :]).sum(axis=0))
+        return out
+
+    def sommet(t):
+        # en deux temps : un balayage large au centieme de milliseconde, puis
+        # un affinage autour du sommet. Balayer tout au millionieme coutait
+        # quatre secondes et n'apprenait rien de plus.
+        g = np.arange(autour * (1.0 - largeur), autour * (1.0 + largeur), 1e-5)
+        s = reponse(t, g)
+        i = int(s.argmax())
+        net = float(s[i] / (s.mean() or 1e-9))
+        fin = np.arange(g[i] - 2e-5, g[i] + 2e-5, pas)
+        sf = reponse(t, fin)
+        return float(fin[int(sf.argmax())]), net
+
+    pa, na = sommet(a)
+    pm, nm = sommet(m)
+    # sous 3 de nettete la grille ne ressort pas : mieux vaut ne rien etirer
+    # que d'etirer au hasard
+    if min(na, nm) < 3.0 or pm <= 0.0:
+        return 1.0, pa, pm, min(na, nm)
+    return pa / pm, pa, pm, min(na, nm)

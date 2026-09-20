@@ -195,6 +195,9 @@ def look_from(q):
         "midi": _melodie(q.get("midi")),
         "midi_force": float(q.get("midiForce", 1.0)),
         "midi_offset": float(q.get("midiOffset", 0.0)),
+        # la page le donne en pourcent — un rapport a six decimales ne se lit
+        # pas sur un curseur — et le moteur veut un rapport
+        "midi_tempo": 1.0 + float(q.get("midiTempo", 0.0)) / 100.0,
         "midi_cale": _coche(q.get("midiCale")),
         "nettete": float(q.get("nettete", 1.0)),
         "taille": float(q.get("taille", 1.0)),
@@ -527,7 +530,8 @@ class Studio:
                         "machine",
                         # le plan de machines et la melodie se posent a la
                         # main : l'un se relit, l'autre se lit dans un fichier
-                        "machines", "midi", "midi_offset", "midi_cale")
+                        "machines", "midi", "midi_offset", "midi_cale",
+                        "midi_tempo")
         # La taille se pose avant l'allure : c'est elle qui decide du creux
         # que la texture garde derriere la machine, et set_look le recalcule.
         r.taille = float(kw["taille"])
@@ -559,6 +563,7 @@ class Studio:
                     r._midi_auto = float(lu.get("cale", 0.0))
                     r.midi_transpose = int(lu.get("transpose", 0))
         r.midi_offset = r._midi_auto + float(kw["midi_offset"])
+        r.midi_tempo = float(kw["midi_tempo"])
 
         # Le spectrogramme est calcule a partir du son, pas repose comme une
         # couleur : on ne le refait que lorsqu'on l'allume pour la premiere fois.
@@ -919,6 +924,25 @@ class Handler(BaseHTTPRequestHandler):
                 img = STUDIO.still(q["track"], float(q.get("t", 0.0)), q,
                                    int(q.get("w", 640)), int(q.get("h", 360)))
                 return self._send(200, "image/png", png_bytes(img))
+            if u.path == "/derive":
+                # De combien le fichier MIDI derive par rapport au morceau.
+                # Mesure a la demande et non a l'envoi : elle demande le
+                # morceau analyse, et coute un tiers de seconde.
+                tr = STUDIO.track(q["track"])
+                chemin = _melodie(q.get("midi"))
+                if not chemin or not os.path.exists(chemin):
+                    return self._fail("aucune melodie chargee")
+                notes = midi.lire_notes(chemin)
+                r, pa, pm, net = midi.deriver(
+                    notes, [e[0] for e in tr["info"]["_audio"]["events"]],
+                    tr["info"]["_audio"]["beat"])
+                return self._json({
+                    "pourcent": (r - 1.0) * 100.0,
+                    "bpm_morceau": 60.0 / (pa * 4.0) if pa > 0 else 0.0,
+                    "bpm_melodie": 60.0 / (pm * 4.0) if pm > 0 else 0.0,
+                    "nettete": net,
+                    "duree": tr["info"]["duration"],
+                })
             if u.path == "/splits":
                 tr = STUDIO.track(q["track"])
                 ev = tr["info"]["_audio"]["events"]
@@ -1420,6 +1444,10 @@ PAGE = r"""<!doctype html>
         <button class="ghost" data-pas="4">+1 mesure</button>
       </div>
       <p class="hint" id="midiOu">&nbsp;</p>
+      <label for="midiTempo">derive &mdash; <span id="v-mit">0.000 %</span></label>
+      <input type="range" id="midiTempo" min="-1" max="1" step="0.005" value="0">
+      <button class="ghost" id="midiMesure">Mesurer la derive</button>
+      <p class="hint" id="midiDerive">&nbsp;</p>
       <label class="coche"><input type="checkbox" id="midiCale">
         chercher le decalage tout seul</label>
       <button class="ghost" id="midiOte">Oter ce fichier</button>
@@ -1434,14 +1462,21 @@ PAGE = r"""<!doctype html>
       le morceau est deja a l'heure, son decalage vaut zero. La ligne sous les
       boutons dit a quel instant de la video tombe la premiere note : lancez
       l'apercu la, et regardez si la touche s'allume avec le son.<br>
-      <b>Si c'est decale</b>, servez-vous des boutons plutot que du curseur.
-      Mesure sur un fichier exporte d'un projet : sa grille tombe deja sur
-      celle du morceau a trois centiemes pres, et le tempo des deux concorde a
-      0,2 % &mdash; ce qui manque n'est donc pas un reglage fin, c'est un
+      <b>Si c'est decale d'un bout a l'autre</b>, servez-vous des boutons
+      plutot que du curseur. Un fichier exporte d'un projet tombe deja sur la
+      grille du morceau : ce qui lui manque n'est pas un reglage fin, c'est un
       nombre entier de temps. Les boutons decalent d'exactement un temps ou une
       mesure du morceau : on clique jusqu'a ce que ca tombe juste, sans jamais
       sortir de la grille. Le curseur ne sert qu'a rattraper un fichier qui,
-      lui, n'est pas sur la grille.<br>
+      lui, n'est pas sur la grille du tout.<br>
+      <b>Si c'est cale au debut et faux a la fin</b>, ce n'est plus un
+      decalage mais une <b>derive</b> : la grille du fichier n'a pas tout a
+      fait le tempo du morceau, et aucun decalage ne la rattrape. Le bouton
+      <b>mesurer la derive</b> compare les deux grilles et pose le curseur.
+      Mesure sur le fichier d'essai : melodie 85,163 BPM, morceau 85,000
+      &mdash; 0,19 % d'ecart, soit sept centiemes de seconde au bout de
+      trente-cinq. L'etirement part de la premiere note, donc le calage deja
+      trouve ne bouge pas.<br>
       <b>Chercher le decalage tout seul</b> compare les attaques du fichier a
       celles du morceau. Mesure : sur un fichier percussif il retrouve le
       decalage exactement ; sur une melodie il se trompe a tous les coups, et
@@ -1917,6 +1952,7 @@ function params() {
     passage: $('#passage').value, passageTurb: $('#passageTurb').value,
     midi: $('#midi').value,
     midiForce: $('#midiForce').value, midiOffset: $('#midiOffset').value,
+    midiTempo: $('#midiTempo').value,
     midiCale: $('#midiCale').checked ? '1' : '0',
     palette: $('#palette').value, trait: $('#trait').value,
     bg: $('#bg').value, bgColor: $('#bgColor').value,
@@ -2217,12 +2253,69 @@ function majOffset() {
       + '</b>, soit apres la fin du plan : on ne la verra pas';
   else
     ou.innerHTML = 'premiere note a <b>' + instant(t) + '</b> dans la video';
+  // la portee de la derive se compte depuis la premiere note : bouger le
+  // calage la change
+  majDerive();
 }
 $('#midiOffset').oninput = () => { majOffset(); shot(); };
+/* La derive, dite en secondes plutot qu'en pourcent : c'est sous cette forme
+   qu'on la constate — la melodie est calee au debut du plan et fausse a la
+   fin. Le pourcent reste affiche parce que lui ne change pas quand on change
+   la longueur du plan. */
+function majDerive() {
+  const el = $('#midiTempo');
+  if (!el) return;
+  const p = +el.value || 0;
+  $('#v-mit').textContent = p.toFixed(3) + ' %';
+  const ou = $('#midiDerive');
+  if (!ou) return;
+  if (MIDI_DEBUT === null || !p) { ou.innerHTML = '&nbsp;'; return; }
+  // l'etirement part de la premiere note : c'est de la qu'on compte
+  const depart = +$('#start').value || 0;
+  const plan = +$('#dur').value || Math.max(0, (duration || 0) - depart);
+  const t0 = MIDI_DEBUT - depart - (+$('#midiOffset').value || 0);
+  const portee = Math.max(0, plan - Math.max(0, t0));
+  const d = portee * p / 100;
+  ou.innerHTML = 'la melodie ' + (p > 0 ? 'retarde' : 'avance') + ' de <b>'
+    + Math.abs(d).toFixed(3) + ' s</b> a la fin du plan';
+}
+$('#midiTempo').oninput = () => { majDerive(); shot(); };
+/* Mesurer la derive : on compare le pas de la grille du fichier a celui du
+   morceau. Contrairement au calage, cette mesure-la est fiable sur une
+   melodie — un motif repetitif dit tres bien l'ecart *entre* ses attaques,
+   c'est seulement *laquelle* des mesures est la bonne qu'il ne dit pas. */
+$('#midiMesure').onclick = async () => {
+  if (!track) return setStatus('chargez d abord un morceau', true);
+  if (!$('#midi').value) return setStatus('chargez d abord une melodie', true);
+  setStatus('mesure de la derive...');
+  try {
+    const j = await (await fetch('/derive?track=' + track + '&midi='
+                     + encodeURIComponent($('#midi').value))).json();
+    if (j.error) return setStatus(j.error, true);
+    const el = $('#midiTempo');
+    // le curseur va par pas de 0,005 % : l'arrondi laisse au pire 0,0025 %,
+    // soit six millisecondes sur quatre minutes
+    const v = Math.min(+el.max, Math.max(+el.min,
+              Math.round(j.pourcent / +el.step) * +el.step));
+    el.value = v;
+    majDerive();
+    shot();
+    setStatus('melodie ' + j.bpm_melodie.toFixed(2) + ' BPM, morceau '
+      + j.bpm_morceau.toFixed(2) + ' BPM  ->  derive '
+      + (j.pourcent >= 0 ? '+' : '') + j.pourcent.toFixed(3) + ' %'
+      + (Math.abs(j.pourcent - v) > 0.0005
+         ? ' (curseur pose a ' + v.toFixed(3) + ' %)' : '')
+      + (j.nettete < 5 ? '  — mesure peu nette, verifiez a l oreille' : '')
+      // la mesure est un ecart entre attaques : elle se moyenne, donc elle
+      // vaut ce que vaut la longueur analysee
+      + (j.duree < 60 ? '  — extrait court (' + Math.round(j.duree)
+         + ' s) : la mesure sera plus juste sur un plan plus long' : ''));
+  } catch (e) { setStatus('mesure impossible : ' + e.message, true); }
+};
 /* Le depart et la duree deplacent la fenetre rendue, donc l'instant ou la
    premiere note y tombe : le rappel se refait. */
-$('#start').oninput = majOffset;
-$('#dur').oninput = majOffset;
+$('#start').oninput = () => { majOffset(); majDerive(); };
+$('#dur').oninput = () => { majOffset(); majDerive(); };
 /* Les boutons decalent d'un nombre entier de temps du morceau. La phase du
    fichier est presque toujours deja bonne — un MIDI exporte du meme projet
    tombe sur la grille — et ce qui manque est le nombre de temps. Bouger par

@@ -471,25 +471,63 @@ dont la première note est à 5 s et un plan qui démarre à 30 s ne montrent ri
 
 #### Si c'est décalé : les boutons, pas le curseur
 
-Six boutons décalent le fichier d'exactement **un quart de temps, un temps ou
-une mesure** du morceau. C'est le bon outil, et la mesure dit pourquoi. Sur le
-fichier d'essai (170 notes) comparé au morceau :
+Deux pannes différentes se ressemblent à l'oreille, et elles n'ont pas le même
+remède. Il faut d'abord les séparer :
 
-| ce qu'on mesure | valeur |
-| --- | --- |
-| écart de phase sur la grille de doubles-croches | **0,033 s** (pour un pas de 0,176 s) |
-| rapport des tempos MIDI / audio | **0,998** — soit 0,06 s de dérive sur 35 s |
+| ce qu'on entend | ce que c'est | le remède |
+| --- | --- | --- |
+| faux **d'un bout à l'autre**, du même écart | un **décalage** | les six boutons |
+| juste au début, **faux de plus en plus** | une **dérive** | le curseur *dérive* |
 
-Autrement dit un MIDI exporté d'un projet tombe **déjà** sur la grille du
-morceau. Ce qui manque n'est jamais un réglage fin, c'est un **nombre entier de
-temps**. Les boutons explorent exactement cette inconnue sans jamais sortir de
-la grille ; le curseur au millième, lui, ne sert qu'à rattraper un fichier qui
-n'est pas sur la grille du tout.
+**Le décalage.** Six boutons décalent le fichier d'exactement un quart de
+temps, un temps ou une mesure du morceau. Un MIDI exporté d'un projet tombe
+déjà sur la grille : ce qui lui manque n'est jamais un réglage fin, c'est un
+**nombre entier de temps**. Les boutons explorent exactement cette inconnue
+sans jamais sortir de la grille ; le curseur au millième, lui, ne sert qu'à
+rattraper un fichier qui n'est pas sur la grille du tout.
 
 Le curseur va de ± 60 s (et non ± 10 s : un fichier peut couvrir une section
 prise loin dans le morceau) et le pas des boutons n'est pas arrondi — arrondir
 au centième ajoutait cinq millisecondes d'erreur par clic, de quoi sortir de la
 grille au bout d'une quinzaine.
+
+#### La dérive : quand les deux tempos ne sont pas le même
+
+Un fichier dont la grille n'a pas tout à fait le tempo du morceau se cale au
+début puis s'en écarte peu à peu. **Aucun décalage ne rattrape ça** : il faut
+étirer la mélodie. Sur le fichier d'essai :
+
+| | pas de double-croche | tempo |
+| --- | --- | --- |
+| morceau | 0,176470 s | **85,0003 BPM** |
+| mélodie | 0,176132 s | **85,1633 BPM** |
+
+Soit **+0,19 %** : sept centièmes de seconde au bout de trente-cinq, une
+demi-seconde sur un morceau entier. Le bouton **mesurer la dérive** compare les
+deux grilles et pose le curseur.
+
+L'étirement part de la **première note**, pas de zéro : le calage déjà trouvé
+ne bouge donc pas, et les deux réglages se font l'un après l'autre sans se
+défaire. Vérifié sur le fichier d'essai — la première note reste à 5,250 s, et
+la dernière passe de 35,017 à 35,074 s, exactement les 0,0569 s attendus.
+
+Contrairement au calage, **cette mesure-là est fiable sur une mélodie**, et la
+raison est nette : chercher un décalage revient à choisir *laquelle* des mesures
+du morceau est la bonne, ce qu'un motif répétitif ne permet pas ; chercher un
+tempo ne demande que l'écart *entre* les attaques, que le même motif répétitif
+donne au contraire très bien. Elle se moyenne, donc elle vaut ce que vaut la
+longueur analysée :
+
+| longueur analysée | tempo trouvé pour le morceau | dérive |
+| --- | --- | --- |
+| 45 s | 85,033 BPM | +0,153 % |
+| 90 s | 85,006 BPM | +0,185 % |
+| morceau entier (243 s) | 85,0006 BPM | +0,191 % |
+
+On somme `exp(2iπt/p)` plutôt que de compter ce qui tombe sur une grille : la
+somme complexe ne dépend pas de la phase, là où une grille posée à zéro ratait
+le vrai sommet — mesuré, l'écart valait 0,2 %, soit tout ce qu'on cherche à
+corriger.
 
 #### Pourquoi le calage automatique ne peut pas marcher
 

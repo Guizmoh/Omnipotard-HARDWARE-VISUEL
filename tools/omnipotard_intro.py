@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-18.3"
+VERSION = "2026-09-20.1"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -245,6 +245,11 @@ AIDE = {
                   "rapport au calage trouve tout seul. A utiliser si les "
                   "touches s'allument un peu avant ou un peu apres la "
                   "melodie entendue.",
+    "midiTempo": "Corrige la derive, quand la melodie est calee au debut du "
+                 "plan et fausse a la fin : la grille du fichier n'a alors pas "
+                 "tout a fait le tempo du morceau. L'etirement part de la "
+                 "premiere note, donc le calage deja trouve ne bouge pas. "
+                 "Positif = la melodie retarde, negatif = elle avance.",
     "preset": "Repose tous les curseurs sur un point de depart. Tout reste "
               "modifiable ensuite. « Mes reglages » sont les votres, gardes "
               "d'une fois sur l'autre.",
@@ -396,6 +401,7 @@ CHAMPS = {
     "neon": "neon", "reflet": "reflet", "tube": "tube", "bg_anim": "bgAnim",
     "passage": "passage", "passage_turb": "passageTurb",
     "midi_force": "midiForce", "midi_offset": "midiOffset",
+    "midi_tempo": "midiTempo",
     "wave_smooth": "waveSmooth", "trail": "trail", "glitch": "glitch",
     "punch": "punch", "punch_on": "punchOn",
     "shake_amp": "shake", "shake_on": "shakeOn",
@@ -2700,7 +2706,8 @@ class Renderer:
                  palette="vert", subtitle=SUB_TXT, bg=None, bg_color=None,
                  bg_strength=1.0, bg_clear=0.55, bg_anim=0.0, nettete=1.0,
                  machine="mpc", machines=None, passage=1.9, passage_turb=1.0,
-                 midi=None, midi_offset=0.0, midi_transpose=0, midi_force=1.0):
+                 midi=None, midi_offset=0.0, midi_transpose=0, midi_force=1.0,
+                 midi_tempo=1.0):
         self.W, self.H = w, h
         self.fps = fps
         self.dur = duration
@@ -2791,6 +2798,7 @@ class Renderer:
         # savoir pour s'allumer au bon moment.
         self.midi = (np.asarray(midi, dtype=np.float64).reshape(-1, 4)
                      if midi is not None and len(midi) else None)
+        self.midi_tempo = float(midi_tempo)
         self.midi_offset = float(midi_offset)
         self.midi_transpose = int(midi_transpose)
         self.midi_force = float(midi_force)
@@ -2954,6 +2962,18 @@ class Renderer:
         mt = t + self.midi_offset
         deb, fin, haut, force = (self.midi[:, 0], self.midi[:, 1],
                                  self.midi[:, 2], self.midi[:, 3])
+        # La derive. Un fichier dont la grille n'a pas tout a fait le tempo du
+        # morceau se cale au debut puis s'en ecarte peu a peu : mesure sur le
+        # fichier d'essai, sa grille avance de 0,207 % — 7 centiemes de seconde
+        # au bout de trente-cinq, une demi-seconde sur un morceau entier. On
+        # etire la melodie autour de sa premiere note, pour que le calage deja
+        # trouve ne bouge pas et que seule la derive se corrige. Fait ici et non
+        # a la construction : l'apercu du studio pose les notes apres coup, et
+        # etirer le tableau sur place l'aurait etire une fois par image.
+        if self.midi_tempo != 1.0:
+            d0 = float(deb.min())
+            deb = d0 + (deb - d0) * self.midi_tempo
+            fin = d0 + (fin - d0) * self.midi_tempo
         # Une nappe ou un accord tenu laissait sa touche allumee des dizaines
         # de secondes : au bout de trois ou quatre, la moitie du clavier reste
         # eclairee et on ne voit plus quelle note vient d'etre jouee. Passe
@@ -3305,6 +3325,7 @@ class Renderer:
     midi_offset = 0.0
     midi_transpose = 0
     midi_force = 1.0
+    midi_tempo = 1.0
     ecran = SCREEN
     taille = 1.0
     presence = 1.0

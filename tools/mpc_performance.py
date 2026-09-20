@@ -384,6 +384,7 @@ def preparer_midi(info, reglages):
     # meme projet est de toute facon deja a l'heure.
     cale = reglages.pop("midi_cale", False)
     ecart = float(reglages.pop("midi_offset", 0.0) or 0.0)
+    vitesse = float(reglages.pop("midi_tempo", 1.0) or 1.0)
     transpo = reglages.pop("midi_transpose", None)
     if not chemin or not os.path.exists(chemin):
         reglages.pop("midi_force", None)
@@ -410,9 +411,10 @@ def preparer_midi(info, reglages):
     if transpo is None or transpo == "":
         transpo = midi_fichier.transposition(notes)
     infos.update({"cale": auto, "nettete": nettete, "transpose": int(transpo),
-                  "offset": auto + ecart})
+                  "offset": auto + ecart, "tempo": vitesse})
     reglages["midi"] = [(a, b, c, d) for a, b, c, d in notes]
     reglages["midi_offset"] = auto + ecart
+    reglages["midi_tempo"] = vitesse
     reglages["midi_transpose"] = int(transpo)
     return reglages, infos
 
@@ -594,6 +596,12 @@ def add_look_args(ap):
                          "un fichier percussif : sur une melodie il se trompe "
                          "a tous les coups. Par defaut le fichier est pris tel "
                          "quel, ce qui est juste pour un export du meme projet")
+    ap.add_argument("--midi-tempo", type=float, default=1.0, metavar="R",
+                    help="corrige la derive quand la grille du fichier n'a pas "
+                         "tout a fait le tempo du morceau : 1 = telle quelle, "
+                         "1.002 = melodie etiree de 0,2 %% (elle avancait). "
+                         "L'etirement se fait autour de la premiere note, donc "
+                         "le calage trouve ne bouge pas")
     ap.add_argument("--midi-transpose", type=int, default=None, metavar="N",
                     help="transposition en demi-tons ; par defaut, celle qui "
                          "met la melodie au milieu du clavier")
@@ -771,6 +779,7 @@ def look_kwargs(args):
             "midi_offset": args.midi_offset,
             "midi_cale": bool(args.midi_cale),
             "midi_transpose": args.midi_transpose,
+            "midi_tempo": args.midi_tempo,
             "midi_force": args.midi_force,
             "passage": args.passage,
             "passage_turb": args.passage_turb,
