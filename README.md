@@ -1028,14 +1028,26 @@ d'entre elles ont été corrigées sur photo :
   gauche**, ses huit encodeurs **à droite de l'écran** en deux rangées de
   quatre, et ses deux gros potards sont empilés sur le **flanc gauche** — le
   modèle précédent les avait pris pour une molette à droite ;
-- le **MiniFreak** porte vingt-trois potards groupés par section (oscillateurs,
-  filtre, effets, deux enveloppes) et non huit en ligne, une matrice de
-  modulation en haut à gauche, et ses deux bandes tactiles sont **verticales, à
-  gauche du clavier** — d'où un clavier qui ne va plus jusqu'au bord.
+- le **MiniFreak** garde la façade simplifiée : huit potards, deux bandes
+  tactiles et un grand écran. La version relevée trait pour trait sur la photo
+  — vingt-trois potards groupés par section, matrice de modulation, rangée de
+  pas — a été essayée puis **abandonnée** : fidèle, mais illisible en trait
+  lumineux, où vingt-trois cercles de rayon 0,05 deviennent une bouillie. Les
+  organes s'alignent en revanche sur une même largeur, ce qu'ils ne faisaient
+  pas : les deux bandes tactiles étaient deux fois plus courtes que la rangée
+  de potards.
 
-Son écran est volontairement plus grand que le vrai (0,52 contre 0,30) : c'est
-lui qui porte la forme d'onde du morceau, et à l'échelle exacte elle n'aurait
-été qu'une trace.
+C'est la règle qui vaut pour les quatre machines : **la photo dit la
+disposition, pas le nombre**. Un trait lumineux a besoin d'air là où une
+sérigraphie tient serré. La SP-404 a perdu deux de ses trois rangées de
+touches pour la même raison, et son cadran central a été agrandi jusqu'à ce
+que la façade le permette — l'écran y gagne trois fois sa surface, parce que
+c'est lui qui porte la forme d'onde du morceau.
+
+Ses six touches d'effets ne sont pas des rectangles : leur bord intérieur
+**épouse l'arc du cadran**, et c'est cette silhouette-là qui fait reconnaître
+la machine. Tracées droites, elles laissaient autour du cadran un vide en
+losange qui ne ressemblait à rien.
 
 Elles parlent le **même langage** : des chemins étiquetés, et des étiquettes que
 le moteur sait animer. `pad<n>` s'allume sur un coup, `step<n>` sur le pas du

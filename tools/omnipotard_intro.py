@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-23.2"
+VERSION = "2026-09-23.3"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1355,15 +1355,8 @@ def pad_fill(k, nlines=7):
 
 # ---- Arturia MiniFreak : un clavier 37 touches, large et plat.
 MF_BODY = (-1.560, -0.612, 1.560, 0.612)
-# Releve sur une vue de dessus a plat. Le clavier ne va pas jusqu'au bord
-# gauche : les deux bandes tactiles verticales lui prennent la place, et il
-# s'arrete plus bas qu'avant pour laisser passer la rangee de pas.
-MF_CLAV = (-1.102, -0.585, 1.515, -0.126)     # la zone du clavier
-# L'ecran est au milieu du panneau, entre le filtre et les oscillateurs.
-# Il est agrandi par rapport au vrai — 0,52 de large contre 0,30 — parce
-# que c'est lui qui porte la forme d'onde du morceau : a l'echelle exacte
-# elle n'aurait ete qu'une trace.
-MF_ECRAN = (-0.260, 0.128, 0.260, 0.330)
+MF_CLAV = (-1.512, -0.588, 1.512, -0.040)     # la zone du clavier
+MF_ECRAN = (-0.040, 0.140, 0.700, 0.520)
 MF_TOUCHE = ((MF_CLAV[2] - MF_CLAV[0]) / 22.0)      # 22 touches blanches
 # noires : apres do, re, fa, sol, la de chaque octave
 MF_NOIRES = (0, 1, 3, 4, 5)
@@ -1605,46 +1598,21 @@ MF_PADS = [[k for k, (r, _, _, _) in enumerate(MF_CLAVIER)
            for i in (min(21, j + 3) for j in range(16))]
 
 
-# Le panneau, section par section, comme sur la machine. Le modele precedent
-# n'avait qu'une rangee de huit potards et une grosse molette ; la vraie en
-# porte vingt-trois, groupes par fonction, et c'est ce groupement qui la rend
-# reconnaissable au premier coup d'oeil.
-MF_KNOB_R = 0.050
-# oscillateurs : un selecteur puis cinq potards (les oranges de la photo)
-MF_OSC = [(-0.711, 0.447)] + [(-0.606 + k * 0.161, 0.447) for k in range(5)]
-# LFO : deux potards sous les oscillateurs
-MF_LFO = [(-0.711, 0.218), (-0.550, 0.218)]
-# filtre analogique : trois potards
-MF_FILTRE = [(0.252 + k * 0.161, 0.447) for k in range(3)]
-# enveloppe cyclique : quatre potards sous le filtre
-MF_CYCL = [(0.252 + k * 0.161, 0.218) for k in range(4)]
-# effets numeriques : quatre potards
-MF_FX = [(0.780 + k * 0.161, 0.447) for k in range(4)]
-# enveloppe : quatre potards dessous
-MF_ENV = [(0.780 + k * 0.161, 0.218) for k in range(4)]
-# le gros potard de volume, tout a droite
-MF_MACRO = (1.446, 0.425)
-MF_MACRO_R = 0.073
-# la matrice de modulation, en haut a gauche, et son encodeur
-MF_MATRICE = (-1.423, 0.287, -0.987, 0.502)
-MF_MAT_N = (7, 4)                                   # colonnes, rangees
-MF_MAT_KNOB, MF_MAT_R = (-0.918, 0.425), 0.055
-# la rangee de petits boutons ronds sous la matrice
-MF_RONDS = [(-1.400 + k * 0.140, 0.227) for k in range(6)]
-MF_ROND_R = 0.035
-# les deux bandes tactiles, verticales, a gauche du clavier
-MF_STRIPS = ((-1.400, -0.562, -1.285, -0.149),
-             (-1.239, -0.562, -1.124, -0.149))
-# la rangee de l'arpegiateur / sequenceur, sur toute la largeur du clavier
-# quatorze et non seize : la rangee s'arrete avant le nom de la machine, qui
-# occupe le bout droit de cette bande comme sur la vraie
-MF_PAS = [(-1.086 + k * 0.163, -0.095, -0.949 + k * 0.163, -0.011)
-          for k in range(14)]
-# les quatre touches de mode a gauche de cette rangee
-MF_BTN = [(-1.400 + k * 0.072, -0.095, -1.346 + k * 0.072, -0.011)
-          for k in range(4)]
-# tous les potards du panneau, dans l'ordre ou on les lit
-MF_KNOBS = MF_OSC + MF_LFO + MF_FILTRE + MF_CYCL + MF_FX + MF_ENV
+# Les trois blocs du panneau tiennent chacun une largeur franche, et les deux
+# premiers partagent la meme : huit potards au-dessus de deux bandes tactiles,
+# exactement alignes. Auparavant les bandes etaient deux fois plus courtes que
+# la rangee de potards, ce qui donnait au coin gauche un air de brouillon.
+MF_GAUCHE = (-1.400, -0.236)                  # la largeur du bloc de gauche
+MF_KNOBS = [(-1.318 + k * 0.155, 0.396) for k in range(8)]
+MF_KNOB_R = 0.062
+MF_MACRO = (1.216, 0.236)
+MF_MACRO_R = 0.116
+MF_STRIPS = ((MF_GAUCHE[0], 0.052, MF_GAUCHE[1], 0.144),
+             (MF_GAUCHE[0], 0.188, MF_GAUCHE[1], 0.280))
+# cinq touches et non sept : elles tiennent toute la largeur de l'ecran, une
+# chacune, au lieu de sept petites qui s'arretaient avant son bord droit
+MF_BTN = [(-0.040 + k * 0.152, -0.010, 0.088 + k * 0.152, 0.074)
+          for k in range(5)]
 
 
 def build_minifreak(step=STEP):
@@ -1666,62 +1634,39 @@ def build_minifreak(step=STEP):
         add(Path(contour, tag="pad%d" % ((rang * 16) // len(MF_CLAVIER)),
                  step=step))
 
-    # ecran, au milieu du panneau
-    add(Path(rrect_pts(*MF_ECRAN, r=0.018), closed=True, tag="lcd", step=step))
-    add(Path(rrect_pts(MF_ECRAN[0] + 0.018, MF_ECRAN[1] + 0.018,
-                       MF_ECRAN[2] - 0.018, MF_ECRAN[3] - 0.018, 0.010),
+    # ecran
+    add(Path(rrect_pts(*MF_ECRAN, r=0.020), closed=True, tag="lcd", step=step))
+    add(Path(rrect_pts(MF_ECRAN[0] + 0.022, MF_ECRAN[1] + 0.022,
+                       MF_ECRAN[2] - 0.022, MF_ECRAN[3] - 0.022, 0.012),
              closed=True, tag="lcd", step=step))
 
-    # les vingt-trois potards du panneau, chacun avec son index
+    # huit potards, et la grosse molette de droite
     for k, (cx, cy) in enumerate(MF_KNOBS):
         add(Path(circle_pts(cx, cy, MF_KNOB_R), closed=True,
                  tag="qlink%d" % k, step=step))
-        add(Path([(cx, cy + MF_KNOB_R * 0.28), (cx, cy + MF_KNOB_R * 0.94)],
+        add(Path([(cx, cy + MF_KNOB_R * 0.30), (cx, cy + MF_KNOB_R * 0.92)],
                  tag="qlink%d" % k, step=step))
-    # le gros potard de volume, a droite, et l'encodeur de la matrice
-    add(Path(circle_pts(*MF_MACRO, r=MF_MACRO_R), closed=True,
-             tag="wheel", step=step))
-    add(Path(circle_pts(*MF_MACRO, r=MF_MACRO_R * 0.40), closed=True,
-             tag="wheel", step=step))
-    add(Path(circle_pts(*MF_MAT_KNOB, r=MF_MAT_R), closed=True,
+    add(Path(circle_pts(*MF_MACRO, r=MF_MACRO_R), closed=True, tag="wheel", step=step))
+    add(Path(circle_pts(*MF_MACRO, r=MF_MACRO_R * 0.42), closed=True,
              tag="wheel", step=step))
 
-    # la matrice de modulation : une grille de points, comme la serigraphie
-    x0, y0, x1, y1 = MF_MATRICE
-    add(Path(rrect_pts(x0, y0, x1, y1, 0.014), closed=True, tag="strip",
-             step=step))
-    nc, nr = MF_MAT_N
-    for i in range(nc):
-        x = x0 + (x1 - x0) * (i + 0.5) / nc
-        add(Path([(x, y0 + 0.020), (x, y1 - 0.020)], tag="strip", step=step))
-    for j in range(nr):
-        y = y0 + (y1 - y0) * (j + 0.5) / nr
-        add(Path([(x0 + 0.018, y), (x1 - 0.018, y)], tag="strip", step=step))
-
-    # la rangee de petits boutons ronds sous la matrice
-    for k, (cx, cy) in enumerate(MF_RONDS):
-        add(Path(circle_pts(cx, cy, MF_ROND_R), closed=True,
-                 tag="btnx%d" % k, step=step))
-
-    # les deux bandes tactiles, verticales, a gauche du clavier
+    # les deux bandes tactiles
     for r in MF_STRIPS:
-        add(Path(rrect_pts(*r, r=0.030), closed=True, tag="strip", step=step))
-        for j in range(6):
-            y = r[1] + 0.036 + (r[3] - r[1] - 0.072) * j / 5.0
-            add(Path([(r[0] + 0.016, y), (r[2] - 0.016, y)], tag="strip",
-                     step=step))
+        add(Path(rrect_pts(*r, r=0.034), closed=True, tag="strip", step=step))
+        for j in range(7):
+            x = r[0] + 0.040 + (r[2] - r[0] - 0.080) * j / 6.0
+            add(Path([(x, r[1] + 0.018), (x, r[3] - 0.018)], tag="strip", step=step))
 
-    # la rangee de l'arpegiateur, et ses quatre touches de mode
-    for k, r in enumerate(MF_PAS + MF_BTN):
-        add(Path(rrect_pts(*r, r=0.012), closed=True, tag="btn%d" % k,
-                 step=step))
+    # rangee de boutons sous l'ecran
+    for k, r in enumerate(MF_BTN):
+        add(Path(rrect_pts(*r, r=0.014), closed=True, tag="btn%d" % k, step=step))
 
-    P += text_paths("MINIFREAK", 0.048, 1.208, -0.080, step=step, center=False,
+    # le marquage se tient au-dessus de la grosse molette, seul endroit du
+    # panneau ou il ne mord ni sur l'ecran ni sur les potards
+    P += text_paths("MINIFREAK", 0.058, 0.965, 0.452, step=step, center=False,
                     tag="logo")
-    # la marque dans la bande libre entre les potards et la rangee de pas :
-    # le seul endroit du panneau ou elle ne mord sur rien
-    P += text_paths("OMNIPOTARD", 0.026, -1.420, 0.042, step=step,
-                    center=False, tag="mark", tracking=0.48)
+    P += text_paths("OMNIPOTARD", 0.028, 0.967, 0.396, step=step, center=False,
+                    tag="mark", tracking=0.52)
     return P
 
 
@@ -1734,12 +1679,6 @@ def build_minifreak(step=STEP):
 # droite, un amas de six en bas a gauche, et les seize declencheurs a cote de
 # cet amas. La premiere version les posait au juge — ils couraient d'un bord
 # a l'autre et le nom du modele leur passait dessus.
-# Releve sur une vue de dessus a plat. La machine est presque carree — 560
-# sur 515 pixels de photo, soit 1,09 — la ou le modele precedent l'etirait a
-# 1,24. Et surtout l'implantation etait fausse : l'ecran est **a gauche**, les
-# huit encodeurs **a sa droite** en deux rangees de quatre, et les deux gros
-# potards (volume general, niveau/donnees) sont empiles sur le **flanc
-# gauche**, pas en molette a droite.
 DK_BODY = (-0.937, -0.862, 0.937, 0.862)
 DK_ECRAN = (-0.653, 0.142, 0.000, 0.661)
 # les deux potards du flanc gauche : volume general en haut, niveau/donnees
@@ -1875,30 +1814,62 @@ def _remplir_sp(k):
 
 SP_BODY = (-0.723, -0.861, 0.723, 0.861)
 # les quatre gros potards du haut : volume, puis les trois controles
-SP_KNOBS = [(-0.561 + k * 0.339, 0.664) for k in range(4)]
-SP_KNOB_R = 0.088
-# le cadran, et l'ecran loge en son centre
-SP_DIAL, SP_DIAL_R = (0.0, 0.354), 0.171
-SP_ECRAN = (-0.128, 0.251, 0.128, 0.457)
-# les deux colonnes d'effets qui encadrent le cadran
-SP_FX_G = [(-0.664, y - 0.041, -0.369, y + 0.041)
-           for y in (0.472, 0.369, 0.266)]
-SP_FX_D = [(0.369, y - 0.041, 0.664, y + 0.041)
-           for y in (0.472, 0.369, 0.266)]
+SP_KNOBS = [(-0.561 + k * 0.339, 0.700) for k in range(4)]
+SP_KNOB_R = 0.068
+# Le cadran et l'ecran qu'il porte. Sur la vraie machine cet ecran est
+# minuscule ; ici c'est lui qui montre la forme d'onde du morceau, et a
+# l'echelle exacte elle n'aurait ete qu'une trace. Tout le bloc central est
+# donc agrandi — l'ecran y gagne deux fois et demie sa surface — en gardant
+# l'ecran inscrit dans le cadran, ce qui est la silhouette de la machine.
+SP_DIAL, SP_DIAL_R = (0.0, 0.290), 0.330
+SP_ECRAN = (-0.240, 0.120, 0.240, 0.460)
+# Les six touches d'effets ne sont pas de simples rectangles : leur bord
+# interieur epouse le cadran, et c'est ce qui donne a la facade sa forme
+# reconnaissable. Chacune est donnee par sa hauteur et son bord exterieur.
+SP_FX_Y = ((0.370, 0.490), (0.230, 0.350), (0.090, 0.210))
+SP_FX_X = (-0.690, 0.690)
+SP_FX_MARGE = 0.028
+
+
+def sp_touche(cote, y0, y1, n=14):
+    """Une touche d'effet, creusee par le cadran.
+
+    Le bord exterieur est droit, l'interieur suit l'arc du cadran a `marge`
+    de distance. Tracees en rectangles, ces six touches laissaient autour du
+    cadran un vide en losange qui ne ressemblait a rien ; epousees, elles
+    referment le bloc central et la facade se lit d'un coup.
+    """
+    cx, cy = SP_DIAL
+    xe = SP_FX_X[0] if cote < 0 else SP_FX_X[1]
+    P = [(xe, y0), (xe, y1)]
+    for y in np.linspace(y1, y0, n):
+        d = abs(y - cy)
+        demi = math.sqrt(max(0.0, SP_DIAL_R ** 2 - d * d)) + SP_FX_MARGE
+        # sous le cadran la touche garde une largeur minimale, sinon elle se
+        # pincerait jusqu'a disparaitre
+        demi = max(demi, SP_FX_MARGE + 0.04)
+        P.append((cx - demi if cote < 0 else cx + demi, y))
+    P.append((xe, y0))
+    return arrondir(P, 0.026)
 # trois rangees de petites touches : sequenceur de motifs, echantillonnage,
 # puis la rangee EXIT / COPY / BANK / SHIFT
-SP_RANG1 = [(-0.531 + k * 0.186, 0.060, -0.389 + k * 0.186, 0.118)
+# Deux rangees et non trois, cinq touches chacune et non cinq puis huit puis
+# six. La vraie machine en porte une vingtaine, serrees et serigraphiees ; en
+# trait lumineux elles ne se lisaient plus qu'en grille de petits rectangles.
+# Les deux rangees tiennent la meme largeur que les colonnes d'effets, ce qui
+# donne a tout le milieu de la facade un seul aplomb.
+# Une seule rangee sous le cadran. La vraie en porte trois, serrees et
+# serigraphiees ; en trait lumineux elles ne se lisaient plus qu'en grille de
+# petits rectangles, et elles volaient a l'ecran la place qui lui manquait.
+SP_RANG1 = [(-0.690 + k * 0.284, -0.154, -0.452 + k * 0.284, -0.062)
             for k in range(5)]
-SP_RANG2 = [(-0.546 + k * 0.152, -0.050, -0.428 + k * 0.152, 0.008)
-            for k in range(8)]
-SP_RANG3 = [(-0.531 + k * 0.170, -0.153, -0.401 + k * 0.170, -0.095)
-            for k in range(6)]
 # la colonne de fonctions a droite des pads
-SP_DROITE = [(0.354, y - 0.059, 0.679, y + 0.059)
-             for y in (-0.266, -0.413, -0.561, -0.708)]
-SP_PAD_X0, SP_PAD_Y0 = -0.664, -0.212
-SP_PAD_W, SP_PAD_H = 0.214, 0.126
-SP_PAD_GX, SP_PAD_GY = 0.2398, 0.1463
+SP_DROITE = [(0.354, y - 0.062, 0.679, y + 0.062)
+             for y in (-0.305, -0.459, -0.613, -0.767)]
+# la rangee retiree rend de la place : les pads s'etalent d'autant
+SP_PAD_X0, SP_PAD_Y0 = -0.664, -0.238
+SP_PAD_W, SP_PAD_H = 0.214, 0.134
+SP_PAD_GX, SP_PAD_GY = 0.2398, 0.1540
 
 
 def sp_pad(k):
@@ -1937,9 +1908,14 @@ def build_sp404(step=STEP):
         add(Path(circle_pts(cx, cy, SP_KNOB_R * 0.30), closed=True,
                  tag="qlink%d" % k, step=step))
 
-    for k, r in enumerate(SP_FX_G + SP_FX_D + SP_RANG1 + SP_RANG2
-                          + SP_RANG3 + SP_DROITE):
-        add(Path(rrect_pts(*r, r=0.016), closed=True, tag="btn%d" % k, step=step))
+    # les six touches d'effets, creusees par le cadran
+    for k, (y0, y1) in enumerate(SP_FX_Y):
+        for j, cote in enumerate((-1, 1)):
+            add(Path(sp_touche(cote, y0, y1), closed=True,
+                     tag="btn%d" % (k * 2 + j), step=step))
+    for k, r in enumerate(SP_RANG1 + SP_DROITE):
+        add(Path(rrect_pts(*r, r=0.016), closed=True,
+                 tag="btn%d" % (6 + k), step=step))
 
     # les seize pads, en double trait comme sur les autres machines
     for k in range(16):
@@ -1951,9 +1927,10 @@ def build_sp404(step=STEP):
 
     # la marque en haut a gauche, le nom en haut a droite : les deux coins
     # libres de la facade, comme sur la vraie
-    P += text_paths("SP-404", 0.046, -0.640, 0.786, step=step,
+    # la bande de titre, au-dessus des potards comme sur la vraie
+    P += text_paths("SP-404", 0.038, -0.648, 0.790, step=step,
                     center=False, tag="logo")
-    P += text_paths("OMNIPOTARD", 0.026, 0.150, 0.790, step=step,
+    P += text_paths("OMNIPOTARD", 0.024, 0.216, 0.794, step=step,
                     center=False, tag="mark", tracking=0.46)
     return P
 
