@@ -1058,14 +1058,14 @@ d'entre elles ont été corrigées sur photo :
   gauche**, ses huit encodeurs **à droite de l'écran** en deux rangées de
   quatre, et ses deux gros potards sont empilés sur le **flanc gauche** — le
   modèle précédent les avait pris pour une molette à droite ;
-- le **MiniFreak** garde la façade simplifiée : huit potards, deux bandes
-  tactiles et un grand écran. La version relevée trait pour trait sur la photo
-  — vingt-trois potards groupés par section, matrice de modulation, rangée de
-  pas — a été essayée puis **abandonnée** : fidèle, mais illisible en trait
-  lumineux, où vingt-trois cercles de rayon 0,05 deviennent une bouillie. Les
-  organes s'alignent en revanche sur une même largeur, ce qu'ils ne faisaient
-  pas : les deux bandes tactiles étaient deux fois plus courtes que la rangée
-  de potards.
+- le **MiniFreak** tient le milieu entre la photo et la lisibilité. La version
+  relevée trait pour trait — vingt-trois potards groupés par section, matrice
+  de modulation, rangée de pas — a été essayée puis **abandonnée** : fidèle,
+  mais illisible en trait lumineux, où vingt-trois cercles de rayon 0,05
+  deviennent une bouillie. Il garde donc huit potards, mais reprend de la
+  vraie ce qui la fait reconnaître : le **renfoncement à gauche du clavier**
+  avec ses deux bandes tactiles **verticales** posées dedans — le clavier ne
+  va plus jusqu'au bord — et deux rangées de touches sous les potards.
 
 C'est la règle qui vaut pour les quatre machines : **la photo dit la
 disposition, pas le nombre**. Un trait lumineux a besoin d'air là où une

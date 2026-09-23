@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-23.5"
+VERSION = "2026-09-23.6"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1343,8 +1343,11 @@ def pad_fill(k, nlines=7):
 
 # ---- Arturia MiniFreak : un clavier 37 touches, large et plat.
 MF_BODY = (-1.560, -0.612, 1.560, 0.612)
-MF_CLAV = (-1.512, -0.588, 1.512, -0.040)     # la zone du clavier
-MF_ECRAN = (-0.040, 0.140, 0.700, 0.520)
+# Le clavier ne va pas jusqu'au bord gauche : il s'arrete sur le renfoncement
+# qui porte les deux bandes tactiles, et c'est cette encoche-la qui fait
+# reconnaitre la machine de loin.
+MF_CLAV = (-1.085, -0.588, 1.512, -0.060)     # la zone du clavier
+MF_ECRAN = (-0.100, 0.150, 0.800, 0.556)
 MF_TOUCHE = ((MF_CLAV[2] - MF_CLAV[0]) / 22.0)      # 22 touches blanches
 # noires : apres do, re, fa, sol, la de chaque octave
 MF_NOIRES = (0, 1, 3, 4, 5)
@@ -1591,18 +1594,27 @@ MF_PADS = [[k for k, (r, _, _, _) in enumerate(MF_CLAVIER)
 # exactement alignes. Auparavant les bandes etaient deux fois plus courtes que
 # la rangee de potards, ce qui donnait au coin gauche un air de brouillon.
 MF_GAUCHE = (-1.400, -0.236)                  # la largeur du bloc de gauche
-MF_KNOBS = [(-1.318 + k * 0.155, 0.396) for k in range(8)]
-MF_KNOB_R = 0.062
-MF_MACRO = (1.216, 0.236)
-MF_MACRO_R = 0.116
-MF_STRIPS = ((MF_GAUCHE[0], 0.052, MF_GAUCHE[1], 0.144),
-             (MF_GAUCHE[0], 0.188, MF_GAUCHE[1], 0.280))
-# cinq touches et non sept : elles tiennent toute la largeur de l'ecran, une
-# chacune, au lieu de sept petites qui s'arretaient avant son bord droit
-MF_BTN = [(-0.040 + k * 0.152, -0.010, 0.088 + k * 0.152, 0.074)
+# Le panneau, en trois blocs. A gauche les commandes : une rangee de potards
+# et deux rangees de touches, toutes alignees sur la meme largeur. Au milieu a
+# droite la dalle, avec sa rangee de touches dessous. Tout a droite le volume.
+MF_CMD = (-1.400, -0.240)                     # la largeur du bloc de gauche
+MF_KNOBS = [(-1.336 + k * 0.152, 0.468) for k in range(8)]
+MF_KNOB_R = 0.056
+MF_RANG = [[(MF_CMD[0] + k * 0.193, y, MF_CMD[0] + 0.160 + k * 0.193, y + 0.080)
+            for k in range(6)]
+           for y in (0.286, 0.166)]
+MF_MACRO = (1.290, 0.400)
+MF_MACRO_R = 0.104
+# cinq touches sous la dalle, chacune tenant sa part de sa largeur
+MF_BTN = [(-0.100 + k * 0.184, 0.032, 0.056 + k * 0.184, 0.112)
           for k in range(5)]
-MF_RONDS = [(-0.142, 0.050), (-0.142, 0.160), (-0.142, 0.270)]
-MF_ROND_R = 0.038
+# Le renfoncement a gauche du clavier, et les deux bandes tactiles qu'il
+# porte. Sur la vraie machine elles sont verticales et posees la, pas
+# couchees en haut du panneau : c'est la seule chose de la facade qu'on
+# reconnait sans lire les serigraphies.
+MF_ENCOCHE = (-1.500, -0.560, -1.120, -0.088)
+MF_STRIPS = ((-1.452, -0.516, -1.332, -0.132),
+             (-1.288, -0.516, -1.168, -0.132))
 
 
 def build_minifreak(step=STEP):
@@ -1624,42 +1636,50 @@ def build_minifreak(step=STEP):
         add(Path(contour, tag="pad%d" % ((rang * 16) // len(MF_CLAVIER)),
                  step=step))
 
-    # ecran
+    # la dalle
     add(Path(rrect_pts(*MF_ECRAN, r=0.020), closed=True, tag="lcd", step=step))
     add(Path(rrect_pts(MF_ECRAN[0] + 0.022, MF_ECRAN[1] + 0.022,
                        MF_ECRAN[2] - 0.022, MF_ECRAN[3] - 0.022, 0.012),
              closed=True, tag="lcd", step=step))
 
-    # huit potards, et la grosse molette de droite
+    # huit potards, et le volume a droite
     for k, (cx, cy) in enumerate(MF_KNOBS):
         add(Path(circle_pts(cx, cy, MF_KNOB_R), closed=True,
                  tag="qlink%d" % k, step=step))
         add(Path([(cx, cy + MF_KNOB_R * 0.30), (cx, cy + MF_KNOB_R * 0.92)],
                  tag="qlink%d" % k, step=step))
-    add(Path(circle_pts(*MF_MACRO, r=MF_MACRO_R), closed=True, tag="wheel", step=step))
+    add(Path(circle_pts(*MF_MACRO, r=MF_MACRO_R), closed=True,
+             tag="wheel", step=step))
     add(Path(circle_pts(*MF_MACRO, r=MF_MACRO_R * 0.42), closed=True,
              tag="wheel", step=step))
 
-    # les deux bandes tactiles
+    # les deux rangees de touches sous les potards, puis celles de la dalle
+    n = 0
+    for rangee in MF_RANG:
+        for r in rangee:
+            add(Path(rrect_pts(*r, r=0.014), closed=True, tag="btn%d" % n,
+                     step=step))
+            n += 1
+    for r in MF_BTN:
+        add(Path(rrect_pts(*r, r=0.014), closed=True, tag="btn%d" % n,
+                 step=step))
+        n += 1
+
+    # le renfoncement, et les deux bandes tactiles verticales qu'il porte
+    add(Path(rrect_pts(*MF_ENCOCHE, r=0.034), closed=True, tag="strip",
+             step=step))
     for r in MF_STRIPS:
-        add(Path(rrect_pts(*r, r=0.034), closed=True, tag="strip", step=step))
+        add(Path(rrect_pts(*r, r=0.030), closed=True, tag="strip", step=step))
         for j in range(7):
-            x = r[0] + 0.040 + (r[2] - r[0] - 0.080) * j / 6.0
-            add(Path([(x, r[1] + 0.018), (x, r[3] - 0.018)], tag="strip", step=step))
+            y = r[1] + 0.034 + (r[3] - r[1] - 0.068) * j / 6.0
+            add(Path([(r[0] + 0.016, y), (r[2] - 0.016, y)], tag="strip",
+                     step=step))
 
-    # rangee de boutons sous l'ecran
-    for k, r in enumerate(MF_BTN):
-        add(Path(rrect_pts(*r, r=0.014), closed=True, tag="btn%d" % k, step=step))
-    # les trois touches rondes, entre les bandes tactiles et l'ecran
-    for k, (cx, cy) in enumerate(MF_RONDS):
-        add(Path(circle_pts(cx, cy, MF_ROND_R), closed=True,
-                 tag="btnx%d" % k, step=step))
-
-    # le marquage se tient au-dessus de la grosse molette, seul endroit du
-    # panneau ou il ne mord ni sur l'ecran ni sur les potards
-    P += text_paths("MINIFREAK", 0.058, 0.965, 0.452, step=step, center=False,
+    # le nom et la marque tiennent dans la bande libre entre la dalle et le
+    # volume : c'est le seul endroit du panneau ou ils ne mordent sur rien
+    P += text_paths("MINIFREAK", 0.044, 0.828, 0.470, step=step, center=False,
                     tag="logo")
-    P += text_paths("OMNIPOTARD", 0.028, 0.967, 0.396, step=step, center=False,
+    P += text_paths("OMNIPOTARD", 0.024, 0.828, 0.406, step=step, center=False,
                     tag="mark", tracking=0.52)
     return P
 
