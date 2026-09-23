@@ -83,8 +83,9 @@ refaire à la main :
 
 ## La machine
 
-Trois machines sont dessinées : la **MPC Live III**, le **MiniFreak** (clavier
-37 touches) et le **Digitakt II** (16 déclencheurs). Elles se jouent de la même
+Quatre machines sont dessinées : la **MPC Live III**, le **MiniFreak** (clavier
+37 touches), la **SP-404 MKII** (16 pads en carré) et le **Digitakt II**
+(16 déclencheurs). Elles se jouent de la même
 façon — les coups du morceau allument leurs organes — et elles peuvent se
 **succéder dans une même vidéo** : le tracé de l'une se déforme jusqu'à devenir
 celui de l'autre (voir *Séquenceur de machines*).
@@ -966,8 +967,25 @@ python3 tools/mpc_performance.py morceau.mp3 --machine digitakt
 | machine | ce qu'elle a |
 | --- | --- |
 | `mpc` | MPC Live III — seize pads, bande de seize pas, grand écran tactile |
-| `minifreak` | MiniFreak — clavier 37 touches, huit potards, deux bandes tactiles |
-| `digitakt` | Digitakt II — seize déclencheurs, huit encodeurs, grand écran |
+| `minifreak` | MiniFreak — clavier 37 touches, vingt-trois potards, matrice de modulation, deux bandes tactiles verticales |
+| `sp404` | SP-404 MKII — seize pads en carré, quatre gros potards, cadran central. La seule **verticale** : 178 mm sur 213 |
+| `digitakt` | Digitakt II — seize déclencheurs, huit encodeurs, écran à gauche |
+
+Les trois dernières sont relevées sur des **vues de dessus à plat**, et deux
+d'entre elles ont été corrigées sur photo :
+
+- le **Digitakt II** est presque carré (1,09 et non 1,24), son écran est **à
+  gauche**, ses huit encodeurs **à droite de l'écran** en deux rangées de
+  quatre, et ses deux gros potards sont empilés sur le **flanc gauche** — le
+  modèle précédent les avait pris pour une molette à droite ;
+- le **MiniFreak** porte vingt-trois potards groupés par section (oscillateurs,
+  filtre, effets, deux enveloppes) et non huit en ligne, une matrice de
+  modulation en haut à gauche, et ses deux bandes tactiles sont **verticales, à
+  gauche du clavier** — d'où un clavier qui ne va plus jusqu'au bord.
+
+Son écran est volontairement plus grand que le vrai (0,52 contre 0,30) : c'est
+lui qui porte la forme d'onde du morceau, et à l'échelle exacte elle n'aurait
+été qu'une trace.
 
 Elles parlent le **même langage** : des chemins étiquetés, et des étiquettes que
 le moteur sait animer. `pad<n>` s'allume sur un coup, `step<n>` sur le pas du
