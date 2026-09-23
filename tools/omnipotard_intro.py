@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-23.4"
+VERSION = "2026-09-23.5"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1218,7 +1218,7 @@ PAD_W, PAD_H, PAD_GX, PAD_GY = 0.2386, 0.1936, 0.0299, 0.0299
 SCREEN = (0.018, -0.167, 1.086, 0.567)
 QLINK = [(1.266, 0.466), (1.266, 0.257), (1.266, 0.048), (1.266, -0.161)]
 QLINK_R = 0.0836
-WHEEL, WHEEL_R = (1.266, -0.406), 0.155
+WHEEL, WHEEL_R = (1.266, -0.408), 0.140
 BTN_ROWS = (-0.275, -0.382, -0.489)
 BTN_X0, BTN_W, BTN_H, BTN_GAP, BTN_N = 0.018, 0.185, 0.084, 0.030, 5
 GRILLE = (-1.340, -0.800, 1.340, -0.570)
@@ -1601,6 +1601,8 @@ MF_STRIPS = ((MF_GAUCHE[0], 0.052, MF_GAUCHE[1], 0.144),
 # chacune, au lieu de sept petites qui s'arretaient avant son bord droit
 MF_BTN = [(-0.040 + k * 0.152, -0.010, 0.088 + k * 0.152, 0.074)
           for k in range(5)]
+MF_RONDS = [(-0.142, 0.050), (-0.142, 0.160), (-0.142, 0.270)]
+MF_ROND_R = 0.038
 
 
 def build_minifreak(step=STEP):
@@ -1648,6 +1650,10 @@ def build_minifreak(step=STEP):
     # rangee de boutons sous l'ecran
     for k, r in enumerate(MF_BTN):
         add(Path(rrect_pts(*r, r=0.014), closed=True, tag="btn%d" % k, step=step))
+    # les trois touches rondes, entre les bandes tactiles et l'ecran
+    for k, (cx, cy) in enumerate(MF_RONDS):
+        add(Path(circle_pts(cx, cy, MF_ROND_R), closed=True,
+                 tag="btnx%d" % k, step=step))
 
     # le marquage se tient au-dessus de la grosse molette, seul endroit du
     # panneau ou il ne mord ni sur l'ecran ni sur les potards
@@ -1810,7 +1816,7 @@ SP_KNOB_R = 0.068
 # donc agrandi — l'ecran y gagne deux fois et demie sa surface — en gardant
 # l'ecran inscrit dans le cadran, ce qui est la silhouette de la machine.
 SP_DIAL, SP_DIAL_R = (0.0, 0.290), 0.330
-SP_ECRAN = (-0.240, 0.120, 0.240, 0.460)
+SP_ECRAN = (-0.230, 0.130, 0.230, 0.450)
 # Les six touches d'effets ne sont pas de simples rectangles : leur bord
 # interieur epouse le cadran, et c'est ce qui donne a la facade sa forme
 # reconnaissable. Chacune est donnee par sa hauteur et son bord exterieur.
@@ -1883,7 +1889,7 @@ def build_sp404(step=STEP):
 
     # le cadran : un anneau epais, et l'ecran pose dedans
     add(Path(circle_pts(*SP_DIAL, r=SP_DIAL_R), closed=True, tag="wheel", step=step))
-    add(Path(circle_pts(*SP_DIAL, r=SP_DIAL_R * 0.86), closed=True,
+    add(Path(circle_pts(*SP_DIAL, r=SP_DIAL_R * 0.93), closed=True,
              tag="wheel", step=step))
     add(Path(rrect_pts(*SP_ECRAN, r=0.020), closed=True, tag="lcd", step=step))
     add(Path(rrect_pts(SP_ECRAN[0] + 0.016, SP_ECRAN[1] + 0.016,
@@ -4263,10 +4269,20 @@ class Renderer:
                     # suivre le titre : dans le studio on peut le changer sans
                     # que le moteur, lui, soit reconstruit.
                     if getattr(self, "_ttl_de", None) != self.screen_title:
+                        # La hauteur suit la largeur de la dalle. A taille
+                        # fixe, un vrai titre de morceau se reduisait a cinq
+                        # lettres et trois points sur l'ecran de la SP-404,
+                        # large de 0,36 : on croyait a un defaut d'affichage.
+                        # Elle ne descend pas sous 0,030 — en dessous le trait
+                        # du faisceau mange la lettre — et ne monte pas
+                        # au-dessus de 0,050, la taille d'origine : sur une
+                        # grande dalle rien ne change donc.
+                        large = (sx1 - 0.052) - (sx0 + 0.052)
+                        l1 = text_width(self.screen_title, 0.42) or 1.0
+                        h = float(np.clip(large / l1, 0.030, 0.050))
                         self._ttl = text_paths(
-                            fit_text(self.screen_title, 0.050,
-                                     (sx1 - 0.052) - (sx0 + 0.052), tracking=0.42),
-                            0.050, sx0 + 0.052, sy1 - 0.099,
+                            fit_text(self.screen_title, h, large, tracking=0.42),
+                            h, sx0 + 0.052, sy1 - 0.049 - h,
                             center=False, tag="scr", tracking=0.42)
                         self._ttl_de = self.screen_title
                     for q in self._ttl:

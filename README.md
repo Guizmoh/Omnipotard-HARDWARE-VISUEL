@@ -81,6 +81,36 @@ refaire à la main :
 - les Q-Links, les bandeaux, le touch strip et les vu-mètres de l'écran suivent
   les enveloppes grave / medium / aigu.
 
+### Le vérificateur de façades
+
+`tools/verifier_machines.py` cherche automatiquement les défauts qu'on ne voit
+pas à l'œil sur un aperçu, et qui sautent aux yeux sur la vidéo finale :
+
+```
+python3 tools/verifier_machines.py
+```
+
+Il rastérise **chaque organe séparément** sur une grille où une cellule vaut
+environ deux pixels en 1080p, puis croise les masques deux à deux. Il signale
+trois familles de défauts : deux organes dont les traits se touchent, un organe
+qui sort du châssis, et un titre trop long pour sa dalle.
+
+Il a trouvé trois choses que les captures ne montraient pas :
+
+- sur la **MPC**, la molette passait à 6 millièmes du dernier potard et à
+  autant de la grille — soit trois pixels entre deux traits lumineux, qui se
+  rejoignaient donc à l'image. Elle est descendue et légèrement réduite ;
+- sur la **SP-404**, les coins de l'écran touchaient l'anneau intérieur du
+  cadran ;
+- toujours sur la **SP-404**, un vrai titre de morceau se réduisait à cinq
+  lettres et trois points sur une dalle large de 0,36.
+
+Ce dernier point a été corrigé dans le moteur et pas dans la géométrie : la
+**hauteur du titre suit désormais la largeur de la dalle**, entre 0,030 et
+0,050. Au-dessus de 0,050 rien ne change, donc les grandes dalles rendent
+exactement comme avant ; en dessous, « BOMBE ATOMIQUE N2 REMIX » passe de cinq
+lettres à dix sur la SP-404, et s'affiche en entier sur la MPC.
+
 ## La matière de la dalle
 
 Trois réglages travaillent l'image finie, et deux d'entre eux étaient jusqu'ici
