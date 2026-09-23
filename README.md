@@ -115,7 +115,7 @@ parallèle. Mesuré au profileur, le temps se répartit ainsi :
 
 | étage | par image en 1080p |
 | --- | --- |
-| le tracé (`_champ`) | 20 ms |
+| le tracé de la machine | 20 ms |
 | la déformation cathodique (`_warp`) | 73 ms |
 | le reste de `colorize` | 123 ms |
 | les flous | 22 ms |

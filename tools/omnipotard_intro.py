@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-23.3"
+VERSION = "2026-09-23.4"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -257,17 +257,6 @@ AIDE = {
                   "dedoublement du trait part sur les gros subs et frappe "
                   "toute l'image. Elle ne coute rien : un decalage entier de "
                   "deux plans, pas un rechantillonnage.",
-    "flou": "Flou de mouvement : combien de fois la machine est tracee dans "
-            "une meme image. A 1 chaque image est un instant fige, comme la "
-            "synthese le fait par defaut ; a 3 ou 4 le mouvement s'etale "
-            "comme au cinema, et les passages rapides cessent de saccader. "
-            "Mesure : quatre traces ne coutent que 20 % de rendu en plus, "
-            "parce que seul le trace est refait — le halo, les textures et la "
-            "deformation cathodique ne se calculent qu'une fois.",
-    "obturateur": "Combien de temps l'obturateur reste ouvert, en part de "
-                  "l'intervalle entre deux images. 0,5 est l'angle de 180 "
-                  "degres du cinema ; plus haut le flou s'allonge, plus bas "
-                  "il se resserre. Sans effet si le flou vaut 1.",
     "midiTempo": "Corrige la derive, quand la melodie est calee au debut du "
                  "plan et fausse a la fin : la grille du fichier n'a alors pas "
                  "tout a fait le tempo du morceau. L'etirement part de la "
@@ -425,7 +414,6 @@ CHAMPS = {
     "passage": "passage", "passage_turb": "passageTurb",
     "midi_force": "midiForce", "midi_offset": "midiOffset",
     "midi_tempo": "midiTempo",
-    "flou": "flou", "obturateur": "obturateur",
     "vignettage": "vignettage", "scanlines": "scanlines",
     "aberration": "aberration",
     "wave_smooth": "waveSmooth", "trail": "trail", "glitch": "glitch",
@@ -3526,11 +3514,6 @@ class Renderer:
     midi_transpose = 0
     midi_force = 1.0
     midi_tempo = 1.0
-    # Flou de mouvement : combien de traces par image, et sur quelle part de
-    # l'intervalle l'obturateur reste ouvert. 1 = un instant fige, comme avant.
-    # 0,5 est l'angle de 180 degres du cinema : la moitie de l'intervalle.
-    flou = 1
-    obturateur = 0.5
     # La matiere de la dalle. A 1 on retrouve exactement la dalle d'origine ;
     # a 0 elle est plate. L'aberration, elle, est nouvelle donc eteinte.
     vignettage = 1.0

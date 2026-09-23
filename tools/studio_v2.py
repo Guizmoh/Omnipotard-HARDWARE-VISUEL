@@ -58,9 +58,6 @@ SIMPLE = {
     # le passage d'une machine a l'autre et l'eclat des touches jouees :
     # ils accompagnent un reglage simple, ils doivent se voir avec lui
     "passage", "midiForce",
-    # le flou de mouvement est un choix de rendu comme la definition ou la
-    # cadence : il se pose une fois, au debut, et il se voit
-    "flou",
 }
 REGLE = SIMPLE | {
     "trait", "bgColor", "bgClear", "bgAnim", "reflet", "tube", "nettete",
@@ -72,7 +69,7 @@ REGLE = SIMPLE | {
     "cadence", "haloDoux", "poussiere", "flottement",
     "tranches", "tranchesOn", "stut", "stutOn", "kaleido", "kaleidoOn",
     "scramble", "scrLen", "passageTurb", "midiOffset", "midiTempo",
-    "midiCale", "obturateur",
+    "midiCale",
 }
 
 
