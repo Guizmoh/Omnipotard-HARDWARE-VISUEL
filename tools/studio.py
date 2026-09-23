@@ -194,6 +194,8 @@ def look_from(q):
         # la melodie : un nom de fichier depose dans out/studio/melodies
         "midi": _melodie(q.get("midi")),
         "midi_force": float(q.get("midiForce", 1.0)),
+        "flou": int(float(q.get("flou", 1))),
+        "obturateur": float(q.get("obturateur", 0.5)),
         "midi_offset": float(q.get("midiOffset", 0.0)),
         # la page le donne en pourcent — un rapport a six decimales ne se lit
         # pas sur un curseur — et le moteur veut un rapport
@@ -523,7 +525,8 @@ class Studio:
                 "cadence", "poussiere", "flottement", "halo_doux",
                 "echo", "echo_n", "echo_delay", "couleurs", "step_div",
                 "presence", "neon", "reflet", "tube",
-                "passage", "passage_turb", "midi_force")
+                "passage", "passage_turb", "midi_force",
+                "flou", "obturateur")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
                         "backdrop_sharp", "spectro", "nettete", "taille",
@@ -1844,6 +1847,12 @@ PAGE = r"""<!doctype html>
         <select id="fps"><option>30</option><option>60</option><option>24</option>
           <option>12</option></select></div>
     </div>
+    <label for="flou">flou de mouvement &mdash; <span id="v-flou">aucun</span></label>
+    <input type="range" id="flou" min="1" max="6" step="1" value="1">
+    <label for="obturateur">ouverture de l'obturateur &mdash;
+      <span id="v-obt">0.50</span></label>
+    <input type="range" id="obturateur" min="0.2" max="1" step="0.05" value="0.5">
+    <p class="hint" id="flouCout">&nbsp;</p>
     <label for="quality">qualite du fichier</label>
     <select id="quality"></select>
     <label><input type="checkbox" id="curve" checked style="width:auto;margin-right:6px">
@@ -1953,6 +1962,7 @@ function params() {
     midi: $('#midi').value,
     midiForce: $('#midiForce').value, midiOffset: $('#midiOffset').value,
     midiTempo: $('#midiTempo').value,
+    flou: $('#flou').value, obturateur: $('#obturateur').value,
     midiCale: $('#midiCale').checked ? '1' : '0',
     palette: $('#palette').value, trait: $('#trait').value,
     bg: $('#bg').value, bgColor: $('#bgColor').value,
@@ -2229,6 +2239,28 @@ async function sendBackdrop(f) {
 $('#passage').oninput = e => { $('#v-psg').textContent = (+e.target.value).toFixed(2) + ' s'; shot(); };
 $('#passageTurb').oninput = e => { $('#v-psgt').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#midiForce').oninput = e => { $('#v-mif').textContent = (+e.target.value).toFixed(2); shot(); };
+/* Le flou de mouvement, dit en mots plutot qu'en nombre de traces : ce qui
+   compte pour choisir n'est pas combien de fois la machine est dessinee mais
+   ce que ca change a l'image. Le surcout est annonce parce qu'il est la
+   seule raison d'hesiter — et qu'il est bien plus bas qu'on ne l'attend. */
+const FLOU_MOTS = ['', 'aucun (instant fige)', 'leger', 'cinema',
+                   'ample', 'tres ample', 'maximal'];
+function majFlou() {
+  const n = +$('#flou').value || 1;
+  $('#v-flou').textContent = FLOU_MOTS[n] || n;
+  $('#v-obt').textContent = (+$('#obturateur').value).toFixed(2);
+  // mesure en 1080p : le trace vaut 20 ms, la mise en couleur 270. Seul le
+  // trace est refait, d'ou un surcout tres inferieur au nombre de traces.
+  const sur = Math.round((n - 1) * 20 / 290 * 100);
+  $('#flouCout').innerHTML = n <= 1
+    ? 'Chaque image est un instant fige. A 3 ou 4, les mouvements rapides '
+      + 'cessent de saccader.'
+    : 'Environ <b>+' + sur + ' %</b> de temps de rendu : seul le trace est '
+      + 'refait, le halo et la deformation ne se calculent qu\'une fois.';
+}
+$('#flou').oninput = () => { majFlou(); shot(); };
+$('#obturateur').oninput = () => { majFlou(); shot(); };
+majFlou();
 /* Ou tombe la premiere note dans la video, une fois le decalage applique.
    C'est le seul chiffre verifiable a l'oeil : on lance l'apercu a cet
    instant-la et on regarde si la touche s'allume avec le son. Le moteur

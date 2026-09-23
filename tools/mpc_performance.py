@@ -165,7 +165,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               backdrop_clear=0.28, screen_dim=0.40,
                               backdrop_sharp=0.37, taille=1.0, presence=1.0,
                               neon=1.0, reflet=0.5, tube=0.0,
-                              midi_force=1.0, **bgkw):
+                              midi_force=1.0, flou=1, obturateur=0.5, **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
     # la taille se pose avant tout le reste : le creux de la texture et celui
@@ -174,6 +174,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.presence = float(presence)
     r.neon, r.reflet, r.tube = float(neon), float(reflet), float(tube)
     r.midi_force = float(midi_force)
+    r.flou, r.obturateur = int(flou), float(obturateur)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
     r.glitch = float(glitch)
@@ -236,8 +237,15 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     return r
 
 
-def frame_performance(r, t, duration):
-    rng = np.random.default_rng(r.seed + int(t * r.fps + 0.5))
+def _champ(r, t, rng):
+    """Le champ d'intensite d'un instant : tout le trace, avant la couleur.
+
+    Sorti de `frame_performance` pour que le flou de mouvement puisse le
+    demander plusieurs fois par image. C'est la moitie bon marche du travail —
+    mesure en 1080p, 20 ms contre 270 pour la mise en couleur — et c'est ce
+    qui rend le flou abordable : quatre sous-images ne coutent que 20 % de
+    plus, la ou refaire l'image entiere quatre fois en couterait 300.
+    """
     # Le begaiement fige l'image sur l'instant du dernier coup : tout ce qui
     # suit est donc calcule a cet instant-la. Le tirage aleatoire, lui, reste
     # celui de l'image reelle — sans quoi le grain se figerait aussi et l'on
@@ -309,8 +317,46 @@ def frame_performance(r, t, duration):
     r._machine(beam, t, 1.0, 999.0, 0.0, rng, shake)   # sweep_x enorme = deployee
     r._etincelles(beam, t, 1.0)               # etincelles, par-dessus
     beam.mul, r._ech = 1.0, 1.0
-    field = beam.render()
-    img = r.colorize(field, t, 1.0, shake, rng)
+    return beam.render(), shake
+
+
+def obturateur_pas(n, ouverture, fps):
+    """Ou tomber les sous-images dans la duree d'exposition.
+
+    Au centre de n tranches egales, pas aux bords : une integration en boite
+    se mesure au milieu de chaque tranche. Avec n = 1 cela rend 0, donc
+    exactement l'ancienne image.
+    """
+    if n <= 1:
+        return (0.0,)
+    e = float(ouverture) / float(fps)
+    return tuple(((k + 0.5) / n - 0.5) * e for k in range(n))
+
+
+def frame_performance(r, t, duration):
+    # Le flou de mouvement : une vraie camera integre ce qui bouge pendant que
+    # l'obturateur est ouvert, la ou une image de synthese fige un instant. On
+    # trace donc plusieurs fois dans la duree d'exposition et on moyenne les
+    # champs — une seule mise en couleur derriere.
+    #
+    # Le tirage aleatoire est refait a l'identique pour chaque sous-image :
+    # sans cela le grain, les secousses et les tranches de glitch se
+    # moyenneraient eux aussi, et l'image perdrait son grain au lieu de gagner
+    # du mouvement. Seul ce qui depend du temps bouge d'une sous-image a
+    # l'autre.
+    graine = r.seed + int(t * r.fps + 0.5)
+    n = max(1, int(getattr(r, "flou", 1)))
+    pas = obturateur_pas(n, getattr(r, "obturateur", 0.5), r.fps)
+    champ = shake = rng = None
+    for k, dec in enumerate(pas):
+        sub = np.random.default_rng(graine)
+        f, sh = _champ(r, t + dec, sub)
+        champ = f if champ is None else champ + f
+        if k == n // 2:                   # l'instant qui represente l'image
+            shake, rng = sh, sub
+    if n > 1:
+        champ /= float(n)
+    img = r.colorize(champ, t, 1.0, shake, rng)
 
     fade = min(1.0, t / 0.5) * min(1.0, (duration - t) / 0.6)
     if fade < 0.999:
@@ -607,6 +653,15 @@ def add_look_args(ap):
                          "met la melodie au milieu du clavier")
     ap.add_argument("--midi-force", type=float, default=1.0, metavar="X",
                     help="eclat des touches jouees (0 = aucune)")
+    ap.add_argument("--flou", type=int, default=1, metavar="N",
+                    help="flou de mouvement : combien de traces par image. "
+                         "1 = un instant fige (par defaut), 3 ou 4 = mouvement "
+                         "filme. Ne coute que 20 %% de rendu en plus a 4 : le "
+                         "trace est refait, pas la mise en couleur")
+    ap.add_argument("--obturateur", type=float, default=0.5, metavar="X",
+                    help="part de l'intervalle pendant laquelle l'obturateur "
+                         "reste ouvert : 0.5 = l'angle de 180 degres du "
+                         "cinema, 1 = flou maximal. Sans effet si --flou vaut 1")
     ap.add_argument("--neon", type=float, default=1.0,
                     help="force de l'eclairage du neon : 1 = d'origine, "
                          "2 = deux fois plus de lumiere autour du trait")
@@ -781,6 +836,7 @@ def look_kwargs(args):
             "midi_transpose": args.midi_transpose,
             "midi_tempo": args.midi_tempo,
             "midi_force": args.midi_force,
+            "flou": args.flou, "obturateur": args.obturateur,
             "passage": args.passage,
             "passage_turb": args.passage_turb,
             "nettete": args.nettete, "taille": args.taille,
