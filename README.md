@@ -81,6 +81,56 @@ refaire à la main :
 - les Q-Links, les bandeaux, le touch strip et les vu-mètres de l'écran suivent
   les enveloppes grave / medium / aigu.
 
+## La matière de la dalle
+
+Trois réglages travaillent l'image finie, et deux d'entre eux étaient jusqu'ici
+figés dans le code :
+
+| réglage | ce qu'il fait | défaut |
+| --- | --- | --- |
+| `vignettage` | assombrit les coins, comme l'optique d'un tube | 1 = la dalle d'origine |
+| `scanlines` | le peigne horizontal des lignes de tube | 1 = la dalle d'origine |
+| `aberration` | la frange de couleur d'un objectif, **en permanence** | 0 = éteinte |
+
+À 1, les deux premiers rendent **exactement** l'image d'avant — vérifié au bit
+près. À 0 la dalle est plate, au-delà elle se creuse.
+
+L'**aberration** ne se confond pas avec le dédoublement du trait (`split`) :
+celui-ci part sur les gros subs et frappe toute l'image d'un coup, c'est un
+défaut de convergence. Une aberration d'objectif ne se voit qu'en **bord de
+champ** — un objectif ne disperse pas les couleurs au milieu — et elle ne bouge
+jamais. D'où le masque radial, nul au centre.
+
+Elle ne coûte rien : les deux plans sont décalés d'un nombre **entier** de
+pixels plutôt que rééchantillonnés. À ces amplitudes-là (un à trois pixels) la
+différence ne se voit pas, et un rééchantillonnage bilinéaire aurait coûté une
+passe de plus sur toute l'image pour le même résultat. Mesuré : le surcoût se
+perd dans le bruit de mesure.
+
+### Ce qui n'a pas été optimisé, et pourquoi
+
+Le rendu coûte 0,29 s par image en 1080p, soit ~35 min pour 4 min de vidéo sur
+un cœur — quelques minutes sur une machine à huit cœurs, le rendu étant
+parallèle. Mesuré au profileur, le temps se répartit ainsi :
+
+| étage | par image en 1080p |
+| --- | --- |
+| le tracé (`_champ`) | 20 ms |
+| la déformation cathodique (`_warp`) | 73 ms |
+| le reste de `colorize` | 123 ms |
+| les flous | 22 ms |
+
+Le tracé des machines ne pèse donc **rien** : l'optimiser ne gagnerait pas
+1 %. La déformation a été testée à toutes les tailles de bande (64 à 1080) et
+avec une lecture en uint8 : l'écart entre les variantes tient dans le bruit de
+mesure, elle est déjà à son optimum pour cette méthode. Et les 123 ms restants
+ne cachent aucun gros poste — ce sont une vingtaine d'opérations pleine image,
+chacune à quelques millisecondes.
+
+Il n'y a donc pas de gain facile à prendre. Les vrais leviers existent déjà :
+le rendu parallèle, et le préréglage **320p / 12 ips** pour les essais, quinze
+fois plus rapide.
+
 ## La machine
 
 Quatre machines sont dessinées : la **MPC Live III**, le **MiniFreak** (clavier

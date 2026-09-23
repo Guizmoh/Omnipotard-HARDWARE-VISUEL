@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-23.1"
+VERSION = "2026-09-23.2"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -245,6 +245,18 @@ AIDE = {
                   "rapport au calage trouve tout seul. A utiliser si les "
                   "touches s'allument un peu avant ou un peu apres la "
                   "melodie entendue.",
+    "vignettage": "Assombrit les coins de l'image, comme l'optique d'un tube. "
+                  "A 1 c'est la dalle d'origine, a 0 elle est plate, au-dela "
+                  "le cadre se creuse et le regard se porte au centre.",
+    "scanlines": "Le peigne horizontal des lignes de tube. A 1 c'est la dalle "
+                 "d'origine, a 0 l'image est lisse. Marque, il donne le grain "
+                 "d'un moniteur filme.",
+    "aberration": "La frange de couleur d'un objectif : rouge d'un cote, bleu "
+                  "de l'autre, et seulement en bord de champ — un objectif ne "
+                  "disperse pas au milieu. Elle est permanente, la ou le "
+                  "dedoublement du trait part sur les gros subs et frappe "
+                  "toute l'image. Elle ne coute rien : un decalage entier de "
+                  "deux plans, pas un rechantillonnage.",
     "flou": "Flou de mouvement : combien de fois la machine est tracee dans "
             "une meme image. A 1 chaque image est un instant fige, comme la "
             "synthese le fait par defaut ; a 3 ou 4 le mouvement s'etale "
@@ -414,6 +426,8 @@ CHAMPS = {
     "midi_force": "midiForce", "midi_offset": "midiOffset",
     "midi_tempo": "midiTempo",
     "flou": "flou", "obturateur": "obturateur",
+    "vignettage": "vignettage", "scanlines": "scanlines",
+    "aberration": "aberration",
     "wave_smooth": "waveSmooth", "trail": "trail", "glitch": "glitch",
     "punch": "punch", "punch_on": "punchOn",
     "shake_amp": "shake", "shake_on": "shakeOn",
@@ -3540,6 +3554,11 @@ class Renderer:
     # 0,5 est l'angle de 180 degres du cinema : la moitie de l'intervalle.
     flou = 1
     obturateur = 0.5
+    # La matiere de la dalle. A 1 on retrouve exactement la dalle d'origine ;
+    # a 0 elle est plate. L'aberration, elle, est nouvelle donc eteinte.
+    vignettage = 1.0
+    scanlines = 1.0
+    aberration = 0.0
     ecran = SCREEN
     taille = 1.0
     presence = 1.0
@@ -3603,6 +3622,14 @@ class Renderer:
         nx = (np.arange(W, dtype=np.float32)[None, :] / W - 0.5) * 2.0
         self._vign = (np.clip(1.06 - 0.42 * (nx * nx * 0.55 + ny * ny),
                               0.0, 1.0) ** 1.15).astype(np.float32)
+        # De quoi doser les deux sans les recalculer : l'ecart a 1. A reglage 1
+        # on retrouve exactement la dalle d'origine, a 0 elle est plate.
+        self._vign_ecart = (self._vign - 1.0).astype(np.float32)
+        self._scan_ecart = (self._scan - 1.0).astype(np.float32)
+        # Le poids de l'aberration : nul au centre, plein dans les coins. Un
+        # objectif ne disperse pas les couleurs au milieu du champ, seulement
+        # en bord — c'est ce qui la distingue d'un simple dedoublement.
+        self._abr = np.clip(nx * nx * 0.62 + ny * ny, 0.0, 1.0).astype(np.float32)
 
     def _build_warp(self):
         """Tables de gather de la deformation cathodique.
@@ -4861,6 +4888,32 @@ class Renderer:
                 x0 = int(rng.integers(0, W // 2))
                 img[y:y + 1, x0:x0 + int(W * rng.uniform(0.05, 0.25))] += 0.22 * k
 
+    def _aberration(self, img):
+        """La frange chromatique d'un objectif, en permanence.
+
+        Le dedoublement du trait, lui, part sur les gros subs et se recolle :
+        c'est un effet de convergence, il frappe toute l'image d'un coup. Une
+        vraie aberration ne se voit qu'en bord de champ, et elle ne bouge
+        jamais — d'ou le masque radial, nul au centre.
+
+        On decale d'un nombre entier de pixels plutot que de rechantillonner :
+        a ces amplitudes-la (un a trois pixels) la difference ne se voit pas,
+        et un rechantillonnage bilineaire aurait coute une passe de plus sur
+        toute l'image, pour le meme resultat.
+        """
+        a = float(self.aberration)
+        if a <= 0.005:
+            return
+        dx = max(1, int(round(a * 2.2 * (self.H / 540.0))))
+        m = self._abr * a
+        for canal, sens in ((0, dx), (2, -dx)):
+            # la copie se prend AVANT d'affaiblir le canal : sinon on decale
+            # ce qu'on vient d'effacer, et la frange s'eteint avec lui
+            avant = img[:, :, canal].copy()
+            p = img[:, :, canal]
+            p *= (1.0 - m)
+            p += self._shift(avant, sens, 0) * m
+
     def _split(self, img, amount):
         """Dedoublement chromatique du trait sur les gros coups de sub.
 
@@ -4983,7 +5036,10 @@ class Renderer:
         self._tables_dalle()
         yy = np.arange(H, dtype=np.float32)[:, None]
         roll = 1.0 + 0.05 * np.cos((yy / H + t * 0.16) * 2.0 * math.pi)
-        img *= ((self._scan * roll).astype(np.float32) * self._vign)[..., None]
+        scan = 1.0 + self._scan_ecart * float(self.scanlines)
+        vign = 1.0 + self._vign_ecart * float(self.vignettage)
+        img *= ((scan * roll).astype(np.float32) * vign)[..., None]
+        self._aberration(img)
 
         img += upsample(rng.standard_normal((H // 4, W // 4)).astype(np.float32),
                         4, (H, W))[..., None] * 0.011

@@ -195,6 +195,9 @@ def look_from(q):
         "midi": _melodie(q.get("midi")),
         "midi_force": float(q.get("midiForce", 1.0)),
         "flou": int(float(q.get("flou", 1))),
+        "vignettage": float(q.get("vignettage", 1.0)),
+        "scanlines": float(q.get("scanlines", 1.0)),
+        "aberration": float(q.get("aberration", 0.0)),
         "obturateur": float(q.get("obturateur", 0.5)),
         "midi_offset": float(q.get("midiOffset", 0.0)),
         # la page le donne en pourcent — un rapport a six decimales ne se lit
@@ -526,7 +529,8 @@ class Studio:
                 "echo", "echo_n", "echo_delay", "couleurs", "step_div",
                 "presence", "neon", "reflet", "tube",
                 "passage", "passage_turb", "midi_force",
-                "flou", "obturateur")
+                "flou", "obturateur",
+                "vignettage", "scanlines", "aberration")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
                         "backdrop_sharp", "spectro", "nettete", "taille",
@@ -1547,7 +1551,16 @@ PAGE = r"""<!doctype html>
       <input type="range" id="bgStrength" min="0" max="2" step="0.05" value="1">
       <label for="bgClear">degagement derriere la machine &mdash; <span id="v-clr">0.55</span></label>
       <input type="range" id="bgClear" min="0" max="1" step="0.05" value="0.55">
-      <label for="bgAnim">animation de la texture &mdash; <span id="v-ba">0.00</span></label>
+      <label for="vignettage">coins assombris &mdash;
+      <span id="v-vig">1.00</span></label>
+    <input type="range" id="vignettage" min="0" max="2" step="0.05" value="1">
+    <label for="scanlines">lignes de tube &mdash;
+      <span id="v-scl">1.00</span></label>
+    <input type="range" id="scanlines" min="0" max="2" step="0.05" value="1">
+    <label for="aberration">frange d'objectif &mdash;
+      <span id="v-abr">0.00</span></label>
+    <input type="range" id="aberration" min="0" max="1.5" step="0.05" value="0">
+    <label for="bgAnim">animation de la texture &mdash; <span id="v-ba">0.00</span></label>
       <input type="range" id="bgAnim" min="0" max="6" step="0.1" value="0">
       <p class="hint">Le trait est additif : un fond clair mange son contraste.
         Le degagement creuse la texture derriere la machine pour qu'elle
@@ -1963,6 +1976,8 @@ function params() {
     midiForce: $('#midiForce').value, midiOffset: $('#midiOffset').value,
     midiTempo: $('#midiTempo').value,
     flou: $('#flou').value, obturateur: $('#obturateur').value,
+    vignettage: $('#vignettage').value, scanlines: $('#scanlines').value,
+    aberration: $('#aberration').value,
     midiCale: $('#midiCale').checked ? '1' : '0',
     palette: $('#palette').value, trait: $('#trait').value,
     bg: $('#bg').value, bgColor: $('#bgColor').value,
@@ -2258,6 +2273,9 @@ function majFlou() {
     : 'Environ <b>+' + sur + ' %</b> de temps de rendu : seul le trace est '
       + 'refait, le halo et la deformation ne se calculent qu\'une fois.';
 }
+for (const [id, sp] of [['vignettage','v-vig'], ['scanlines','v-scl'],
+                        ['aberration','v-abr']])
+  $('#' + id).oninput = e => { $('#'+sp).textContent = (+e.target.value).toFixed(2); shot(); };
 $('#flou').oninput = () => { majFlou(); shot(); };
 $('#obturateur').oninput = () => { majFlou(); shot(); };
 majFlou();

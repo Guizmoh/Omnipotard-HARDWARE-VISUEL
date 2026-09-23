@@ -165,7 +165,9 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               backdrop_clear=0.28, screen_dim=0.40,
                               backdrop_sharp=0.37, taille=1.0, presence=1.0,
                               neon=1.0, reflet=0.5, tube=0.0,
-                              midi_force=1.0, flou=1, obturateur=0.5, **bgkw):
+                              midi_force=1.0, flou=1, obturateur=0.5,
+                              vignettage=1.0, scanlines=1.0, aberration=0.0,
+                              **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
     # la taille se pose avant tout le reste : le creux de la texture et celui
@@ -175,6 +177,8 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.neon, r.reflet, r.tube = float(neon), float(reflet), float(tube)
     r.midi_force = float(midi_force)
     r.flou, r.obturateur = int(flou), float(obturateur)
+    r.vignettage, r.scanlines = float(vignettage), float(scanlines)
+    r.aberration = float(aberration)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
     r.glitch = float(glitch)
@@ -653,6 +657,17 @@ def add_look_args(ap):
                          "met la melodie au milieu du clavier")
     ap.add_argument("--midi-force", type=float, default=1.0, metavar="X",
                     help="eclat des touches jouees (0 = aucune)")
+    ap.add_argument("--vignettage", type=float, default=1.0, metavar="X",
+                    help="coins assombris : 1 = comme avant, 0 = dalle plate, "
+                         "2 = deux fois plus creuse")
+    ap.add_argument("--scanlines", type=float, default=1.0, metavar="X",
+                    help="peigne des lignes de tube : 1 = comme avant, 0 = "
+                         "aucune, 2 = deux fois plus marquees")
+    ap.add_argument("--aberration", type=float, default=0.0, metavar="X",
+                    help="frange chromatique d'objectif, en permanence et "
+                         "seulement en bord de champ. A ne pas confondre avec "
+                         "--split, qui part sur les gros subs et frappe toute "
+                         "l'image")
     ap.add_argument("--flou", type=int, default=1, metavar="N",
                     help="flou de mouvement : combien de traces par image. "
                          "1 = un instant fige (par defaut), 3 ou 4 = mouvement "
@@ -837,6 +852,8 @@ def look_kwargs(args):
             "midi_tempo": args.midi_tempo,
             "midi_force": args.midi_force,
             "flou": args.flou, "obturateur": args.obturateur,
+            "vignettage": args.vignettage, "scanlines": args.scanlines,
+            "aberration": args.aberration,
             "passage": args.passage,
             "passage_turb": args.passage_turb,
             "nettete": args.nettete, "taille": args.taille,
