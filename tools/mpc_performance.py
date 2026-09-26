@@ -389,6 +389,7 @@ def preparer_midi(info, reglages):
     cale = reglages.pop("midi_cale", False)
     ecart = float(reglages.pop("midi_offset", 0.0) or 0.0)
     vitesse = float(reglages.pop("midi_tempo", 1.0) or 1.0)
+    genre = reglages.pop("midi_type", "piano") or "piano"
     transpo = reglages.pop("midi_transpose", None)
     if not chemin or not os.path.exists(chemin):
         reglages.pop("midi_force", None)
@@ -419,6 +420,7 @@ def preparer_midi(info, reglages):
     reglages["midi"] = [(a, b, c, d) for a, b, c, d in notes]
     reglages["midi_offset"] = auto + ecart
     reglages["midi_tempo"] = vitesse
+    reglages["midi_type"] = genre
     reglages["midi_transpose"] = int(transpo)
     return reglages, infos
 
@@ -606,6 +608,12 @@ def add_look_args(ap):
                          "1.002 = melodie etiree de 0,2 %% (elle avancait). "
                          "L'etirement se fait autour de la premiere note, donc "
                          "le calage trouve ne bouge pas")
+    ap.add_argument("--midi-type", choices=("piano", "batterie"),
+                    default="piano",
+                    help="ce que contient le fichier : piano (les notes vont "
+                         "sur les touches du clavier, par hauteur) ou batterie "
+                         "(chaque instrument prend un pad, sur n'importe quelle "
+                         "machine)")
     ap.add_argument("--midi-transpose", type=int, default=None, metavar="N",
                     help="transposition en demi-tons ; par defaut, celle qui "
                          "met la melodie au milieu du clavier")
@@ -795,6 +803,7 @@ def look_kwargs(args):
             "midi_cale": bool(args.midi_cale),
             "midi_transpose": args.midi_transpose,
             "midi_tempo": args.midi_tempo,
+            "midi_type": args.midi_type,
             "midi_force": args.midi_force,
             "vignettage": args.vignettage, "scanlines": args.scanlines,
             "aberration": args.aberration,

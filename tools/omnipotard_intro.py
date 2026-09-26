@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-23.6"
+VERSION = "2026-09-26.1"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -257,6 +257,11 @@ AIDE = {
                   "dedoublement du trait part sur les gros subs et frappe "
                   "toute l'image. Elle ne coute rien : un decalage entier de "
                   "deux plans, pas un rechantillonnage.",
+    "midiType": "Ce que contient le fichier. En piano, chaque note allume la "
+                "touche de sa hauteur, sur le clavier du MiniFreak. En batterie, "
+                "la hauteur designe un instrument : chacun prend un pad, du "
+                "plus grave au plus aigu, et cela sur n'importe quelle machine "
+                "— le fichier remplace alors les coups devines dans le son.",
     "midiTempo": "Corrige la derive, quand la melodie est calee au debut du "
                  "plan et fausse a la fin : la grille du fichier n'a alors pas "
                  "tout a fait le tempo du morceau. L'etirement part de la "
@@ -413,7 +418,7 @@ CHAMPS = {
     "neon": "neon", "reflet": "reflet", "tube": "tube", "bg_anim": "bgAnim",
     "passage": "passage", "passage_turb": "passageTurb",
     "midi_force": "midiForce", "midi_offset": "midiOffset",
-    "midi_tempo": "midiTempo",
+    "midi_tempo": "midiTempo", "midi_type": "midiType",
     "vignettage": "vignettage", "scanlines": "scanlines",
     "aberration": "aberration",
     "wave_smooth": "waveSmooth", "trail": "trail", "glitch": "glitch",
@@ -2921,7 +2926,7 @@ class Renderer:
                  bg_strength=1.0, bg_clear=0.55, bg_anim=0.0, nettete=1.0,
                  machine="mpc", machines=None, passage=1.9, passage_turb=1.0,
                  midi=None, midi_offset=0.0, midi_transpose=0, midi_force=1.0,
-                 midi_tempo=1.0):
+                 midi_tempo=1.0, midi_type="piano"):
         self.W, self.H = w, h
         self.fps = fps
         self.dur = duration
@@ -3013,6 +3018,7 @@ class Renderer:
         self.midi = (np.asarray(midi, dtype=np.float64).reshape(-1, 4)
                      if midi is not None and len(midi) else None)
         self.midi_tempo = float(midi_tempo)
+        self.midi_type = "batterie" if midi_type == "batterie" else "piano"
         self.midi_offset = float(midi_offset)
         self.midi_transpose = int(midi_transpose)
         self.midi_force = float(midi_force)
@@ -3160,19 +3166,22 @@ class Renderer:
                 out[int(pad)] = max(out.get(int(pad), 0.0), float(val))
         return out
 
-    def notes_midi(self, t, touches, note0):
-        """Les touches allumees a l'instant t, avec leur intensite.
+    def _notes_actives(self, t):
+        """Les notes qui sonnent a l'instant t : leur hauteur et leur eclat.
+
+        Commun aux deux lectures du fichier — melodie sur un clavier, batterie
+        sur des pads — pour que la derive, la tenue et l'enveloppe soient les
+        memes dans les deux cas. Les recopier aurait ete le plus sur moyen
+        qu'une correction n'en touche qu'une.
 
         Une note tient tant qu'elle est tenue, puis retombe en un cinquieme de
         seconde ; l'attaque est plus vive que la tenue, sans quoi une note
         longue et une note repetee se ressemblent.
 
-        Une hauteur qui tombe hors du clavier y est ramenee par octaves : le
-        dessin garde la note, il change seulement d'octave. C'est ce qui
-        permet a seize pads de rendre une melodie ecrite sur cinq octaves.
+        Rend None quand rien ne sonne.
         """
         if self.midi is None or not len(self.midi) or self.midi_force <= 0.001:
-            return {}
+            return None
         mt = t + self.midi_offset
         deb, fin, haut, force = (self.midi[:, 0], self.midi[:, 1],
                                  self.midi[:, 2], self.midi[:, 3])
@@ -3196,12 +3205,25 @@ class Renderer:
         fin = np.minimum(fin, deb + TENUE_MAX)
         vus = (mt >= deb) & (mt < fin + 0.30)
         if not np.any(vus):
-            return {}
+            return None
         deb, fin, haut, force = deb[vus], fin[vus], haut[vus], force[vus]
         v = force * (0.60 + 0.55 * np.exp(-(mt - deb) * 11.0))
         v = np.where(mt < fin, v, v * np.exp(-(mt - fin) * 9.0))
         v *= self.midi_force
+        return haut, v
 
+    def notes_midi(self, t, touches, note0):
+        """Lecture melodique : chaque note allume la touche de sa hauteur.
+
+        Une hauteur qui tombe hors du clavier y est ramenee par octaves : le
+        dessin garde la note, il change seulement d'octave. C'est ce qui
+        permet a un clavier de trois octaves de rendre une melodie ecrite sur
+        cinq.
+        """
+        actives = self._notes_actives(t)
+        if actives is None:
+            return {}
+        haut, v = actives
         n = len(touches)
         k = haut.astype(np.int64) + self.midi_transpose - int(note0)
         bas = k < 0
@@ -3215,6 +3237,38 @@ class Renderer:
         for kk, vv in zip(k[garde], v[garde]):
             kk = int(kk)
             out[kk] = max(out.get(kk, 0.0), float(vv))
+        return out
+
+    def notes_batterie(self, t, n):
+        """Lecture batterie : chaque instrument du fichier prend un pad.
+
+        Dans un fichier de batterie, la hauteur ne dit pas une note mais un
+        instrument — 36 la grosse caisse, 38 la caisse claire, 42 le charley
+        ferme. La replier par octaves comme une melodie n'aurait aucun sens :
+        une grosse caisse et un tom tomberaient sur la meme touche.
+
+        Les instruments presents dans le fichier sont donc ranges du plus grave
+        au plus aigu, et chacun prend un pad, dans l'ordre. La grosse caisse
+        est presque toujours la plus grave et tombe sur le premier pad, comme
+        sur une vraie boite a rythmes. La table est faite sur **tout** le
+        fichier et non sur ce qui sonne a l'instant : sans cela un instrument
+        changerait de pad selon ceux qui jouent avec lui.
+
+        Au-dela de n instruments, les suivants reprennent les pads depuis le
+        premier. La transposition n'entre pas en jeu : transposer une batterie
+        changerait d'instrument, pas de hauteur.
+        """
+        actives = self._notes_actives(t)
+        if actives is None or n <= 0:
+            return {}
+        haut, v = actives
+        table = np.unique(self.midi[:, 2])
+        k = np.searchsorted(table, haut) % n
+        out = {}
+        for kk, vv in zip(k, v):
+            if vv > 0.02:
+                kk = int(kk)
+                out[kk] = max(out.get(kk, 0.0), float(vv))
         return out
 
     def stutter_time(self, t):
@@ -3540,6 +3594,10 @@ class Renderer:
     midi_transpose = 0
     midi_force = 1.0
     midi_tempo = 1.0
+    # Ce que le fichier contient : une melodie, dont les notes vont sur les
+    # touches d'un clavier, ou une batterie, dont les instruments vont sur les
+    # pads — de n'importe quelle machine, et plus seulement du clavier.
+    midi_type = "piano"
     # La matiere de la dalle. A 1 on retrouve exactement la dalle d'origine ;
     # a 0 elle est plate. L'aberration, elle, est nouvelle donc eteinte.
     vignettage = 1.0
@@ -4170,7 +4228,13 @@ class Renderer:
         # batterie repartis sur trente-sept touches allumaient la moitie du
         # clavier, et la note jouee se perdait au milieu.
         melodique = mach.get("touches") is not None
-        if melodique and self.midi is not None:
+        batterie = self.midi is not None and self.midi_type == "batterie"
+        if batterie:
+            # Le fichier remplace les coups detectes dans le son, sur toutes
+            # les machines : il dit exactement quel instrument joue, la ou
+            # l'analyse du mixage ne fait que le deviner.
+            flashes = self.notes_batterie(t, len(mach["pads"]))
+        elif melodique and self.midi is not None:
             flashes = {}
 
         # pads allumes : remplissage
@@ -4212,7 +4276,7 @@ class Renderer:
         # ont pas le meme nombre, et une note tomberait n'importe ou sur une
         # facade en train de se deformer.
         touches = mach.get("touches")
-        if melodique and self.midi is not None:
+        if melodique and self.midi is not None and not batterie:
             for k, v in self.notes_midi(t, touches, mach.get("note0", 36)).items():
                 r = touches[k]
                 mk = float(self.morph_at(r[0], sweep_x))

@@ -57,7 +57,7 @@ SIMPLE = {
     "size", "fps", "quality", "curve", "start", "dur",
     # le passage d'une machine a l'autre et l'eclat des touches jouees :
     # ils accompagnent un reglage simple, ils doivent se voir avec lui
-    "passage", "midiForce",
+    "passage", "midiForce", "midiType",
 }
 REGLE = SIMPLE | {
     "trait", "bgColor", "bgClear", "bgAnim", "reflet", "tube", "nettete",
@@ -1108,7 +1108,7 @@ const _duree = () => duree;
     champMachine.insertAdjacentElement('afterend', d);
   }
   const cible = $('#midiCurseurs');
-  for (const id of ['midiForce', 'midiOffset', 'midiTempo', 'midiCale']) {
+  for (const id of ['midiType', 'midiForce', 'midiOffset', 'midiTempo', 'midiCale']) {
     const c = document.querySelector('[data-champ="' + id + '"]');
     if (c && cible) cible.appendChild(c);
   }

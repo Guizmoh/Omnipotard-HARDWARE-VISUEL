@@ -201,6 +201,7 @@ def look_from(q):
         # la page le donne en pourcent — un rapport a six decimales ne se lit
         # pas sur un curseur — et le moteur veut un rapport
         "midi_tempo": 1.0 + float(q.get("midiTempo", 0.0)) / 100.0,
+        "midi_type": "batterie" if q.get("midiType") == "batterie" else "piano",
         "midi_cale": _coche(q.get("midiCale")),
         "nettete": float(q.get("nettete", 1.0)),
         "taille": float(q.get("taille", 1.0)),
@@ -535,7 +536,7 @@ class Studio:
                         # le plan de machines et la melodie se posent a la
                         # main : l'un se relit, l'autre se lit dans un fichier
                         "machines", "midi", "midi_offset", "midi_cale",
-                        "midi_tempo")
+                        "midi_tempo", "midi_type")
         # La taille se pose avant l'allure : c'est elle qui decide du creux
         # que la texture garde derriere la machine, et set_look le recalcule.
         r.taille = float(kw["taille"])
@@ -568,6 +569,7 @@ class Studio:
                     r.midi_transpose = int(lu.get("transpose", 0))
         r.midi_offset = r._midi_auto + float(kw["midi_offset"])
         r.midi_tempo = float(kw["midi_tempo"])
+        r.midi_type = kw["midi_type"]
 
         # Le spectrogramme est calcule a partir du son, pas repose comme une
         # couleur : on ne le refait que lorsqu'on l'allume pour la premiere fois.
@@ -1138,7 +1140,10 @@ function midiAvis() {
   const a = $('#midiAvis');
   if (!a) return;
   const plan = ($('#machines').value || '') + ' ' + $('#machine').value;
-  a.hidden = !$('#midi').value || plan.indexOf('minifreak') >= 0;
+  // une batterie joue sur les pads de toutes les machines : pas besoin de
+  // clavier pour elle
+  const bat = $('#midiType') && $('#midiType').value === 'batterie';
+  a.hidden = !$('#midi').value || bat || plan.indexOf('minifreak') >= 0;
 }
 
 function seqDessine() {
@@ -1433,6 +1438,11 @@ PAGE = r"""<!doctype html>
       <span>premiere note <b id="mi-c">-</b></span>
     </div>
     <div id="midiReglages" hidden>
+      <label for="midiType">ce que contient le fichier</label>
+      <select id="midiType">
+        <option value="piano">une melodie (touches du clavier)</option>
+        <option value="batterie">une batterie (pads de toutes les machines)</option>
+      </select>
       <label for="midiForce">eclat des touches jouees &mdash;
         <span id="v-mif">1.00</span></label>
       <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1">
@@ -1965,7 +1975,7 @@ function params() {
     passage: $('#passage').value, passageTurb: $('#passageTurb').value,
     midi: $('#midi').value,
     midiForce: $('#midiForce').value, midiOffset: $('#midiOffset').value,
-    midiTempo: $('#midiTempo').value,
+    midiTempo: $('#midiTempo').value, midiType: $('#midiType').value,
     vignettage: $('#vignettage').value, scanlines: $('#scanlines').value,
     aberration: $('#aberration').value,
     midiCale: $('#midiCale').checked ? '1' : '0',
@@ -2298,6 +2308,7 @@ function majDerive() {
     + Math.abs(d).toFixed(3) + ' s</b> a la fin du plan';
 }
 $('#midiTempo').oninput = () => { majDerive(); shot(); };
+$('#midiType').onchange = () => { midiAvis(); shot(); };
 /* Mesurer la derive : on compare le pas de la grille du fichier a celui du
    morceau. Contrairement au calage, cette mesure-la est fiable sur une
    melodie — un motif repetitif dit tres bien l'ecart *entre* ses attaques,

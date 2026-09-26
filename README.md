@@ -639,6 +639,49 @@ le faire se trompe en silence.
 À ne cocher que pour une piste de **batterie**, où il retrouve le décalage
 exactement.
 
+#### Mélodie ou batterie
+
+Le réglage *ce que contient le fichier* (`--midi-type`) dit comment lire les
+hauteurs :
+
+- **piano** — chaque note allume la touche de sa hauteur, sur le clavier du
+  MiniFreak. Une note hors clavier y est ramenée par octaves.
+- **batterie** — la hauteur ne désigne pas une note mais un **instrument** : 36
+  la grosse caisse, 38 la caisse claire, 42 le charley fermé. La replier par
+  octaves n'aurait aucun sens, une grosse caisse et un tom tomberaient sur la
+  même touche. Les instruments du fichier sont donc rangés du plus grave au
+  plus aigu et chacun prend un pad, dans l'ordre : la grosse caisse, presque
+  toujours la plus grave, tombe sur le premier pad comme sur une vraie boîte à
+  rythmes.
+
+En batterie le fichier joue sur **toutes les machines**, et plus seulement sur
+le clavier : il remplace les coups que l'analyse devinait dans le mixage, par
+ceux qu'il connaît exactement. La table des instruments est faite sur tout le
+fichier et non sur ce qui sonne à l'instant — sans cela la caisse claire
+changerait de pad selon ce qui joue avec elle.
+
+#### Le vérificateur du suivi des notes
+
+```
+python3 tools/verifier_midi.py out/studio/melodies/melodie.mid
+```
+
+Le suivi passe par quatre étapes qui peuvent chacune se tromper sans que rien
+ne plante : l'ordre des touches, le repli par octaves, la dérive, la tenue.
+Une erreur donne une vidéo où les touches s'allument — simplement pas les
+bonnes, ce qu'on ne voit qu'en connaissant la mélodie par cœur.
+
+Le vérificateur appelle le vrai code du moteur sur des fichiers dont on connaît
+la réponse (chaque demi-ton du clavier, un accord, des notes hors clavier, un
+décalage, une dérive, une note tenue, un kit de batterie), puis repasse les
+fichiers donnés, note par note. Sur le fichier d'essai : **170 notes, toutes
+justes**.
+
+Pour s'assurer qu'il n'est pas complaisant, quatre erreurs ont été introduites
+exprès dans le moteur — un repli d'octave faux d'un demi-ton, une dérive
+étirée depuis zéro, une batterie répartie sur les seules notes du moment, une
+tenue oubliée. Il les attrape toutes les quatre.
+
 #### Les notes tenues relâchent au bout de 1,2 s
 
 Une nappe ou un accord plaqué gardait sa touche allumée aussi longtemps que la
