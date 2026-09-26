@@ -111,6 +111,42 @@ Ce dernier point a été corrigé dans le moteur et pas dans la géométrie : la
 exactement comme avant ; en dessous, « BOMBE ATOMIQUE N2 REMIX » passe de cinq
 lettres à dix sur la SP-404, et s'affiche en entier sur la MPC.
 
+## Les styles, après le rendu
+
+Quand un rendu se termine, une fenêtre propose **six styles** — des allures
+poussées, chacune avec sa vignette calculée sur ton propre morceau :
+
+| style | ce qu'il fait |
+| --- | --- |
+| néon de nuit | orange chaud, halo large, coins profonds |
+| archive cathodique | lignes de tube, poussière, bande qui flotte, cadence tenue |
+| cristal | bleu sur fond bleu, trait fin, verre en relief |
+| onde de choc | chaque grosse caisse envoie un anneau, secoue et pousse l'image |
+| rêve | échos de la machine, halo laiteux, couleurs par instrument |
+| épure | rien que le trait, sans lignes, halo ni avarie |
+
+*Appliquer* pose le style ; *Rendre avec* le pose et relance le rendu. Le bouton
+**Essayer un autre style** rouvre la fenêtre à tout moment.
+
+**Un style n'est pas un préréglage.** Un préréglage décrit un genre — ce qui
+réagit à quoi — et repart de l'usine. Un style ne touche qu'à l'allure : il se
+pose *par-dessus* tes réglages et garde tes réactions, ta machine et ta
+mélodie. Vérifié dans le navigateur : poser « néon de nuit » change la palette
+et le néon, et laisse l'onde de choc réglée à la main exactement où elle était.
+
+**L'instant des vignettes** a demandé deux essais, et les deux erreurs valent
+d'être dites. Un instant quelconque ne montrait rien des styles réactifs :
+l'onde de choc différait de l'image sans style sur 5 % des pixels. Les plus
+gros coups, eux, déclenchaient le dédoublement du trait — trois copies rouge,
+vert et bleu superposées — et **46 % de l'image virait au blanc** : cinq
+vignettes sur six étaient cramées. Le serveur prend donc un coup de grosse
+caisse **ordinaire**, en écartant ceux qui dédoublent selon les réglages de la
+page. Sur un tel coup : 0,4 % de pixels blancs, et la réaction se voit.
+
+Les six vignettes passent à côté de la règle du « dernier aperçu gagne » :
+demandées d'affilée, elles se seraient annulées l'une l'autre, et auraient
+annulé l'aperçu principal avec elles.
+
 ## La matière de la dalle
 
 Trois réglages travaillent l'image finie, et deux d'entre eux étaient jusqu'ici

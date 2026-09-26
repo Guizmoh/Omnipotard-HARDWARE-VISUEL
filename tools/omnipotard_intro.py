@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-26.1"
+VERSION = "2026-09-26.2"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -133,6 +133,61 @@ _APERCU_OK = None
 #  reste bougeable ensuite. Ils sont ecrits avec les noms du moteur, et c'est
 #  CHAMPS, plus bas, qui dit a quel curseur du studio chacun correspond.
 # ==========================================================================
+
+# Les styles : des allures poussees, proposees une fois le rendu termine.
+#
+# Ils ne se confondent pas avec les prereglages. Un prereglage decrit un genre
+# — ce qui reagit a quoi, et comment — et il repart de l'usine. Un style ne
+# touche qu'a l'allure : la couleur, la lumiere, la matiere de la dalle. Il se
+# pose donc **par-dessus** ce qu'on a regle, sans rien remettre a zero : on
+# vient de rendre une video qu'on aime, on veut la voir autrement, pas la
+# refaire.
+STYLES = {
+    "neon de nuit": {
+        "quoi": "Orange chaud, halo large, coins profonds : une enseigne "
+                "allumee dans une rue sombre.",
+        "reglages": {"palette": "orange", "neon": 2.1, "reflet": 0.85,
+                     "halo_doux": 1.1, "vignettage": 1.7, "aberration": 0.35,
+                     "trail": 1.5},
+    },
+    "archive cathodique": {
+        "quoi": "Lignes de tube marquees, poussiere, bande qui flotte, cadence "
+                "tenue : un vieil enregistrement d'ecran.",
+        "reglages": {"palette": "vert", "scanlines": 2.0, "poussiere": 2.0,
+                     "flottement": 1.6, "vignettage": 2.0, "cadence": 2,
+                     "halo_doux": 0.9, "nettete": 0.72, "aberration": 0.5},
+    },
+    "cristal": {
+        "quoi": "Bleu sur fond bleu, trait fin, verre en relief : net et froid.",
+        "reglages": {"palette": "bleu-fond", "tube": 1.2, "nettete": 1.5,
+                     "reflet": 0.25, "neon": 1.3, "scanlines": 0.4,
+                     "vignettage": 0.8},
+    },
+    "onde de choc": {
+        "quoi": "Chaque grosse caisse envoie un anneau, secoue et pousse "
+                "l'image : pour un morceau qui cogne.",
+        "reglages": {"ring": 1.5, "ring_on": "grosse caisse",
+                     "punch": 0.12, "punch_on": "grosse caisse",
+                     "shake_amp": 0.7, "shake_on": "grosse caisse",
+                     "aberration": 1.0, "trail": 1.6, "split": 1.6,
+                     "wave_gain": 1.4},
+    },
+    "reve": {
+        "quoi": "Echos de la machine, halo laiteux, couleurs par instrument : "
+                "tout flotte.",
+        "reglages": {"echo": 0.45, "echo_n": 3, "echo_delay": 0.08,
+                     "halo_doux": 0.9, "couleurs": 1.3, "wobble": 0.40,
+                     "neon": 0.75, "palette": "bleu"},
+    },
+    "epure": {
+        "quoi": "Rien que le trait : ni lignes, ni halo, ni avarie. La machine "
+                "dessinee comme un plan.",
+        "reglages": {"scanlines": 0.0, "vignettage": 0.35, "neon": 0.8,
+                     "nettete": 1.45, "halo_doux": 0.0, "glitch": 0.0,
+                     "split": 0.0, "aberration": 0.0},
+    },
+}
+
 
 PRESETS = {
     "propre": {},

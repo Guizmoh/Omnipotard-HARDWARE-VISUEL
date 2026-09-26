@@ -47,7 +47,7 @@ from omnipotard_intro import (  # noqa: E402
     NOMS_MACHINES,
     compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
     lire_plan_machines,
-    backdrop_quality, PRESETS, CHAMPS, AIDE, COMPTE, QUALITES, pick_split_times,
+    backdrop_quality, PRESETS, STYLES, CHAMPS, AIDE, COMPTE, QUALITES, pick_split_times,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -473,6 +473,13 @@ class Studio:
         couleur et le fond, eux, n'en dependent pas — on les repose sur le
         moteur existant, et bouger un curseur redevient instantane.
         """
+        # Les vignettes des styles se demandent a six d'affilee : elles
+        # s'annuleraient l'une l'autre, et surtout annuleraient l'apercu
+        # principal. Elles passent donc a cote de la regle du dernier arrive,
+        # tout en attendant leur tour pour dessiner.
+        if q.get("vignette") == "1":
+            with self.draw:
+                return self._still(tid, t, q, w, h)
         with self.lock:
             self.shot_seq += 1
             mine = self.shot_seq
@@ -922,6 +929,11 @@ class Handler(BaseHTTPRequestHandler):
                                  for k, v in MACHINES.items()],
                     "presets": {k: {CHAMPS[a]: b for a, b in v.items()}
                                 for k, v in PRESETS.items()},
+                    # les styles, dans les noms des curseurs de la page
+                    "styles": {k: {"quoi": v["quoi"],
+                                   "reglages": {CHAMPS[a]: b for a, b
+                                                in v["reglages"].items()}}
+                               for k, v in STYLES.items()},
                     "mes": lire_mes_reglages(),
                     "aide": AIDE, "compte": COMPTE,
                 })
@@ -930,6 +942,41 @@ class Handler(BaseHTTPRequestHandler):
                 img = STUDIO.still(q["track"], float(q.get("t", 0.0)), q,
                                    int(q.get("w", 640)), int(q.get("h", 360)))
                 return self._send(200, "image/png", png_bytes(img))
+            if u.path == "/instant_vignette":
+                # L'instant ou prendre les vignettes des styles : un coup de
+                # grosse caisse ordinaire, le plus proche de l'instant regarde.
+                #
+                # Ordinaire, et c'est tout le point. Les coups qui declenchent
+                # le dedoublement du trait superposent trois copies rouge,
+                # vert et bleu : mesure sur la MPC, 46 % de l'image vire au
+                # blanc sur un tel coup, contre 0,4 % sur un coup ordinaire.
+                # Prendre les plus gros coups — l'idee de depart — donnait
+                # donc cinq vignettes sur six cramees. On ecarte ceux-la, avec
+                # les reglages de dedoublement de la page, puisque ce sont eux
+                # qui decident lesquels partent.
+                tr = STUDIO.track(q["track"])
+                info = tr["info"]
+                ev = info["_audio"]["events"]
+                dur = float(info["duration"])
+                t0 = float(q.get("t", 0.0))
+                tt = np.array([e[0] for e in ev])
+                ff = np.array([e[2] for e in ev])
+                cible = FAMILLES.get(_dans(q.get("splitOn"), INSTRUMENTS,
+                                           "grosse caisse"))
+                ok = (np.ones(len(ev), bool) if cible is None
+                      else np.array([e[1] in cible for e in ev]))
+                splits = pick_split_times(tt, ff, ok, dur,
+                                          int(float(q.get("splitCount", 3))))
+                caisse = FAMILLES["grosse caisse"]
+                # hors du fondu d'ouverture et de fermeture, qui assombrissent
+                coups = [e[0] for e in ev if e[1] in caisse
+                         and 0.6 < e[0] < dur - 0.8
+                         and all(abs(e[0] - x) > 0.35 for x in splits)]
+                if not coups:
+                    return self._json({"t": t0, "coup": False})
+                t = min(coups, key=lambda x: abs(x - t0))
+                # juste apres l'attaque : l'anneau et la poussee sont partis
+                return self._json({"t": t + 0.08, "coup": True})
             if u.path == "/derive":
                 # De combien le fichier MIDI derive par rapport au morceau.
                 # Mesure a la demande et non a l'envoi : elle demande le
@@ -1367,6 +1414,34 @@ PAGE = r"""<!doctype html>
   a.dl{display:block;text-align:center;background:var(--acc);color:#04180c;
     padding:10px;border-radius:5px;text-decoration:none;font-weight:700;
     letter-spacing:.1em;text-transform:uppercase}
+  /* la fenetre des styles, ouverte a la fin d'un rendu */
+  #styles{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:50;
+    display:flex;align-items:flex-start;justify-content:center;
+    overflow-y:auto;padding:32px 16px}
+  #styles[hidden]{display:none}
+  #styles .fen{background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;max-width:1080px;width:100%;padding:20px 22px}
+  #styles .tete{display:flex;justify-content:space-between;
+    align-items:flex-start;gap:16px;margin-bottom:6px}
+  #styles h2{margin:0;color:var(--acc);letter-spacing:.06em}
+  #styles .tete > div{flex:1;min-width:0}
+  #styles .ferme{background:none;color:var(--dim);border:1px solid var(--line);
+    font-weight:400;padding:4px 12px;flex:none;width:auto}
+  #styles .grille{display:grid;gap:14px;margin-top:14px;
+    grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+  #styles .st{border:1px solid var(--line);border-radius:8px;overflow:hidden;
+    background:var(--bg);display:flex;flex-direction:column}
+  #styles .st img{display:block;width:100%;aspect-ratio:16/9;
+    background:#000;object-fit:cover}
+  #styles .st .vide{width:100%;aspect-ratio:16/9;background:#000;
+    display:flex;align-items:center;justify-content:center;
+    color:var(--dim);font-size:12px}
+  #styles .st .txt{padding:10px 12px;flex:1}
+  #styles .st b{color:var(--ink);display:block;margin-bottom:4px}
+  #styles .st b::first-letter{text-transform:uppercase}
+  #styles .st p{margin:0;color:var(--dim);font-size:13px;line-height:1.4}
+  #styles .st .act{display:flex;gap:8px;padding:0 12px 12px}
+  #styles .st .act button{flex:1;padding:7px 6px;font-size:12px}
 </style></head><body>
 
 <header>
@@ -1880,6 +1955,8 @@ PAGE = r"""<!doctype html>
       <a class="dl" id="dl">Telecharger</a>
       <p class="hint" id="donepath"></p>
     </div>
+    <button class="ghost" id="stylesOuvre" style="margin-top:8px" disabled>
+      Essayer un autre style</button>
   </div>
  </div>
 
@@ -1920,6 +1997,22 @@ PAGE = r"""<!doctype html>
  </div>
 </main>
 
+<div id="styles" hidden>
+  <div class="fen" role="dialog" aria-labelledby="stylesTitre">
+    <div class="tete">
+      <div>
+        <h2 id="stylesTitre">Et si on essayait autrement ?</h2>
+        <p class="hint" style="margin:6px 0 0">Chaque style se pose
+          <b>par-dessus</b> tes reglages : il change la couleur, la lumiere et
+          la matiere de la dalle, mais garde tes reactions, ta machine et ta
+          melodie. Les vignettes sont prises sur un coup de grosse caisse, la
+          ou les styles reactifs se montrent.</p>
+      </div>
+      <button class="ferme" id="stylesFerme" aria-label="Fermer">Fermer</button>
+    </div>
+    <div class="grille" id="stylesGrille"></div>
+  </div>
+</div>
 <script>
 const $ = s => document.querySelector(s);
 let track = null, drops = [], duration = 0, jobTimer = null, shotSeq = 0;
@@ -1959,6 +2052,7 @@ async function upload(f) {
     $('#dur').placeholder = 'tout';
     $('#go').disabled = false;
     $('#lire').disabled = false;
+    $('#stylesOuvre').disabled = false;
     majOffset();          // le tempo et la longueur viennent d'arriver
     setStatus(j.name + ' — ' + j.bpm.toFixed(1) + ' BPM, ' + drops.length +
       ' paroxysme(s) : les glitchs tomberont la.');
@@ -2030,7 +2124,7 @@ function params() {
   });
   return p;
 }
-let pending = null, PRESETS = {}, USINE = {}, AIDE = {}, COMPTE = {};
+let pending = null, PRESETS = {}, STYLES = {}, USINE = {}, AIDE = {}, COMPTE = {};
 let QUALITES = {}, FRAPPES = null;
 
 /* Combien de fois chaque effet partira sur ce morceau. C'est le chiffre qui
@@ -2527,6 +2621,7 @@ function watch(id) {
         ' (' + (j.size / 1048576).toFixed(1) + ' Mo)';
       $('#done').hidden = false; $('#go').disabled = false;
       setStatus('rendu termine');
+      ouvrirStyles();
       return;
     }
     const pc = j.total ? j.done / j.total * 100 : 0;
@@ -2619,6 +2714,7 @@ fetch('/config').then(r => r.json())
 
     /* ---- prereglages : ils reposent tous les curseurs d'un coup ---- */
     PRESETS = c.presets || {};
+    STYLES = c.styles || {};
     MES = c.mes || {};
     USINE = {};                       // les valeurs d'usine, pour y revenir
     for (const el of document.querySelectorAll('input[type=range], select'))
@@ -2684,6 +2780,96 @@ function appliquerPrereglage(nom) {
     el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input'));
   }
 }
+
+/* ---------- styles ----------
+
+   Un style ne passe pas par appliquerPrereglage : celui-ci remet d'abord tout
+   a l'usine, ce qui effacerait les reactions, la machine et la melodie qu'on
+   vient de regler. Un style ne pose que ce qu'il dit. */
+function appliquerStyle(nom) {
+  const st = STYLES[nom];
+  if (!st) return;
+  for (const [id, v] of Object.entries(st.reglages)) {
+    const el = $('#' + id);
+    if (!el) { console.warn('style : curseur inconnu', id); continue; }
+    el.value = v;
+    el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input'));
+  }
+  majFrequences();
+  shot();
+  setStatus('style « ' + nom + ' » pose par-dessus tes reglages');
+}
+
+/* L'instant des vignettes, choisi par le serveur : un coup de grosse caisse
+   ordinaire. Sur un instant quelconque les styles reactifs ne montraient rien
+   (5 % de l'image changee) ; sur les plus gros coups, le dedoublement du
+   trait blanchissait tout (46 % de pixels blancs). Un coup ordinaire montre
+   les deux : la reaction, sans l'eblouissement. */
+async function instantDesVignettes() {
+  const t0 = +$('#scrub').value || 0;
+  try {
+    const j = await (await fetch('/instant_vignette?track=' + track + '&t=' + t0
+      + '&splitOn=' + encodeURIComponent($('#splitOn').value)
+      + '&splitCount=' + $('#splitCount').value)).json();
+    if (typeof j.t === 'number') return j.t;
+  } catch (e) { /* on retombe sur l'instant regarde */ }
+  return t0;
+}
+
+let stylesGen = 0;
+async function ouvrirStyles() {
+  if (!track || !Object.keys(STYLES).length) return;
+  const gen = ++stylesGen;
+  const g = $('#stylesGrille');
+  for (const im of g.querySelectorAll('img'))
+    if (im.dataset.blob) URL.revokeObjectURL(im.dataset.blob);
+  g.innerHTML = '';
+  const cartes = {};
+  for (const [nom, st] of Object.entries(STYLES)) {
+    const c = document.createElement('div');
+    c.className = 'st';
+    c.innerHTML = '<div class="vide">calcul de la vignette…</div>'
+      + '<div class="txt"><b></b><p></p></div>'
+      + '<div class="act"><button class="ghost">Appliquer</button>'
+      + '<button>Rendre avec</button></div>';
+    c.querySelector('b').textContent = nom;
+    c.querySelector('p').textContent = st.quoi;
+    const [app, ren] = c.querySelectorAll('button');
+    app.onclick = () => { appliquerStyle(nom); fermerStyles(); };
+    ren.onclick = () => { appliquerStyle(nom); fermerStyles(); $('#go').click(); };
+    g.appendChild(c);
+    cartes[nom] = c;
+  }
+  $('#styles').hidden = false;
+  const t = await instantDesVignettes();
+  // une par une : le moteur dessine une image a la fois, et les lancer
+  // ensemble ne ferait que les mettre en file
+  for (const [nom, st] of Object.entries(STYLES)) {
+    if (gen !== stylesGen || $('#styles').hidden) return;
+    const p = params();
+    for (const [id, v] of Object.entries(st.reglages)) p.set(id, v);
+    p.set('t', t); p.set('w', 480); p.set('h', 270); p.set('vignette', '1');
+    const place = cartes[nom].querySelector('.vide');
+    try {
+      const r = await fetch('/still?' + p.toString());
+      if (!r.ok) throw new Error('erreur ' + r.status);
+      const url = URL.createObjectURL(await r.blob());
+      if (gen !== stylesGen) { URL.revokeObjectURL(url); return; }
+      const im = document.createElement('img');
+      im.src = url; im.dataset.blob = url; im.alt = 'style ' + nom;
+      place.replaceWith(im);
+    } catch (e) {
+      place.textContent = 'vignette impossible : ' + e.message;
+    }
+  }
+}
+function fermerStyles() { $('#styles').hidden = true; stylesGen++; }
+$('#stylesOuvre').onclick = ouvrirStyles;
+$('#stylesFerme').onclick = fermerStyles;
+$('#styles').onclick = e => { if (e.target.id === 'styles') fermerStyles(); };
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('#styles').hidden) fermerStyles();
+});
 
 /* Tout ce qui decrit l'allure, et rien de ce qui decrit le fichier : la
    definition, la cadence, la duree d'apercu et le morceau n'ont rien a faire
