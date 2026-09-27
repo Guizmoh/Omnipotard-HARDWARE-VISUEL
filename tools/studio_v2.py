@@ -427,6 +427,47 @@ PAGE = r"""<!doctype html>
     padding:10px 14px;border-radius:7px;text-decoration:none;font-weight:700;
     letter-spacing:.1em;text-transform:uppercase;font-size:12.5px}
   a.dl:hover{background:#63ff8d}
+  /* ---------- calage de la melodie ---------- */
+  .calage{margin:2px 0 12px}
+  .calage .exact{display:flex;align-items:center;gap:8px;margin-top:2px}
+  .calage .exact label{flex:1;font-size:12.5px;color:var(--dim)}
+  .calage .exact input{width:104px;text-align:right;font-family:var(--mono)}
+  .calage .exact span{color:var(--faible);font-size:12px}
+  .calage .rangee{display:grid;gap:6px;margin-top:8px}
+  .calage .r4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .calage .r3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .calage .rangee button{margin:0;padding:7px 4px;font-size:11.5px;width:100%;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .calage .note b{color:var(--ink);font-family:var(--mono);font-weight:600}
+
+  /* ---------- la fenetre des styles, ouverte a la fin d'un rendu ---------- */
+  #styles{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:50;
+    display:flex;align-items:flex-start;justify-content:center;
+    overflow-y:auto;padding:32px 16px}
+  #styles[hidden]{display:none}
+  #styles .fen{background:linear-gradient(180deg,var(--carte2),var(--carte));
+    border:1px solid var(--ligne);border-radius:12px;max-width:1080px;
+    width:100%;padding:20px 22px}
+  #styles .ent{display:flex;justify-content:space-between;
+    align-items:flex-start;gap:16px}
+  #styles .ent > div{flex:1;min-width:0}
+  #styles h2{margin:0;color:var(--acc);font-size:18px;font-weight:700}
+  #styles .ferme{flex:none;width:auto;padding:6px 14px}
+  #styles .grille{display:grid;gap:14px;margin-top:16px;
+    grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+  #styles .st{border:1px solid var(--ligne);border-radius:9px;overflow:hidden;
+    background:var(--fond);display:flex;flex-direction:column}
+  #styles .st img,#styles .st .vide{display:block;width:100%;
+    aspect-ratio:16/9;background:#000}
+  #styles .st .vide{display:flex;align-items:center;justify-content:center;
+    color:var(--faible);font-size:12px}
+  #styles .st .txt{padding:10px 12px;flex:1}
+  #styles .st b{color:var(--ink);display:block;margin-bottom:4px}
+  #styles .st b::first-letter{text-transform:uppercase}
+  #styles .st p{margin:0;color:var(--dim);font-size:12.5px;line-height:1.45}
+  #styles .st .act{display:grid;grid-template-columns:1fr 1fr;gap:8px;
+    padding:0 12px 12px}
+  #styles .st .act button{margin:0;padding:7px 6px;font-size:12px;width:100%}
 </style></head><body>
 
 <header>
@@ -439,7 +480,7 @@ PAGE = r"""<!doctype html>
     <button data-n="3">tout</button>
   </div>
   <button id="aides" title="garder toutes les explications ouvertes">aide</button>
-  <a href="/">page classique</a>
+  <a href="/v1">page classique</a>
 </header>
 
 <main>
@@ -523,9 +564,28 @@ PAGE = r"""<!doctype html>
     <div class="jauge" id="prog" hidden><i id="progBar"></i></div>
     <p class="note" id="progTexte"></p>
     <a class="dl" id="dl" hidden>Telecharger</a>
+    <button id="stylesOuvre" disabled style="width:100%;margin-top:10px">
+      essayer un autre style</button>
   </div>
  </div>
 </main>
+
+<div id="styles" hidden>
+  <div class="fen" role="dialog" aria-labelledby="stylesTitre">
+    <div class="ent">
+      <div>
+        <h2 id="stylesTitre">Et si on essayait autrement ?</h2>
+        <p class="note">Chaque style se pose <b>par-dessus</b> tes reglages :
+          il change la couleur, la lumiere et la matiere de la dalle, mais
+          garde tes reactions, ta machine et ta melodie. Les vignettes sont
+          prises sur un coup de grosse caisse ordinaire, la ou les styles
+          reactifs se montrent sans que le dedoublement ne blanchisse tout.</p>
+      </div>
+      <button class="ferme" id="stylesFerme" aria-label="Fermer">fermer</button>
+    </div>
+    <div class="grille" id="stylesGrille"></div>
+  </div>
+</div>
 
 <script>
 const CTRL = __CTRL__;
@@ -645,6 +705,29 @@ $('#niveaux').onclick = e => {
 
 
 _SUITE = r"""
+/* ---------- le chiffre affiche a cote de certains curseurs ----------
+   Par defaut un curseur montre sa valeur au centieme. Le decalage de la
+   melodie, lui, se lit en secondes et millisecondes : c'est dans cette unite
+   qu'on constate un ecart — « la touche s'allume un poil apres le son » — et
+   qu'on veut le rattraper. Au centieme, un decalage de 85 ms s'affichait
+   « 0.09 », et 5 ms de plus ne changeaient rien au chiffre. */
+function enSecMs(x, signe) {
+  const neg = x < 0;
+  let ms = Math.round(Math.abs(x) * 1000);
+  const sec = Math.floor(ms / 1000);
+  ms -= sec * 1000;
+  const corps = !sec ? ms + ' ms' : (ms ? sec + ' s ' + ms + ' ms' : sec + ' s');
+  if (!signe || (!sec && !ms)) return corps;
+  return (neg ? '\u2212' : '+') + corps;
+}
+const FORMAT = {
+  midiOffset: v => enSecMs(v, true),
+  midiTempo: v => (v > 0 ? '+' : v < 0 ? '\u2212' : '') + Math.abs(v).toFixed(3) + ' %',
+};
+// la cadence de l'apercu anime : elle fixe la plus petite erreur de calage
+// qu'on puisse y voir, d'ou une constante que le rappel cite
+const FPS_APERCU = 15;
+
 /* ---------- ce que la page envoie au moteur ----------
    Une seule liste, construite des reglages eux-memes : impossible qu'un
    reglage visible ne parte pas au rendu. */
@@ -759,6 +842,7 @@ async function envoyerMorceau(f) {
     s.disabled = false;
     allerA(+s.value);
     $('#rendre').disabled = false; $('#lire').disabled = false;
+    $('#stylesOuvre').disabled = false;
     etat(j.name + ' — ' + j.bpm.toFixed(1) + ' BPM, ' + drops.length
          + ' paroxysme(s)');
     frequences();
@@ -897,7 +981,7 @@ $('#lire').onclick = async () => {
   try {
     const r = await fetch('/render', {method: 'POST', body: JSON.stringify(
       corpsDuRendu({start: depart, duration: sec, width: 960, height: 540,
-                    fps: 15, apercu: true}))});
+                    fps: FPS_APERCU, apercu: true}))});
     const j = await r.json();
     if (j.error) throw new Error(j.error);
     suivreClip(j.id);
@@ -960,7 +1044,7 @@ function suivreRendu(id) {
       $('#dl').href = '/download?id=' + id;
       $('#dl').setAttribute('download', j.name);
       $('#dl').hidden = false; $('#rendre').disabled = false;
-      etat('rendu termine'); return;
+      etat('rendu termine'); ouvrirStyles(); return;
     }
     $('#progBar').style.width = (j.total ? j.done / j.total * 100 : 0) + '%';
     $('#progTexte').textContent = j.state === 'rendu'
@@ -990,8 +1074,10 @@ $('#versDrop').onclick = () => {
 };
 $('#versSplit').onclick = async () => {
   if (!morceau) return;
+  // le serveur lit « count » : envoye sous le nom « n », le nombre de
+  // dedoublements regle dans la page etait ignore et il en prenait trois
   const q = new URLSearchParams({track: morceau, on: $('#splitOn').value,
-                                 n: $('#splitCount').value});
+                                 count: $('#splitCount').value});
   try {
     const j = await (await fetch('/splits?' + q)).json();
     if (!j.times || !j.times.length) return etat('aucun dedoublement prevu', true);
@@ -1008,6 +1094,7 @@ fetch('/config').then(r => r.json()).then(c => {
     + 'studio, relancez-le, puis rechargez cette page', true);
   AIDE = c.aide || {}; COMPTE = c.compte || {}; QUALITES = c.qualites || {};
   PRESETS = c.presets || {}; MES = c.mes || {};
+  STYLES = c.styles || {};
   const groupes = (sel, gs, def) => {
     if (!$(sel)) return;
     $(sel).innerHTML = gs.map(g => '<optgroup label="' + echap(g.titre) + '">'
@@ -1052,7 +1139,8 @@ document.querySelectorAll('#panneaux input, #panneaux select').forEach(el => {
     const v = $('#v-' + el.id);
     if (v) {
       const n = +el.value;
-      v.textContent = Number.isFinite(n)
+      v.textContent = (FORMAT[el.id] && Number.isFinite(n)) ? FORMAT[el.id](n)
+        : Number.isFinite(n)
         ? (Math.abs(n) >= 100 || Number.isInteger(n) ? el.value : n.toFixed(2))
         : el.value;
     }
@@ -1078,6 +1166,242 @@ $('#aides').onclick = () => {
   const on = document.body.classList.toggle('aides');
   $('#aides').classList.toggle('on', on);
 };
+
+/* ---------- calage de la melodie ----------
+   Tout ce qui sert a caler le fichier sur ce qu'on voit, au meme endroit : le
+   decalage au millieme, les pas d'une image, d'un temps ou d'une mesure, ou
+   tombe la premiere note, et la derive. Le code est ecrit pour la v2 — c'est
+   la page qu'on utilise — et non plus seulement pour la page classique. */
+function reglerDecalage(v) {
+  const el = $('#midiOffset');
+  if (!el) return;
+  v = Math.min(+el.max, Math.max(+el.min, v));
+  // au millieme : le curseur y va, et arrondir plus gros ferait deriver une
+  // suite de clics — cinq millisecondes par clic au centieme
+  el.value = (Math.round(v * 1000) / 1000).toFixed(3);
+  el.dispatchEvent(new Event('input'));
+}
+
+/* Le sens, dit en clair. Le moteur calcule mt = t + decalage : un decalage
+   positif fait donc s'allumer les touches plus TOT. Sans la phrase, « +85 ms »
+   laissait deviner dans quel sens on venait de pousser. */
+function majOffset() {
+  const el = $('#midiOffset');
+  if (!el) return;
+  const d = +el.value || 0;
+  const sens = $('#midiSens');
+  if (sens) sens.innerHTML = !Math.round(d * 1000)
+    ? "les touches s'allument a l'heure du fichier"
+    : "les touches s'allument <b>" + enSecMs(Math.abs(d)) + '</b> plus '
+      + (d > 0 ? 'tot' : 'tard') + ' que ne le dit le fichier';
+  const ms = $('#midiMs');
+  if (ms && document.activeElement !== ms) ms.value = Math.round(d * 1000);
+  const ou = $('#midiOu');
+  if (ou) {
+    if (MIDI_DEBUT === null) ou.textContent = '';
+    else {
+      const depart = +$('#start').value || 0;
+      const t = MIDI_DEBUT - depart - d;
+      // la longueur rendue, pas celle du morceau : vide, le plan va au bout
+      const plan = +$('#dur').value || Math.max(0, duree - depart);
+      if (t < 0)
+        ou.innerHTML = 'premiere note <b>' + instant(-t)
+          + ' avant le debut du plan</b> : on ne la verra pas';
+      else if (plan > 0 && t > plan)
+        ou.innerHTML = 'premiere note a <b>' + instant(t)
+          + '</b>, apres la fin du plan : on ne la verra pas';
+      else
+        ou.innerHTML = 'premiere note a <b>' + instant(t) + '</b> dans la video';
+    }
+  }
+  majImage();
+  majDerive();
+}
+
+/* Ce qu'on voit est decoupe en images : un ecart plus petit qu'une image ne
+   se voit pas, et le chercher fait tourner en rond. L'apercu anime tourne a
+   quinze images par seconde — soixante-sept millisecondes chacune —, la ou
+   la video finale en a souvent trente. */
+function majImage() {
+  const z = $('#midiImage');
+  if (!z) return;
+  const fps = +$('#fps').value || 30;
+  z.innerHTML = '1 image = <b>' + Math.round(1000 / fps) + ' ms</b> dans la video ('
+    + fps + ' i/s) et <b>' + Math.round(1000 / FPS_APERCU)
+    + " ms</b> dans l'apercu anime (" + FPS_APERCU
+    + " i/s) : un ecart plus petit ne s'y voit pas";
+}
+
+function majDerive() {
+  const z = $('#midiDerive'), el = $('#midiTempo');
+  if (!z || !el) return;
+  const p = +el.value || 0;
+  if (MIDI_DEBUT === null || !p) { z.textContent = ''; return; }
+  const depart = +$('#start').value || 0;
+  const plan = +$('#dur').value || Math.max(0, duree - depart);
+  // l'etirement part de la premiere note : c'est de la qu'on compte
+  const t0 = MIDI_DEBUT - depart - (+$('#midiOffset').value || 0);
+  const portee = Math.max(0, plan - Math.max(0, t0));
+  z.innerHTML = 'la melodie ' + (p > 0 ? 'retarde' : 'avance') + ' de <b>'
+    + enSecMs(Math.abs(portee * p / 100)) + '</b> a la fin du plan';
+}
+
+/* Mesurer la derive : le pas de la grille du fichier contre celui du morceau.
+   Fiable sur une melodie, contrairement au calage : un motif repetitif dit
+   tres bien l'ecart ENTRE ses attaques. */
+async function mesurerDerive() {
+  if (!morceau) return etat("chargez d'abord un morceau", true);
+  if (!$('#midi').value) return etat("chargez d'abord une melodie", true);
+  etat('mesure de la derive…');
+  try {
+    const j = await (await fetch('/derive?track=' + morceau + '&midi='
+                     + encodeURIComponent($('#midi').value))).json();
+    if (j.error) return etat(j.error, true);
+    const el = $('#midiTempo');
+    const pas = +el.step || 0.005;
+    const v = Math.min(+el.max, Math.max(+el.min,
+              Math.round(j.pourcent / pas) * pas));
+    el.value = v.toFixed(3);
+    el.dispatchEvent(new Event('input'));
+    etat('melodie ' + j.bpm_melodie.toFixed(2) + ' BPM, morceau '
+      + j.bpm_morceau.toFixed(2) + ' BPM : derive '
+      + (j.pourcent >= 0 ? '+' : '') + j.pourcent.toFixed(3) + ' %'
+      + (Math.abs(j.pourcent - v) > 0.0005 ? ' (curseur pose a ' + v.toFixed(3) + ' %)' : '')
+      + (j.nettete < 5 ? " — mesure peu nette, verifiez a l'oreille" : '')
+      + (j.duree < 60 ? ' — extrait court (' + Math.round(j.duree)
+         + ' s) : la mesure sera plus juste sur un plan plus long' : ''));
+  } catch (e) { etat('mesure impossible : ' + e.message, true); }
+}
+
+function brancherCalage() {
+  const off = $('#midiOffset');
+  if (!off) return;
+  off.addEventListener('input', majOffset);
+  const tempo = $('#midiTempo');
+  if (tempo) tempo.addEventListener('input', majDerive);
+  // le depart, la duree et la cadence deplacent ce que les rappels comptent
+  for (const id of ['start', 'dur', 'fps']) {
+    const el = $('#' + id);
+    if (!el) continue;
+    el.addEventListener('input', majOffset);
+    el.addEventListener('change', majOffset);
+  }
+  const ms = $('#midiMs');
+  if (ms) {
+    ms.addEventListener('input', () => {
+      if (ms.value === '' || ms.value === '-') return;   // en cours de frappe
+      const v = +ms.value;
+      if (Number.isFinite(v)) reglerDecalage(v / 1000);
+    });
+    // en quittant le champ, il reprend la valeur retenue, bornee et arrondie
+    ms.addEventListener('change', () => { ms.blur(); majOffset(); });
+  }
+  for (const b of document.querySelectorAll('.calage [data-ms]'))
+    b.onclick = () => reglerDecalage((+off.value || 0) + (+b.dataset.ms) / 1000);
+  for (const b of document.querySelectorAll('.calage [data-img]'))
+    b.onclick = () => reglerDecalage((+off.value || 0)
+                                     + (+b.dataset.img) / (+$('#fps').value || 30));
+  // un temps du morceau entier : la phase d'un fichier exporte du projet est
+  // deja bonne, ce qui lui manque est un nombre entier de temps
+  for (const b of document.querySelectorAll('.calage [data-pas]'))
+    b.onclick = () => {
+      const temps = 60 / Math.max(1, (FRAPPES && FRAPPES.bpm) || 120);
+      reglerDecalage((+off.value || 0) + (+b.dataset.pas) * temps);
+    };
+  const m = $('#midiMesure');
+  if (m) m.onclick = mesurerDerive;
+  majOffset();
+}
+
+/* ---------- les styles, proposes a la fin d'un rendu ----------
+   Un style ne passe pas par appliquer() : celui-ci repart de l'usine, ce qui
+   effacerait les reactions, la machine et la melodie qu'on vient de regler.
+   Un style ne pose que ce qu'il dit. */
+let STYLES = {};
+function appliquerStyle(nom) {
+  const st = STYLES[nom];
+  if (!st) return;
+  for (const [id, v] of Object.entries(st.reglages)) {
+    const el = $('#' + id);
+    if (!el) { console.warn('style : reglage inconnu', id); continue; }
+    el.value = v;
+    el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input'));
+  }
+  frequences();
+  apercu();
+  etat('style « ' + nom + ' » pose par-dessus tes reglages');
+}
+
+/* L'instant des vignettes, choisi par le serveur : un coup de grosse caisse
+   ordinaire. Sur un instant quelconque les styles reactifs ne montraient rien
+   (5 % de l'image changee) ; sur les plus gros coups, le dedoublement du trait
+   blanchissait tout (46 % de pixels blancs). */
+async function instantDesVignettes() {
+  const t0 = +$('#scrub').value || 0;
+  try {
+    const q = new URLSearchParams({track: morceau, t: t0,
+      splitOn: $('#splitOn').value, splitCount: $('#splitCount').value});
+    const j = await (await fetch('/instant_vignette?' + q)).json();
+    if (typeof j.t === 'number') return j.t;
+  } catch (e) { /* on retombe sur l'instant regarde */ }
+  return t0;
+}
+
+let stylesGen = 0;
+async function ouvrirStyles() {
+  if (!morceau || !Object.keys(STYLES).length) return;
+  const gen = ++stylesGen;
+  const g = $('#stylesGrille');
+  for (const im of g.querySelectorAll('img'))
+    if (im.dataset.blob) URL.revokeObjectURL(im.dataset.blob);
+  g.innerHTML = '';
+  const cartes = {};
+  for (const [nom, st] of Object.entries(STYLES)) {
+    const c = document.createElement('div');
+    c.className = 'st';
+    c.innerHTML = '<div class="vide">calcul de la vignette…</div>'
+      + '<div class="txt"><b></b><p></p></div>'
+      + '<div class="act"><button>appliquer</button>'
+      + '<button class="fort">rendre avec</button></div>';
+    c.querySelector('b').textContent = nom;
+    c.querySelector('p').textContent = st.quoi;
+    const [app, ren] = c.querySelectorAll('button');
+    app.onclick = () => { appliquerStyle(nom); fermerStyles(); };
+    ren.onclick = () => { appliquerStyle(nom); fermerStyles(); $('#rendre').click(); };
+    g.appendChild(c);
+    cartes[nom] = c;
+  }
+  $('#styles').hidden = false;
+  const t = await instantDesVignettes();
+  // Une par une : le moteur ne dessine qu'une image a la fois, et « vignette »
+  // les fait passer a cote de la regle du dernier apercu gagne — lancees
+  // ensemble, elles s'annulaient l'une l'autre et annulaient l'apercu.
+  for (const [nom, st] of Object.entries(STYLES)) {
+    if (gen !== stylesGen || $('#styles').hidden) return;
+    const p = params();
+    for (const [id, v] of Object.entries(st.reglages)) p.set(id, v);
+    p.set('t', t); p.set('w', 480); p.set('h', 270); p.set('vignette', '1');
+    const place = cartes[nom].querySelector('.vide');
+    try {
+      const r = await fetch('/still?' + p.toString());
+      if (!r.ok) throw new Error('erreur ' + r.status);
+      const url = URL.createObjectURL(await r.blob());
+      if (gen !== stylesGen) { URL.revokeObjectURL(url); return; }
+      const im = document.createElement('img');
+      im.src = url; im.dataset.blob = url; im.alt = 'style ' + nom;
+      place.replaceWith(im);
+    } catch (e) {
+      place.textContent = 'vignette impossible : ' + e.message;
+    }
+  }
+}
+function fermerStyles() { $('#styles').hidden = true; stylesGen++; }
+$('#stylesOuvre').onclick = ouvrirStyles;
+$('#stylesFerme').onclick = fermerStyles;
+$('#styles').onclick = e => { if (e.target.id === 'styles') fermerStyles(); };
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('#styles').hidden) fermerStyles();
+});
 
 /* ---------- le sequenceur de machines et la melodie ----------
    Le code est celui de la v1, ecrit une seule fois : les deux pages
@@ -1112,6 +1436,44 @@ const _duree = () => duree;
     const c = document.querySelector('[data-champ="' + id + '"]');
     if (c && cible) cible.appendChild(c);
   }
+  // Les outils de calage se posent sous leur curseur, et DANS son reglage :
+  // ils se cachent et se montrent avec lui selon la profondeur choisie. Poses
+  // a cote, ils restaient seuls a l'ecran en profondeur « simple », ou le
+  // curseur qu'ils reglent est cache.
+  const cOff = document.querySelector('[data-champ="midiOffset"]');
+  if (cOff) {
+    const cal = document.createElement('div');
+    cal.className = 'calage';
+    cal.innerHTML =
+      '<div class="exact"><label for="midiMs">decalage exact '
+      + '<span>(+ = touches plus tot)</span></label>'
+      + '<input type="number" id="midiMs" step="1" value="0"><span>ms</span></div>'
+      + '<div class="rangee r4">'
+      + '<button data-img="-1">−1 image</button>'
+      + '<button data-ms="-10">−10 ms</button>'
+      + '<button data-ms="10">+10 ms</button>'
+      + '<button data-img="1">+1 image</button></div>'
+      + '<div class="rangee r3">'
+      + '<button data-pas="-4">−1 mesure</button>'
+      + '<button data-pas="-1">−1 temps</button>'
+      + '<button data-pas="-0.25">−1/4</button>'
+      + '<button data-pas="0.25">+1/4</button>'
+      + '<button data-pas="1">+1 temps</button>'
+      + '<button data-pas="4">+1 mesure</button></div>'
+      + '<p class="note" id="midiSens"></p>'
+      + '<p class="note" id="midiOu"></p>'
+      + '<p class="note" id="midiImage"></p>';
+    (cOff.querySelector('input[type=range]') || cOff).insertAdjacentElement('afterend', cal);
+  }
+  const cTempo = document.querySelector('[data-champ="midiTempo"]');
+  if (cTempo) {
+    const der = document.createElement('div');
+    der.className = 'calage';
+    der.innerHTML = '<button id="midiMesure" style="width:100%">'
+      + 'mesurer la derive</button><p class="note" id="midiDerive"></p>';
+    (cTempo.querySelector('input[type=range]') || cTempo).insertAdjacentElement('afterend', der);
+  }
+  brancherCalage();
   // la carte qui les portait est vide : majNiveau la fait disparaitre
   majNiveau();
   // La machine du debut est la premiere entree du plan : en changer doit le

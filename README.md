@@ -503,7 +503,7 @@ git clone https://github.com/Guizmoh/Omnipotard-HARDWARE-VISUEL.git
 cd Omnipotard-HARDWARE-VISUEL
 pip install numpy pillow          # ffmpeg : voir « Rendu » plus haut
 python3 tools/studio.py
-# le navigateur s'ouvre sur http://127.0.0.1:8765
+# le navigateur s'ouvre sur http://127.0.0.1:8765 — la v2
 ```
 
 **Après un `git pull`, il faut relancer le studio.** Python lit les modules au
@@ -1520,12 +1520,42 @@ repasse par un chemin générique). Elles ne sont pas dans le code.
 
 ## STUDIO v2 — la même machine, une page plus claire
 
+**La v2 est le studio.** C'est elle qui s'ouvre, quel que soit le lanceur :
+
 ```
-double-cliquer   Lancer-le-studio-v2.bat        (Windows)
-                 Lancer-le-studio-v2.command    (macOS, Linux)
-en ligne         python3 tools/studio_v2.py
-l'adresse        http://127.0.0.1:8765/v2   (la page classique reste sur /)
+double-cliquer   Lancer-le-studio.bat  ou  Lancer-le-studio-v2.bat   (Windows)
+                 Lancer-le-studio.command  ou  ...-v2.command        (macOS, Linux)
+en ligne         python3 tools/studio.py
+l'adresse        http://127.0.0.1:8765        (la page classique est sur /v1)
 ```
+
+La page classique reste servie sur `/v1` pour une raison précise : la v2 ne
+recopie pas la liste des réglages, elle **la lit dans la page classique**.
+Celle-ci doit donc rester juste — c'est ce que vérifie
+`tools/verifier_studio.py` —, mais il n'y a plus de raison de s'en servir. Tout
+ce qui a été ajouté depuis se trouve dans la v2 : le calage de la mélodie au
+millième, la mesure de la dérive, la fenêtre des styles à la fin du rendu.
+
+### Caler la mélodie sur ce qu'on voit
+
+Le curseur **avance / retard** s'affiche en **secondes et millisecondes** —
+« +85 ms », « −1 s 250 ms » — et une phrase dit le sens : *les touches
+s'allument 85 ms plus tôt que ne le dit le fichier*. Un décalage positif les
+allume plus tôt, un négatif plus tard.
+
+Sous le curseur :
+
+- **décalage exact**, un champ en millisecondes : on y tape l'écart constaté,
+  les flèches du clavier le règlent à la milliseconde ;
+- **±1 image** et **±10 ms**, pour les petits écarts ;
+- **±1/4, ±1 temps, ±1 mesure**, pour un fichier décalé d'un nombre entier de
+  temps — le cas d'un export de projet, dont la phase est déjà bonne ;
+- où tombe la **première note** dans la vidéo, au millième ;
+- et ce que vaut **une image** : 33 ms dans une vidéo à 30 images par seconde,
+  67 ms dans l'aperçu animé, qui tourne à 15. Un écart plus petit qu'une image
+  ne se voit pas — le chercher fait tourner en rond. Pour juger un calage à
+  quelques dizaines de millisecondes près, il faut une vidéo à 30 ou 60 images
+  par seconde, pas l'aperçu.
 
 La v1 pose ses quatre-vingt-dix réglages les uns sous les autres. Tout y est,
 mais il faut déjà savoir ce qu'on cherche. La v2 **ne retire rien — elle

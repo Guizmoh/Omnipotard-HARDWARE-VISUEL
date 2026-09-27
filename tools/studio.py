@@ -904,14 +904,23 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
-            if u.path in ("/", "/index.html"):
-                return self._send(200, "text/html; charset=utf-8", PAGE.encode("utf-8"))
-            if u.path == "/v2":
-                # importee ici et non en tete : la v2 lit les controles de
-                # cette page-ci, les deux modules se tiennent par la main
+            if u.path == "/favicon.ico":
+                # Le navigateur la reclame de lui-meme. Sans reponse, chaque
+                # page ouverte laissait une erreur 404 dans la console — sans
+                # consequence, mais elle noyait les vraies.
+                return self._send(204, "image/x-icon", b"")
+            if u.path in ("/", "/index.html", "/v2"):
+                # La v2 est le studio : c'est elle qu'on ouvre. Importee ici
+                # et non en tete, parce qu'elle lit ses controles dans la page
+                # classique — les deux modules se tiennent par la main.
                 from studio_v2 import page as page_v2
                 return self._send(200, "text/html; charset=utf-8",
                                   page_v2().encode("utf-8"))
+            if u.path == "/v1":
+                # La page classique reste servie : la v2 ne recopie pas la
+                # liste des reglages, elle la lit dans celle-ci, qui doit donc
+                # rester juste — et se consulter.
+                return self._send(200, "text/html; charset=utf-8", PAGE.encode("utf-8"))
             if u.path == "/config":
                 return self._json({
                     "version": version(),
@@ -1280,13 +1289,14 @@ function seqBrancher() {
    studios partagent ce bloc. */
 let MIDI_DEBUT = null;
 
-/* Un instant, ecrit au centieme : c'est ce qui permet de comparer la premiere
+/* Un instant, ecrit au millieme : c'est ce qui permet de comparer la premiere
    note du fichier a ce qu'on entend. Arrondi a la seconde, « 5 s » ne disait
-   pas si le fichier tombait a 5,00 ou a 5,49. */
+   pas si le fichier tombait a 5,00 ou a 5,49 ; au centieme, un decalage regle
+   a la milliseconde ne s'y voyait pas bouger. */
 function instant(s) {
   s = Math.max(0, +s || 0);
   const m = Math.floor(s / 60), r = s - m * 60;
-  return m + ':' + (r < 10 ? '0' : '') + r.toFixed(2);
+  return m + ':' + (r < 10 ? '0' : '') + r.toFixed(3);
 }
 
 function midiOte() {
@@ -2963,9 +2973,9 @@ def main():
     ap.add_argument("--host", default="127.0.0.1",
                     help="127.0.0.1 par defaut : rien n'est expose au reseau")
     ap.add_argument("--no-browser", action="store_true")
-    ap.add_argument("--v2", action="store_true",
-                    help="ouvrir la page v2 : moins de reglages a l'ecran, "
-                         "rangee par onglets, tout reste accessible")
+    # la v2 est desormais la page par defaut ; l'option reste acceptee pour
+    # que les anciens lanceurs et raccourcis continuent de marcher
+    ap.add_argument("--v2", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("track", nargs="?", help="morceau a charger au demarrage")
     args = ap.parse_args()
 
