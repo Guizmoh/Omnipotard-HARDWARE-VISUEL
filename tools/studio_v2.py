@@ -379,6 +379,7 @@ PAGE = r"""<!doctype html>
 
   .avis{color:var(--mal)}
   #midimeta[hidden], #midiReglages[hidden], #midiAvis[hidden]{display:none}
+  #mi-p:empty{display:none}
 
   /* ---------- sequenceur de machines ----------
      Une ligne par changement : « a [temps] [machine] [x] ». Sans colonnes,
@@ -551,6 +552,7 @@ PAGE = r"""<!doctype html>
       <span>etendue <b id="mi-e">-</b></span>
       <span>premiere note <b id="mi-c">-</b></span>
     </div>
+    <p class="note" id="mi-p"></p>
     <div id="midiReglages" hidden>
       <div id="midiCurseurs"></div>
       <button id="midiOte" style="margin-top:9px">oter la melodie</button>

@@ -572,10 +572,18 @@ Déposer un **.mid** dans la carte *Mélodie* fait jouer les vraies notes du
 morceau sur le **clavier du MiniFreak** : c'est la touche exacte qui s'enfonce,
 et elle seule — les coups de batterie cessent alors d'allumer les touches.
 
-La MPC et le Digitakt n'ont pas de clavier, et le fichier n'y change rien.
-Plaquer une mélodie sur seize pads de batterie ne donnait rien de lisible :
-trois choses s'y disputaient les mêmes cellules — les coups, les pas et les
-notes.
+**Les touches qui s'allument sont celles du fichier, et seulement elles** —
+mais *toutes* celles du fichier : toutes ses pistes et tous ses canaux. Un
+export qui a emporté la batterie avec la mélodie allume donc aussi des touches
+sur chaque coup. La carte dit ce que contient le fichier, piste par piste
+(« piste 2 « Lead » : 170 notes, canal 1 »), et prévient quand la batterie
+(canal 10) y est mêlée à d'autres notes : mieux vaut alors exporter la mélodie
+seule.
+
+La MPC, le SP-404 et le Digitakt n'ont pas de clavier : en mode mélodie, le
+fichier n'y change rien. Plaquer une mélodie sur seize pads de batterie ne
+donnait rien de lisible : trois choses s'y disputaient les mêmes cellules — les
+coups, les pas et les notes.
 
 Le fichier est pris **tel quel**. Un MIDI exporté du même projet que le morceau
 est déjà à l'heure : son décalage vaut zéro, et c'est ce qu'on lui laisse.
@@ -696,27 +704,79 @@ ceux qu'il connaît exactement. La table des instruments est faite sur tout le
 fichier et non sur ce qui sonne à l'instant — sans cela la caisse claire
 changerait de pad selon ce qui joue avec elle.
 
+#### Ce qui allume une touche — et ce qui ne l'allume plus
+
+« Certaines notes s'allument au bon moment, d'autres ne sont pas prises en
+compte » : l'impression était juste, et elle avait quatre causes. Elles ont été
+trouvées en **mesurant l'image** : un extrait rendu avec un fichier dont on
+connaît chaque note (isolées, répétées, liées, qui se chevauchent, douces, un
+accord, une tenue, une note de durée nulle, la même hauteur sur deux canaux),
+et la lumière relevée sur chaque touche, image par image.
+
+| défaut | avant | après |
+| --- | --- | --- |
+| touches allumées **sans aucune note**, sur les coups de batterie du son | jusqu'à +45 de luminosité | +4 (le bruit du fond) |
+| notes du fichier **lues** | 43 sur 45 | 45 sur 45 |
+| la touche retombe **avant une note rejouée** | de 17 à 29 % | de 89 à 94 % |
+| éclat d'une note jouée **doucement** (vélocité 20) | 21 % d'une note ordinaire | 63 % |
+
+- **Les coups du son allumaient des touches.** Le contour des touches suivait
+  encore les coups de batterie relevés dans le mixage, par groupes de deux ou
+  trois, même quand le fichier MIDI décidait du reste : un coup de grosse caisse
+  ajoutait 42 % de lumière au clavier — plus qu'une vraie note du fichier
+  (+15 %). En mode batterie, c'était pire sur la MPC, le SP-404 et le
+  Digitakt : un coup du son éclairait les pads de +40 %, une note du fichier de
+  +2 à +4 % seulement. Désormais le fichier décide seul, contour compris : un
+  coup du son n'y ajoute rien, une note du fichier +17 à +28 %.
+- **Le lecteur perdait des notes.** Une note rejouée avant d'avoir été relâchée
+  (legato, pédale) effaçait la précédente ; la même hauteur sur deux canaux
+  d'une même piste aussi ; une note sans son octet de statut juste après un
+  méta faisait dérailler la suite de la piste ; une note de durée nulle — la
+  façon ordinaire d'écrire un coup — restait allumée une seconde. Chaque
+  attaque du fichier donne maintenant une note.
+- **Les notes répétées se fondaient en une seule lueur.** Des doubles-croches
+  sur la même touche ne la laissaient retomber que de 17 à 29 % entre deux
+  attaques : à l'œil, une note tenue. La touche s'éteint maintenant le temps
+  d'une image avant chaque note rejouée, comme une vraie touche qui remonte
+  avant d'être enfoncée de nouveau (`CREUX_FOND`). Le creux couvre toujours
+  une image entière, où qu'elle tombe — à cadence réduite aussi.
+- **Les notes douces disparaissaient.** L'éclat suivait la vélocité en
+  proportion directe : une note à 20 sur 127 n'allumait sa touche qu'au
+  cinquième. La nuance reste, avec un plancher (`VELOCITE_PLANCHER`, 0,45).
+
 #### Le vérificateur du suivi des notes
 
 ```
 python3 tools/verifier_midi.py out/studio/melodies/melodie.mid
 ```
 
-Le suivi passe par quatre étapes qui peuvent chacune se tromper sans que rien
-ne plante : l'ordre des touches, le repli par octaves, la dérive, la tenue.
-Une erreur donne une vidéo où les touches s'allument — simplement pas les
-bonnes, ce qu'on ne voit qu'en connaissant la mélodie par cœur.
+Le suivi passe par des étapes qui peuvent chacune se tromper sans que rien
+ne plante : la lecture du fichier, l'ordre des touches, le repli par octaves,
+la dérive, la tenue, ce qui décide de l'éclat. Une erreur donne une vidéo où
+les touches s'allument — simplement pas les bonnes, ou pas toutes, ce qu'on ne
+voit qu'en connaissant la mélodie par cœur.
 
 Le vérificateur appelle le vrai code du moteur sur des fichiers dont on connaît
 la réponse (chaque demi-ton du clavier, un accord, des notes hors clavier, un
-décalage, une dérive, une note tenue, un kit de batterie), puis repasse les
-fichiers donnés, note par note. Sur le fichier d'essai : **170 notes, toutes
-justes**.
+décalage, une dérive, une note tenue, un kit de batterie, une note rejouée,
+une note douce, un fichier truffé des pièges d'écriture ci-dessus), puis
+**rend de vraies images** avec un son muet où ne tombent que trois coups, sur
+chaque machine : un coup du son ne doit rien allumer de ce que le fichier
+décide, une note du fichier doit se voir. Il repasse enfin les fichiers
+donnés, note par note, et dit ce qu'ils contiennent :
 
-Pour s'assurer qu'il n'est pas complaisant, quatre erreurs ont été introduites
-exprès dans le moteur — un repli d'octave faux d'un demi-ton, une dérive
-étirée depuis zéro, une batterie répartie sur les seules notes du moment, une
-tenue oubliée. Il les attrape toutes les quatre.
+```
+melodie.mid : 170 notes, toutes justes
+    piste 1 : 170 notes, canal 1
+```
+
+Pour s'assurer qu'il n'est pas complaisant, on l'a lancé sur le moteur
+d'avant ces corrections : il y trouve **20 défauts** — cinq notes perdues et
+trois autres apparues à leur place, la note rejouée (sur trois images), la
+note douce, et huit mesures d'image. Quatre erreurs introduites exprès auparavant — un repli
+d'octave faux d'un demi-ton, une dérive étirée depuis zéro, une batterie
+répartie sur les seules notes du moment, une tenue oubliée — sont attrapées
+elles aussi.
 
 #### Les notes tenues relâchent au bout de 1,2 s
 
@@ -741,7 +801,8 @@ python3 tools/mpc_performance.py morceau.mp3 --machine minifreak \
   --midi melodie.mid --midi-force 1.2
 ```
 
-Avec `--machine mpc` ou `--machine digitakt`, `--midi` est sans effet.
+Avec `--machine mpc`, `sp404` ou `digitakt`, `--midi` est sans effet en mode
+mélodie ; en mode batterie (`--midi-type batterie`), il y allume les pads.
 
 ### Couleur
 

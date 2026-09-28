@@ -54,9 +54,10 @@ def _pistes(data):
 
 
 def _evenements(bloc):
-    """Les evenements d'une piste, en tics absolus.
+    """Les evenements d'une piste, en tics absolus, dans l'ordre du fichier.
 
-    Rend (tic, genre, a, b) ou genre vaut "on", "off" ou "tempo".
+    Rend (tic, genre, a, b, canal) ou genre vaut "on", "off", "tempo" ou
+    "nom" — ce dernier portant le nom de la piste dans `a`.
     """
     out = []
     i, tic, statut = 0, 0, 0
@@ -66,26 +67,33 @@ def _evenements(bloc):
         if i >= len(bloc):
             break
         o = bloc[i]
+        # ---- meta et systeme exclusif. Ils ne deviennent pas le statut
+        # courant : un fichier qui enchaine une note sans son octet de statut
+        # juste apres un meta — c'est hors norme, mais il en circule — aurait
+        # sinon vu cette note lue comme un meta, et le reste de la piste avec.
+        if o == 0xFF:
+            if i + 2 > len(bloc):
+                break
+            genre = bloc[i + 1]
+            lg, i = _lire_varlen(bloc, i + 2)
+            corps = bloc[i:i + lg]
+            i += lg
+            if genre == 0x51 and lg == 3:      # tempo : microsecondes / noire
+                us = (corps[0] << 16) | (corps[1] << 8) | corps[2]
+                out.append((tic, "tempo", us, 0, 0))
+            elif genre == 0x03:                # nom de la piste
+                out.append((tic, "nom",
+                            bytes(corps).decode("latin-1").strip(), 0, 0))
+            continue
+        if o in (0xF0, 0xF7):
+            lg, i = _lire_varlen(bloc, i + 1)
+            i += lg
+            continue
         if o & 0x80:
             statut = o
             i += 1
         elif not statut:
             raise MidiIllisible("evenement sans statut")
-        # ---- meta et systeme exclusif
-        if statut == 0xFF:
-            genre = bloc[i]
-            i += 1
-            lg, i = _lire_varlen(bloc, i)
-            corps = bloc[i:i + lg]
-            i += lg
-            if genre == 0x51 and lg == 3:      # tempo : microsecondes / noire
-                out.append((tic, "tempo",
-                            (corps[0] << 16) | (corps[1] << 8) | corps[2], 0))
-            continue
-        if statut in (0xF0, 0xF7):
-            lg, i = _lire_varlen(bloc, i)
-            i += lg
-            continue
         # ---- voix
         haut = statut & 0xF0
         n = 1 if haut in (0xC0, 0xD0) else 2
@@ -95,9 +103,9 @@ def _evenements(bloc):
         b = bloc[i + 1] if n == 2 else 0
         i += n
         if haut == 0x90 and b > 0:
-            out.append((tic, "on", a, b))
+            out.append((tic, "on", a, b, statut & 0x0F))
         elif haut == 0x80 or (haut == 0x90 and b == 0):
-            out.append((tic, "off", a, 0))
+            out.append((tic, "off", a, 0, statut & 0x0F))
     return out
 
 
@@ -119,14 +127,17 @@ def lire_notes(chemin, pistes=None):
     tous = []
     for k, bloc in enumerate(blocs):
         garde = pistes is None or k in pistes
-        for tic, genre, a, b in _evenements(bloc):
+        for j, (tic, genre, a, b, canal) in enumerate(_evenements(bloc)):
+            if genre == "nom":
+                continue
             # les tempos comptent quelle que soit la piste : ils sont ecrits
             # sur la premiere et valent pour toutes
             if genre == "tempo" or garde:
-                tous.append((tic, genre, a, b, k))
-    # « off » avant « on » a tic egal : une note repetee se ferme puis rouvre
-    tous.sort(key=lambda e: (e[0], 0 if e[1] == "tempo" else
-                             (1 if e[1] == "off" else 2)))
+                tous.append((tic, k, j, genre, a, b, canal))
+    # Par instant, puis dans l'ordre du fichier. Trier « off » avant « on » a
+    # tic egal, comme on le faisait, fermait une note de duree nulle avant de
+    # l'ouvrir : elle restait alors ouverte, et durait une seconde.
+    tous.sort(key=lambda e: e[:3])
 
     # ---- tics vers secondes
     if division & 0x8000:
@@ -139,9 +150,15 @@ def lire_notes(chemin, pistes=None):
         carte = par_noire
         par_tic = None
 
+    # Les notes ouvertes, par piste, canal et hauteur : la plus ancienne en
+    # tete, et c'est elle qu'un « off » ferme. Une seule place par hauteur,
+    # comme auparavant, perdait des notes sans rien dire : une note rejouee
+    # avant d'avoir ete relachee — un legato, une pedale, deux canaux sur la
+    # meme hauteur dans un fichier a une piste — effacait la precedente, dont
+    # l'attaque disparaissait du clavier.
     notes, ouvertes = [], {}
     sec, tic_prec, us_noire = 0.0, 0, 500000.0     # 120 a la noire par defaut
-    for tic, genre, a, b, k in tous:
+    for tic, k, _j, genre, a, b, canal in tous:
         if par_tic is not None:
             sec = tic * par_tic
         else:
@@ -150,18 +167,79 @@ def lire_notes(chemin, pistes=None):
         if genre == "tempo":
             us_noire = float(a) or 500000.0
             continue
-        cle = (k, a)
+        cle = (k, canal, a)
         if genre == "on":
-            ouvertes[cle] = (sec, b / 127.0)
-        else:
-            deb = ouvertes.pop(cle, None)
-            if deb is not None and sec > deb[0]:
-                notes.append((deb[0], sec, int(a), float(deb[1])))
+            ouvertes.setdefault(cle, []).append((sec, b / 127.0))
+            continue
+        file_ = ouvertes.get(cle)
+        if not file_:
+            continue                   # un « off » sans note : on l'ignore
+        deb, v = file_.pop(0)
+        if not file_:
+            del ouvertes[cle]
+        # une note de duree nulle est gardee : c'est souvent ainsi qu'un
+        # logiciel ecrit un coup de batterie, et elle doit allumer son pad
+        notes.append((deb, sec, int(a), float(v)))
     # une note laissee ouverte par un fichier mal ferme dure une seconde
-    for (k, a), (deb, v) in ouvertes.items():
-        notes.append((deb, deb + 1.0, int(a), float(v)))
+    for (k, canal, a), file_ in ouvertes.items():
+        for deb, v in file_:
+            notes.append((deb, deb + 1.0, int(a), float(v)))
     notes.sort()
     return notes
+
+
+# General MIDI : le canal 10 est toujours celui de la batterie
+CANAL_BATTERIE = 10
+
+
+def inventaire(chemin):
+    """Ce que contient le fichier, piste par piste : d'ou viennent les notes.
+
+    Toutes les notes du fichier allument le clavier, de toutes les pistes et
+    de tous les canaux. Un export qui a emporte la batterie avec la melodie
+    allume donc des touches que l'on n'attendait pas, et rien a l'image ne dit
+    pourquoi : cet inventaire le dit.
+
+    Rend une entree par piste qui porte des notes : {"piste", "nom",
+    "canaux": {canal: attaques}, "notes"}. Pistes et canaux sont numerotes
+    comme les logiciels les affichent, a partir de 1.
+    """
+    with open(chemin, "rb") as f:
+        data = f.read()
+    _fmt, _div, blocs = _pistes(data)
+    out = []
+    for k, bloc in enumerate(blocs):
+        nom, canaux = "", {}
+        for _tic, genre, a, _b, canal in _evenements(bloc):
+            if genre == "nom" and not nom:
+                nom = a
+            elif genre == "on":
+                canaux[canal + 1] = canaux.get(canal + 1, 0) + 1
+        if canaux:
+            out.append({"piste": k + 1, "nom": nom, "canaux": canaux,
+                        "notes": sum(canaux.values())})
+    return out
+
+
+def decrire(inv):
+    """L'inventaire en une ligne : piste 2 « Lead » : 170 notes, canal 1."""
+    parts = []
+    for p in inv:
+        canaux = ", ".join(
+            "canal %d%s" % (c, " (batterie)" if c == CANAL_BATTERIE else "")
+            for c in sorted(p["canaux"]))
+        nom = " « %s »" % p["nom"] if p["nom"] else ""
+        parts.append("piste %d%s : %d notes, %s"
+                     % (p["piste"], nom, p["notes"], canaux))
+    return " · ".join(parts)
+
+
+def melange(inv):
+    """La batterie et autre chose dans le meme fichier : tout s'allumera."""
+    canaux = set()
+    for p in inv:
+        canaux |= set(p["canaux"])
+    return CANAL_BATTERIE in canaux and len(canaux) > 1
 
 
 def resume(notes):

@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-27.1"
+VERSION = "2026-09-28.1"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1504,6 +1504,22 @@ TRAIT_SERRE = 0.030
 # relache, meme si le son continue.
 TENUE_MAX = 1.2
 
+# L'eclat d'une note ne descend pas sous cette part de celui d'une note jouee
+# a fond, si doucement qu'elle soit jouee. Proportionnel a la velocite, comme
+# il l'etait, une note a 20 sur 127 n'allumait sa touche qu'au cinquieme d'une
+# note ordinaire : mesure a l'image, elle ne se distinguait plus du clavier
+# eteint. La nuance reste, sans qu'aucune note ne disparaisse.
+VELOCITE_PLANCHER = 0.45
+
+# Avant chaque note rejouee sur une touche encore allumee, la touche s'eteint
+# le temps d'une image — comme une vraie touche, qui doit remonter avant
+# d'etre enfoncee de nouveau. Sans ce creux, des doubles-croches sur la meme
+# note ne faisaient qu'une lueur continue : mesure a l'image, la touche ne
+# retombait que de 17 a 29 % entre deux attaques, et la plupart des notes
+# semblaient ne pas avoir ete jouees ; avec le creux, elle retombe de 89 a
+# 94 %. CREUX_FOND est ce qu'il reste de la lumiere au fond du creux.
+CREUX_FOND = 0.10
+
 
 def _grille(r, m=0.009):
     """Un rectangle rempli d'une nappe de points serree."""
@@ -1689,12 +1705,15 @@ def build_minifreak(step=STEP):
     add(Path([(MF_BODY[0] + 0.030, MF_CLAV[3] + 0.014),
               (MF_BODY[2] - 0.030, MF_CLAV[3] + 0.014)], tag="body", step=step))
 
-    # les 37 touches, du grave a l'aigu : une seule suite de pads, etalee sur
-    # tout le clavier pour qu'un coup de grosse caisse ne rallume pas seulement
-    # le bas du meuble. Les contours sont deja fermes.
+    # les 37 touches, du grave a l'aigu. Ce ne sont pas des pads : une touche
+    # ne s'allume que redessinee en entier, contour et remplissage, par la note
+    # qui la joue — ou, sans fichier MIDI, par le coup qui tombe sur l'une des
+    # seize de MF_PADS. Marquees « pad » par groupes de deux ou trois, comme
+    # elles l'etaient, leurs contours s'eclairaient a chaque coup de batterie,
+    # a cote de la touche jouee et meme en pleine melodie. Les contours sont
+    # deja fermes.
     for rang, (_, contour, _, _) in enumerate(MF_CLAVIER):
-        add(Path(contour, tag="pad%d" % ((rang * 16) // len(MF_CLAVIER)),
-                 step=step))
+        add(Path(contour, tag="touche%d" % rang, step=step))
 
     # la dalle
     add(Path(rrect_pts(*MF_ECRAN, r=0.020), closed=True, tag="lcd", step=step))
@@ -2130,7 +2149,7 @@ NOMS_MACHINES = tuple(MACHINES)
 FAMILLES_ORGANES = (
     ("corps", ("body",)),
     ("ecran", ("lcd",)),
-    ("pad", ("pad", "step")),
+    ("pad", ("pad", "step", "touche")),
     ("potard", ("qlink", "wheel", "vol")),
     ("bande", ("strip", "stripbtn")),
     ("bouton", ("btn", "btnx")),
@@ -3231,7 +3250,10 @@ class Renderer:
 
         Une note tient tant qu'elle est tenue, puis retombe en un cinquieme de
         seconde ; l'attaque est plus vive que la tenue, sans quoi une note
-        longue et une note repetee se ressemblent.
+        longue et une note repetee se ressemblent. Rejouee alors que sa touche
+        est encore allumee, elle l'eteint d'abord le temps d'une image (voir
+        CREUX_FOND). Si douce qu'elle soit, elle garde au moins
+        VELOCITE_PLANCHER de l'eclat d'une note jouee a fond.
 
         Rend None quand rien ne sonne.
         """
@@ -3261,9 +3283,30 @@ class Renderer:
         vus = (mt >= deb) & (mt < fin + 0.30)
         if not np.any(vus):
             return None
+        # les attaques imminentes, pour le creux qui les precede ; relevees
+        # avant de ne garder que les notes visibles. Le creux dure un peu plus
+        # qu'une image — de celles qu'on voit : a cadence reduite, une image
+        # est tenue deux ou trois fois.
+        plein = max(0.036, 1.1 * max(1, int(self.cadence))
+                    / float(self.fps or 30))
+        pres = (deb > mt) & (deb <= mt + plein * 1.7)
+        a_venir = {}
+        for h, d in zip(haut[pres], deb[pres]):
+            a_venir[h] = min(a_venir.get(h, d), d)
         deb, fin, haut, force = deb[vus], fin[vus], haut[vus], force[vus]
-        v = force * (0.60 + 0.55 * np.exp(-(mt - deb) * 11.0))
+        v = ((VELOCITE_PLANCHER + (1.0 - VELOCITE_PLANCHER) * force)
+             * (0.60 + 0.55 * np.exp(-(mt - deb) * 11.0)))
         v = np.where(mt < fin, v, v * np.exp(-(mt - fin) * 9.0))
+        # Le creux. Il couvre au moins une image entiere avant l'attaque, quel
+        # que soit l'endroit ou elle tombe entre deux images : c'est l'image
+        # d'avant qui doit etre sombre, et elle peut preceder l'attaque d'une
+        # periode presque entiere. Il ne touche que la meme hauteur : une
+        # autre note qui commence ailleurs ne doit rien eteindre.
+        for h, d in a_venir.items():
+            m = (haut == h) & (deb < d)
+            if np.any(m):
+                u = np.clip((d - mt - plein) / (0.7 * plein), 0.0, 1.0)
+                v[m] *= CREUX_FOND + (1.0 - CREUX_FOND) * u
         v *= self.midi_force
         return haut, v
 
@@ -4215,7 +4258,29 @@ class Renderer:
         self.poser_machine(t)
         tl = self.tl
         live = t >= tl.start("groove") - 0.05
-        flashes = self.pad_flashes(t) if live else {}
+        mach = self.mach
+        # Ce qui allume les pads, decide une fois pour tout le dessin : leur
+        # contour plus bas, leur remplissage ensuite. Le contour suivait
+        # auparavant les coups releves dans le son meme quand le fichier MIDI
+        # decidait du reste — sur le clavier, des touches s'eclairaient a
+        # chaque coup de grosse caisse, jusqu'a 40 % de l'eclat d'une vraie
+        # note, alors qu'aucune note du fichier ne les jouait.
+        #
+        # Sur une machine melodique — celle qui declare des touches — elles
+        # appartiennent a la melodie des qu'il y en a une : seize coups de
+        # batterie repartis sur trente-sept touches allumaient la moitie du
+        # clavier, et la note jouee se perdait au milieu.
+        melodique = mach.get("touches") is not None
+        batterie = self.midi is not None and self.midi_type == "batterie"
+        if batterie:
+            # Le fichier remplace les coups detectes dans le son, sur toutes
+            # les machines : il dit exactement quel instrument joue, la ou
+            # l'analyse du mixage ne fait que le deviner.
+            flashes = self.notes_batterie(t, len(mach["pads"]))
+        elif melodique and self.midi is not None:
+            flashes = {}
+        else:
+            flashes = self.pad_flashes(t) if live else {}
         e_low = self.env_at(self.e_low, t) if live else 0.0
         e_high = self.env_at(self.e_high, t) if live else 0.0
         e_full = self.env_at(self.e_full, t) if live else 0.0
@@ -4276,21 +4341,6 @@ class Renderer:
         # ---- organes animes
         if melt >= 0.99:
             return
-
-        mach = self.mach
-        # Sur une machine melodique — celle qui declare des touches — elles
-        # appartiennent a la melodie des qu'il y en a une : seize coups de
-        # batterie repartis sur trente-sept touches allumaient la moitie du
-        # clavier, et la note jouee se perdait au milieu.
-        melodique = mach.get("touches") is not None
-        batterie = self.midi is not None and self.midi_type == "batterie"
-        if batterie:
-            # Le fichier remplace les coups detectes dans le son, sur toutes
-            # les machines : il dit exactement quel instrument joue, la ou
-            # l'analyse du mixage ne fait que le deviner.
-            flashes = self.notes_batterie(t, len(mach["pads"]))
-        elif melodique and self.midi is not None:
-            flashes = {}
 
         # pads allumes : remplissage
         for k, v in flashes.items():

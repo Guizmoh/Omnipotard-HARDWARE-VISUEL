@@ -1104,6 +1104,11 @@ class Handler(BaseHTTPRequestHandler):
                 rep = dict(midi.resume(notes), name=name)
                 rep["grave"] = midi.nom_note(rep["grave"])
                 rep["aigu"] = midi.nom_note(rep["aigu"])
+                # d'ou viennent les notes : ce sont elles, et elles seules, qui
+                # allument le clavier — la page doit pouvoir le montrer
+                inv = midi.inventaire(path)
+                rep["pistes"] = midi.decrire(inv)
+                rep["melange"] = midi.melange(inv)
                 # On ne cherche plus de calage a l'envoi : il se trompe a tous
                 # les coups sur une melodie (voir midi.caler). On rend l'instant
                 # de la premiere note, qui se verifie a l'oreille.
@@ -1304,6 +1309,7 @@ function midiOte() {
   MIDI_DEBUT = null;
   midiAvis();
   $('#midimeta').hidden = true;
+  if ($('#mi-p')) $('#mi-p').textContent = '';
   $('#midiReglages').hidden = true;
   $('#midiDrop').innerHTML = '<b>Deposer un fichier MIDI</b>.mid, .midi<br>'
     + 'ou cliquer pour choisir';
@@ -1316,6 +1322,15 @@ async function sendMidi(f) {
     $('#mi-n').textContent = j.notes;
     $('#mi-e').textContent = j.grave + ' \u2192 ' + j.aigu;
     $('#mi-c').textContent = instant(j.debut);
+    // d'ou viennent les notes, piste par piste : ce sont elles seules qui
+    // allument le clavier
+    const origine = $('#mi-p');
+    if (origine) {
+      origine.textContent = j.pistes ? 'dans le fichier : ' + j.pistes : '';
+      if (j.melange) origine.textContent += ' — attention : la batterie'
+        + ' (canal 10) et les autres notes s\'allument ensemble. Pour un rendu'
+        + ' net, exportez la melodie seule.';
+    }
     // la v2 partage ce code mais n'a pas le rappel de calage : on ne l'appelle
     // que si la page en question le porte
     MIDI_DEBUT = +j.debut || 0;
