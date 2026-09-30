@@ -250,8 +250,16 @@ PAGE = r"""<!doctype html>
 <style>
   :root{
     --fond:#06080a; --carte:#0d1115; --carte2:#11161b; --ligne:#1b242c;
-    --ligne2:#27333c; --ink:#dfe9e4; --dim:#839690;
-    --faible:#5f7069; --acc:#3dff72; --acc-mat:#1f8f45; --mal:#ff6b5e;
+    --ligne2:#27333c; --ink:#ece5de; --dim:#9d8f85; --faible:#776a60;
+    /* L'accent est orange : la teinte de la palette « orange » du moteur, a
+       peine eclaircie pour que les petits caracteres se lisent. Tout ce qui
+       le reprend passe par ces variables, halos compris (--acc-rgb) : le
+       changer se fait ici et nulle part ailleurs. Les gris du texte tirent
+       vers le chaud : verdatres, comme ils l'etaient sous l'accent vert, ils
+       salissaient l'orange. L'erreur vire au rouge franc, pour ne pas se
+       confondre avec lui. */
+    --acc:#ff7a1f; --acc-rgb:255,122,31; --acc-clair:#ff9a4d;
+    --acc-mat:#c85f16; --sur-acc:#170900; --lueur:#1c1008; --mal:#ff5470;
     /* Deux polices, et deux usages. Le texte se lit en caracteres
        proportionnels — c'est ce pour quoi ils sont faits ; les nombres
        gardent la chasse fixe, sans quoi une valeur qui passe de 1 a 0,85
@@ -268,7 +276,7 @@ PAGE = r"""<!doctype html>
   html{-webkit-text-size-adjust:100%}
   body{margin:0;background:var(--fond);color:var(--ink);font-family:var(--texte);
     font-size:13.5px;line-height:1.6;-webkit-font-smoothing:antialiased;
-    background-image:radial-gradient(1200px 600px at 70% -10%,#0b1a13 0%,transparent 70%)}
+    background-image:radial-gradient(1200px 600px at 70% -10%,var(--lueur) 0%,transparent 70%)}
 
   /* ---------- en-tete ---------- */
   header{position:sticky;top:0;z-index:20;display:flex;align-items:center;
@@ -329,13 +337,13 @@ PAGE = r"""<!doctype html>
   input[type=range]::-moz-range-progress{height:4px;border-radius:2px;background:var(--acc)}
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
     width:14px;height:14px;border-radius:50%;background:var(--acc);
-    margin-top:-5px;border:0;box-shadow:0 0 0 3px rgba(61,255,114,.14);
+    margin-top:-5px;border:0;box-shadow:0 0 0 3px rgba(var(--acc-rgb),.14);
     transition:box-shadow .12s}
   input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;
-    background:var(--acc);border:0;box-shadow:0 0 0 3px rgba(61,255,114,.14)}
-  input[type=range]:hover::-webkit-slider-thumb{box-shadow:0 0 0 5px rgba(61,255,114,.22)}
+    background:var(--acc);border:0;box-shadow:0 0 0 3px rgba(var(--acc-rgb),.14)}
+  input[type=range]:hover::-webkit-slider-thumb{box-shadow:0 0 0 5px rgba(var(--acc-rgb),.22)}
   input[type=range]:focus{outline:none}
-  input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 5px rgba(61,255,114,.35)}
+  input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 5px rgba(var(--acc-rgb),.35)}
 
   /* ---------- listes, champs, boutons ---------- */
   select,input[type=text],input[type=number],input[type=color]{
@@ -354,10 +362,10 @@ PAGE = r"""<!doctype html>
     border-radius:7px;padding:9px 14px;font:inherit;font-size:13px;
     cursor:pointer;transition:border-color .12s,color .12s,background .12s}
   button:hover:not(:disabled){border-color:var(--acc);color:var(--acc)}
-  button.fort{background:var(--acc);color:#04120a;border-color:var(--acc);
+  button.fort{background:var(--acc);color:var(--sur-acc);border-color:var(--acc);
     font-weight:700;letter-spacing:.1em;text-transform:uppercase;font-size:12.5px;
     padding:12px 14px}
-  button.fort:hover:not(:disabled){background:#63ff8d;color:#04120a}
+  button.fort:hover:not(:disabled){background:var(--acc-clair);color:var(--sur-acc)}
   button:disabled{opacity:.38;cursor:default}
   .rang{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   .rang > *{flex:1 1 130px}
@@ -368,13 +376,13 @@ PAGE = r"""<!doctype html>
   .onglets button{padding:7px 14px;font-size:12.5px;border-radius:999px;
     color:var(--dim)}
   .onglets button.on{border-color:var(--acc);color:var(--acc);
-    background:rgba(61,255,114,.08)}
+    background:rgba(var(--acc-rgb),.08)}
   .niveaux{display:flex;border:1px solid var(--ligne2);border-radius:999px;
     overflow:hidden}
   .niveaux button{border:0;border-radius:0;padding:6px 14px;font-size:12.5px;
     color:var(--dim)}
   .niveaux button:hover:not(.on){color:var(--ink);background:#141b21}
-  .niveaux button.on{background:var(--acc);color:#04120a;font-weight:700}
+  .niveaux button.on{background:var(--acc);color:var(--sur-acc);font-weight:700}
   .cache{display:none}
 
   .avis{color:var(--mal)}
@@ -403,7 +411,7 @@ PAGE = r"""<!doctype html>
     text-align:center;color:var(--faible);cursor:pointer;font-size:12.5px;
     transition:border-color .12s,color .12s,background .12s}
   .drop:hover{border-color:#3c4d57;color:var(--dim)}
-  .drop.sur{border-color:var(--acc);color:var(--acc);background:rgba(61,255,114,.06)}
+  .drop.sur{border-color:var(--acc);color:var(--acc);background:rgba(var(--acc-rgb),.06)}
   .drop b{display:block;color:var(--ink);font-size:13.5px;margin-bottom:3px;
     font-weight:600}
 
@@ -411,7 +419,7 @@ PAGE = r"""<!doctype html>
   #vue{position:sticky;top:64px}
   .ecran{position:relative;border-radius:10px;overflow:hidden;
     border:1px solid var(--ligne);background:#000;
-    box-shadow:0 0 0 1px rgba(61,255,114,.05),0 18px 50px -24px rgba(0,0,0,.9)}
+    box-shadow:0 0 0 1px rgba(var(--acc-rgb),.05),0 18px 50px -24px rgba(0,0,0,.9)}
   #image,#clip{width:100%;display:block;background:#000;aspect-ratio:16/9;
     object-fit:contain;transition:opacity .15s}
   #image[hidden],#clip[hidden]{display:none}
@@ -424,10 +432,10 @@ PAGE = r"""<!doctype html>
   .note{font-size:11.5px;color:var(--faible);margin:6px 0 0;min-height:1em;
     font-family:var(--mono)}
   a.dl[hidden]{display:none}
-  a.dl{display:inline-block;margin-top:10px;background:var(--acc);color:#04120a;
+  a.dl{display:inline-block;margin-top:10px;background:var(--acc);color:var(--sur-acc);
     padding:10px 14px;border-radius:7px;text-decoration:none;font-weight:700;
     letter-spacing:.1em;text-transform:uppercase;font-size:12.5px}
-  a.dl:hover{background:#63ff8d}
+  a.dl:hover{background:var(--acc-clair)}
   /* ---------- calage de la melodie ---------- */
   .calage{margin:2px 0 12px}
   .calage .exact{display:flex;align-items:center;gap:8px;margin-top:2px}
@@ -524,7 +532,7 @@ PAGE = r"""<!doctype html>
     <label for="scrub">instant du morceau</label>
     <span class="val" id="v-scrub">0.0 s</span>
   </div>
-  <input type="range" id="scrub" min="0" max="100" step="0.1" value="0" disabled>
+  <input type="range" id="scrub" min="0" max="100" step="0.1" value="0" style="--p:0%" disabled>
   <div class="rang" style="margin-top:10px">
     <button id="versDrop">prochain paroxysme</button>
     <button id="versSplit">prochain dedoublement</button>

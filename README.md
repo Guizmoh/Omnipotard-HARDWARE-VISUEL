@@ -535,6 +535,12 @@ Le rendu se lance depuis la même page, en 1080p, 4K, 720p, carré ou vertical,
 avec une barre de progression et un bouton de téléchargement. Tout ce que le studio fabrique (morceaux déposés et
 vidéos) reste dans `out/studio/`.
 
+La page est **orange** — curseurs, valeurs, boutons, onglets. C'est la
+couleur de l'outil, pas celle des vidéos : le trait de la machine se règle à
+part, dans l'onglet *Couleurs* (vert par défaut, orange, bleu ou une couleur
+libre). L'orange de la page est celui de la palette *orange* du moteur ; il se
+change en tête du style de `tools/studio_v2.py`, en deux lignes.
+
 Rien ne sort de la machine : le serveur n'écoute que sur `127.0.0.1`, il n'y a
 ni bibliothèque web ni CDN — la page est servie telle quelle, et les seules
 dépendances sont celles du reste du projet (numpy et ffmpeg).

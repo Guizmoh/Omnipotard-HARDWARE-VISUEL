@@ -1354,8 +1354,10 @@ PAGE = r"""<!doctype html>
 <title>Studio Omnipotard</title>
 <style>
   :root{
-    --bg:#07090b; --panel:#0e1216; --line:#1d262e; --ink:#d6e2dc;
-    --dim:#7d8c88; --acc:#3dff72; --bad:#ff6b5e;
+    --bg:#07090b; --panel:#0e1216; --line:#1d262e; --ink:#e5ded7;
+    --dim:#948880; --bad:#ff5470;
+    /* l'accent orange de la v2, et ce qui va avec : voir tools/studio_v2.py */
+    --acc:#ff7a1f; --sur-acc:#170900;
     /* Le texte se lit en caracteres proportionnels, les nombres gardent la
        chasse fixe. Rien n'est telecharge : le studio tourne sans reseau. */
     --texte:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",
@@ -1387,9 +1389,9 @@ PAGE = r"""<!doctype html>
     border:1px solid var(--line);border-radius:5px;padding:6px 8px;width:100%}
   input[type=color]{padding:2px;height:32px;cursor:pointer}
   input[type=range]{padding:0;background:none;border:none;accent-color:var(--acc)}
-  button{background:var(--acc);color:#04180c;border:none;font-weight:700;
+  button{background:var(--acc);color:var(--sur-acc);border:none;font-weight:700;
     cursor:pointer;letter-spacing:.1em;text-transform:uppercase;padding:10px}
-  button:disabled{background:#24302a;color:var(--dim);cursor:default}
+  button:disabled{background:#312821;color:var(--dim);cursor:default}
   button.ghost{background:#141a20;color:var(--ink);font-weight:400;
     border:1px solid var(--line);letter-spacing:0;text-transform:none}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -1399,7 +1401,7 @@ PAGE = r"""<!doctype html>
   .drop b{color:var(--acc);display:block;margin-bottom:4px;letter-spacing:.08em}
   #shot.calcul{opacity:.35;transition:opacity .2s}
   select.inst{margin:2px 0 4px;font-size:11px;color:var(--dim)}
-  .aide{font-size:11px;line-height:1.5;color:#7c8f88;margin:2px 0 12px}
+  .aide{font-size:11px;line-height:1.5;color:#958981;margin:2px 0 12px}
   /* le style en ligne aurait ecrase l'attribut « hidden », qui ne passe que
      par la feuille de style du navigateur */
   #clip{width:100%;display:block;border-radius:6px;background:#000}
@@ -1436,7 +1438,7 @@ PAGE = r"""<!doctype html>
   .seq .unite{color:var(--dim);font-size:11px;letter-spacing:.06em}
   /* « hidden » ne coupe rien des qu'une autre regle donne un display */
   #midimeta[hidden], #midiReglages[hidden], #midiAvis[hidden]{display:none}
-  a.dl{display:block;text-align:center;background:var(--acc);color:#04180c;
+  a.dl{display:block;text-align:center;background:var(--acc);color:var(--sur-acc);
     padding:10px;border-radius:5px;text-decoration:none;font-weight:700;
     letter-spacing:.1em;text-transform:uppercase}
   /* la fenetre des styles, ouverte a la fin d'un rendu */
