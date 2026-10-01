@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-09-28.1"
+VERSION = "2026-10-01.1"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -317,11 +317,20 @@ AIDE = {
                 "la hauteur designe un instrument : chacun prend un pad, du "
                 "plus grave au plus aigu, et cela sur n'importe quelle machine "
                 "— le fichier remplace alors les coups devines dans le son.",
-    "midiTempo": "Corrige la derive, quand la melodie est calee au debut du "
-                 "plan et fausse a la fin : la grille du fichier n'a alors pas "
-                 "tout a fait le tempo du morceau. L'etirement part de la "
-                 "premiere note, donc le calage deja trouve ne bouge pas. "
-                 "Positif = la melodie retarde, negatif = elle avance.",
+    "midiTempo": "Corrige la derive d'un fichier lu tel quel, quand la "
+                 "melodie est calee au debut du plan et fausse a la fin. "
+                 "Inutile sinon : posee sur la grille du morceau, la melodie "
+                 "en a deja le tempo exact. Positif = la melodie retarde, "
+                 "negatif = elle avance.",
+    "midiBpm": "Le tempo du morceau. Le studio le propose — mesure sur la "
+               "batterie — et on le corrige s'il se trompe, par exemple s'il "
+               "annonce la moitie du vrai tempo. Les notes du fichier sont "
+               "posees sur la grille du morceau, mesuree au millieme autour "
+               "de ce tempo : elles ne derivent plus, quel que soit le tempo "
+               "que le fichier annonce, ou s'il n'en annonce aucun.",
+    "midiTelQuel": "Lit le fichier en secondes, comme avant, sans le poser "
+                   "sur la grille du morceau. A ne cocher que si la grille se "
+                   "trompe — un morceau sans batterie, par exemple.",
     "preset": "Repose tous les curseurs sur un point de depart. Tout reste "
               "modifiable ensuite. « Mes reglages » sont les votres, gardes "
               "d'une fois sur l'autre.",
@@ -3259,7 +3268,13 @@ class Renderer:
         """
         if self.midi is None or not len(self.midi) or self.midi_force <= 0.001:
             return None
-        mt = t + self.midi_offset
+        # Une note s'allume sur l'image la plus proche de son attaque, et non
+        # sur la suivante. Mesure de bout en bout dans la video finale, la
+        # touche s'allumait de 0 a 33 ms apres le son (16 en moyenne) : un son
+        # en avance sur l'image se remarque des 45 ms, et le retard s'ajoutait
+        # a tout le reste. Avance d'une demi-image, l'ecart tombe dans +-17 ms.
+        image = max(1, int(self.cadence)) / float(self.fps or 30)
+        mt = t + self.midi_offset + 0.5 * image
         deb, fin, haut, force = (self.midi[:, 0], self.midi[:, 1],
                                  self.midi[:, 2], self.midi[:, 3])
         # La derive. Un fichier dont la grille n'a pas tout a fait le tempo du

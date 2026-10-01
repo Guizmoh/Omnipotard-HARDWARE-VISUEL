@@ -12,6 +12,7 @@ Les fichiers de format 0 (une piste) et 1 (plusieurs pistes simultanees) sont
 lus ; le format 2 (pistes independantes) est lu comme du format 1, ce qui est
 faux en theorie et sans consequence ici — personne n'en produit.
 """
+import bisect
 import struct
 
 
@@ -109,14 +110,14 @@ def _evenements(bloc):
     return out
 
 
-def lire_notes(chemin, pistes=None):
-    """Les notes d'un fichier MIDI : liste de (debut, fin, hauteur, force).
+def _lire(chemin, pistes=None):
+    """Le fichier en tics : (division, tempos, notes).
 
-    Les instants sont en secondes depuis le debut du fichier, la hauteur est
-    le numero de note MIDI (60 = do du milieu) et la force va de 0 a 1.
-
-    `pistes` limite la lecture a certaines pistes, numerotees a partir de 0 ;
-    None les prend toutes.
+    `tempos` est la carte des tempos, [(tic, microsecondes par noire)] ;
+    `notes` est [(tic de debut, tic de fin, hauteur, force)], la fin valant
+    None pour une note que le fichier oublie de fermer. Les tics sont la
+    seule chose que le fichier dit sans ambiguite : les secondes en
+    dependent de la carte des tempos, les temps de la division.
     """
     with open(chemin, "rb") as f:
         data = f.read()
@@ -139,37 +140,20 @@ def lire_notes(chemin, pistes=None):
     # l'ouvrir : elle restait alors ouverte, et durait une seconde.
     tous.sort(key=lambda e: e[:3])
 
-    # ---- tics vers secondes
-    if division & 0x8000:
-        # division en images par seconde (SMPTE) : le tempo n'entre pas en jeu
-        images = 256 - ((division >> 8) & 0xFF)
-        par_tic = 1.0 / (images * (division & 0xFF))
-        carte = None
-    else:
-        par_noire = division or 480
-        carte = par_noire
-        par_tic = None
-
     # Les notes ouvertes, par piste, canal et hauteur : la plus ancienne en
     # tete, et c'est elle qu'un « off » ferme. Une seule place par hauteur,
     # comme auparavant, perdait des notes sans rien dire : une note rejouee
     # avant d'avoir ete relachee — un legato, une pedale, deux canaux sur la
     # meme hauteur dans un fichier a une piste — effacait la precedente, dont
     # l'attaque disparaissait du clavier.
-    notes, ouvertes = [], {}
-    sec, tic_prec, us_noire = 0.0, 0, 500000.0     # 120 a la noire par defaut
+    notes, ouvertes, tempos = [], {}, []
     for tic, k, _j, genre, a, b, canal in tous:
-        if par_tic is not None:
-            sec = tic * par_tic
-        else:
-            sec += (tic - tic_prec) * (us_noire / 1e6) / carte
-            tic_prec = tic
         if genre == "tempo":
-            us_noire = float(a) or 500000.0
+            tempos.append((tic, float(a) or 500000.0))
             continue
         cle = (k, canal, a)
         if genre == "on":
-            ouvertes.setdefault(cle, []).append((sec, b / 127.0))
+            ouvertes.setdefault(cle, []).append((tic, b / 127.0))
             continue
         file_ = ouvertes.get(cle)
         if not file_:
@@ -179,13 +163,101 @@ def lire_notes(chemin, pistes=None):
             del ouvertes[cle]
         # une note de duree nulle est gardee : c'est souvent ainsi qu'un
         # logiciel ecrit un coup de batterie, et elle doit allumer son pad
-        notes.append((deb, sec, int(a), float(v)))
-    # une note laissee ouverte par un fichier mal ferme dure une seconde
+        notes.append((deb, tic, int(a), float(v)))
     for (k, canal, a), file_ in ouvertes.items():
         for deb, v in file_:
-            notes.append((deb, deb + 1.0, int(a), float(v)))
+            notes.append((deb, None, int(a), float(v)))
+    return division, tempos, notes
+
+
+def _vers_secondes(division, tempos):
+    """La fonction tic -> seconde du fichier, carte des tempos comprise."""
+    if division & 0x8000:
+        # division en images par seconde (SMPTE) : le tempo n'entre pas en jeu
+        images = 256 - ((division >> 8) & 0xFF)
+        par_tic = 1.0 / (images * (division & 0xFF))
+        return lambda tic: tic * par_tic
+    par_noire = division or 480
+    # les segments de la carte : a partir de tel tic, telle seconde, tel tempo
+    segs, sec, tic_prec, us = [], 0.0, 0, 500000.0   # 120 a la noire par defaut
+    for tic, us_noire in tempos:
+        sec += (tic - tic_prec) * (us / 1e6) / par_noire
+        tic_prec, us = tic, us_noire
+        segs.append((tic, sec, us))
+    debuts = [s[0] for s in segs]
+
+    def conv(tic):
+        i = bisect.bisect_right(debuts, tic) - 1
+        if i < 0:
+            return tic * 0.5 / par_noire
+        t0, s0, u = segs[i]
+        return s0 + (tic - t0) * (u / 1e6) / par_noire
+    return conv
+
+
+def lire_notes(chemin, pistes=None):
+    """Les notes d'un fichier MIDI : liste de (debut, fin, hauteur, force).
+
+    Les instants sont en secondes depuis le debut du fichier, la hauteur est
+    le numero de note MIDI (60 = do du milieu) et la force va de 0 a 1.
+
+    `pistes` limite la lecture a certaines pistes, numerotees a partir de 0 ;
+    None les prend toutes.
+    """
+    division, tempos, brutes = _lire(chemin, pistes)
+    sec = _vers_secondes(division, tempos)
+    notes = []
+    for deb, fin, a, v in brutes:
+        d = sec(deb)
+        # une note laissee ouverte par un fichier mal ferme dure une seconde
+        notes.append((d, sec(fin) if fin is not None else d + 1.0, a, v))
     notes.sort()
     return notes
+
+
+def lire_temps(chemin, pistes=None):
+    """Les memes notes, en temps et non en secondes : (debut, fin, hauteur,
+    force), un temps valant une noire.
+
+    C'est ce que le fichier dit de la musique, independamment du tempo qu'il
+    annonce — ou qu'il n'annonce pas : un fichier sans tempo est lu a 120, et
+    une melodie ecrite a 85 y defile alors presque une fois et demie trop vite.
+    Pose ensuite au tempo du morceau, chaque note retombe exactement sur son
+    temps. Rend None pour un fichier date en images (SMPTE), qui n'a pas de
+    temps.
+    """
+    division, tempos, brutes = _lire(chemin, pistes)
+    if division & 0x8000:
+        return None
+    par_noire = float(division or 480)
+    sec = _vers_secondes(division, tempos)
+    notes = []
+    for deb, fin, a, v in brutes:
+        if fin is None:
+            # comme en secondes : une seconde, comptee ici au tempo du fichier
+            d = sec(deb)
+            fin_t = deb
+            while sec(fin_t) < d + 1.0:
+                fin_t += par_noire / 8.0
+            fin = fin_t
+        notes.append((deb / par_noire, fin / par_noire, a, v))
+    notes.sort()
+    return notes
+
+
+def tempo_fichier(chemin):
+    """Ce que le fichier annonce de son tempo : le premier, s'il y en a, et
+    combien de fois il en change."""
+    division, tempos, _ = _lire(chemin)
+    valeurs = [60e6 / us for _tic, us in tempos]
+    distincts = []
+    for b in valeurs:
+        if not distincts or abs(b - distincts[-1]) > 1e-6:
+            distincts.append(b)
+    return {"bpm": valeurs[0] if valeurs else 120.0,
+            "annonce": bool(valeurs),
+            "changements": max(0, len(distincts) - 1),
+            "smpte": bool(division & 0x8000)}
 
 
 # General MIDI : le canal 10 est toujours celui de la batterie
@@ -359,6 +431,43 @@ def transposition(notes, note0=36, touches=37):
     return int(12 * round((cible - median) / 12.0))
 
 
+def _reponse(t, periodes, poids=None):
+    """La reponse d'une suite d'instants a chaque periode de grille :
+    |somme des exp(2i.pi.t/p)|, ponderee si on le demande.
+
+    Par paquets : la matrice entiere ferait deux gigaoctets sur un morceau de
+    quatre minutes, ou l'on compte pres de sept mille attaques.
+    """
+    import numpy as np
+    t = np.asarray(t, dtype=np.float64)
+    w = np.ones(len(t)) if poids is None else np.asarray(poids, dtype=np.float64)
+    g = np.asarray(periodes, dtype=np.float64)
+    out = np.empty(len(g))
+    for i in range(0, len(g), 256):
+        bloc = g[i:i + 256]
+        out[i:i + 256] = np.abs(
+            (w[:, None] * np.exp(2j * np.pi * t[:, None] / bloc[None, :])).sum(axis=0))
+    return out
+
+
+def _sommet(t, autour, largeur, poids=None, pas=1e-6):
+    """La periode de grille la plus nette a +-`largeur` autour de `autour` :
+    (periode, nettete). La nettete compare le sommet a la reponse moyenne.
+
+    En deux temps : un balayage large au centieme de milliseconde, puis un
+    affinage autour du sommet. Balayer tout au millionieme coutait quatre
+    secondes et n'apprenait rien de plus.
+    """
+    import numpy as np
+    g = np.arange(autour * (1.0 - largeur), autour * (1.0 + largeur), 1e-5)
+    s = _reponse(t, g, poids)
+    i = int(s.argmax())
+    net = float(s[i] / (s.mean() or 1e-9))
+    fin = np.arange(g[i] - 2e-5, g[i] + 2e-5, pas)
+    sf = _reponse(t, fin, poids)
+    return float(fin[int(sf.argmax())]), net
+
+
 def deriver(notes, instants, battement, largeur=0.06, pas=1e-6):
     """De combien etirer le fichier pour qu'il tienne le tempo du morceau.
 
@@ -402,30 +511,8 @@ def deriver(notes, instants, battement, largeur=0.06, pas=1e-6):
     if len(m) < 8 or len(a) < 8 or autour <= 0.0:
         return 1.0, autour, autour, 0.0
 
-    def reponse(t, g):
-        """La reponse de la grille a chaque periode de `g`.
-
-        Par paquets : la matrice entiere ferait deux gigaoctets sur un morceau
-        de quatre minutes, ou l'on compte pres de sept mille attaques.
-        """
-        out = np.empty(len(g))
-        for i in range(0, len(g), 256):
-            bloc = g[i:i + 256]
-            out[i:i + 256] = np.abs(
-                np.exp(2j * np.pi * t[:, None] / bloc[None, :]).sum(axis=0))
-        return out
-
     def sommet(t):
-        # en deux temps : un balayage large au centieme de milliseconde, puis
-        # un affinage autour du sommet. Balayer tout au millionieme coutait
-        # quatre secondes et n'apprenait rien de plus.
-        g = np.arange(autour * (1.0 - largeur), autour * (1.0 + largeur), 1e-5)
-        s = reponse(t, g)
-        i = int(s.argmax())
-        net = float(s[i] / (s.mean() or 1e-9))
-        fin = np.arange(g[i] - 2e-5, g[i] + 2e-5, pas)
-        sf = reponse(t, fin)
-        return float(fin[int(sf.argmax())]), net
+        return _sommet(t, autour, largeur, pas=pas)
 
     pa, na = sommet(a)
     pm, nm = sommet(m)
@@ -434,3 +521,237 @@ def deriver(notes, instants, battement, largeur=0.06, pas=1e-6):
     if min(na, nm) < 3.0 or pm <= 0.0:
         return 1.0, pa, pm, min(na, nm)
     return pa / pm, pa, pm, min(na, nm)
+
+
+# ==========================================================================
+#  Le calage par le tempo du morceau
+#
+#  Un fichier MIDI dit deux choses de ses notes : leur place dans la musique
+#  — tel temps de telle mesure, en tics — et, par sa carte des tempos, a
+#  quelle seconde cela tombe. La premiere est sure ; la seconde ne l'est que
+#  si le tempo annonce est celui du morceau. Un fichier qui n'en annonce pas
+#  est lu a 120 ; un tempo arrondi (85 pour 84,6) ou une horloge de machine
+#  un rien differente de celle de la carte son font deriver la melodie de
+#  quelques millisecondes par mesure, jusqu'a ce que tout soit a cote.
+#
+#  On garde donc la place des notes dans la musique, et on prend le tempo et
+#  la grille dans le morceau lui-meme : mesures sur ses coups de batterie, au
+#  millieme de BPM, autour du tempo que l'on donne. Rien ne peut plus
+#  deriver : chaque temps du fichier tombe sur un temps du morceau.
+# ==========================================================================
+
+# Les grilles sur lesquelles une note peut tomber, en fractions de temps :
+# noire, croche, double croche, et les deux triolets. Une melodie en triolets
+# n'est pas sur la grille des doubles croches, mais elle est sur la sienne.
+SUBDIVISIONS = (1.0, 0.5, 0.25, 1.0 / 3.0, 1.0 / 6.0)
+
+
+def coherence(instants, periode):
+    """A quel point des instants tombent sur une grille de cette periode, quelle
+    qu'en soit la phase : 1 = tous dessus, ~0 = au hasard."""
+    import numpy as np
+    t = np.asarray(instants, dtype=np.float64)
+    if not len(t) or periode <= 0:
+        return 0.0
+    return float(abs(np.exp(2j * np.pi * t / periode).mean()))
+
+
+def sur_la_grille(instants, temps, origine=0.0):
+    """A quel point des instants tombent sur les traits d'une grille qui part
+    de `origine` : sur ses temps ou l'une de leurs subdivisions. 1 = tous
+    dessus ; 0 ou moins = a cote. Contrairement a `coherence`, la phase compte :
+    des notes regulieres mais posees entre les traits n'y sont pas."""
+    import numpy as np
+    t = np.asarray(instants, dtype=np.float64) - float(origine)
+    if not len(t) or temps <= 0:
+        return 0.0
+    return max(float(np.cos(2 * np.pi * t / (temps * f)).mean())
+               for f in SUBDIVISIONS)
+
+
+def grille_morceau(instants, bpm, poids=None, accents=None, largeur=0.03):
+    """Le tempo exact du morceau et l'instant de ses temps.
+
+    `bpm` dit ou chercher : le tempo est mesure a +-`largeur` autour, au
+    millieme, sur tous les coups ; s'il ne ressort pas nettement, c'est `bpm`
+    lui-meme qui sert. La grille fine — ou tombent les doubles croches — se lit
+    sur tous les coups, ponderes par `poids`. Reste a savoir laquelle des
+    quatre doubles croches porte le temps : c'est la que tombent la grosse
+    caisse, la caisse claire et la basse, d'ou les `accents`, un poids par
+    coup qui les favorise. Le charley, lui, tombe partout et ne le dit pas.
+
+    Rend {"bpm", "temps", "phase", "nettete", "mesure", "phase_sure"} :
+    `phase` est l'instant du premier temps, entre 0 et la duree d'un temps ;
+    `mesure` dit si le tempo a ete mesure plutot que pris tel quel, et
+    `phase_sure` si les coups tombent assez sur une grille pour qu'on sache ou
+    sont les temps — ce qui ne demande pas d'en avoir beaucoup : seize clics
+    disent mal le tempo au millieme, mais tres bien ou ils tombent.
+    """
+    import numpy as np
+    t = np.asarray(instants, dtype=np.float64)
+    w = np.ones(len(t)) if poids is None else np.asarray(poids, dtype=np.float64)
+    acc = w if accents is None else np.asarray(accents, dtype=np.float64)
+    p16 = 60.0 / float(bpm) / 4.0
+    net = 0.0
+    if len(t) >= 8:
+        p, net = _sommet(t, p16, largeur, w)
+        if net >= 3.0:
+            p16 = p
+    temps = 4.0 * p16
+    if not len(t):
+        return {"bpm": 60.0 / temps, "temps": temps, "phase": 0.0,
+                "nettete": net, "mesure": False, "phase_sure": False}
+    # la grille fine, sur tous les coups ...
+    z16 = (w * np.exp(2j * np.pi * t / p16)).sum()
+    ph16 = (np.angle(z16) / (2 * np.pi) * p16) % p16
+    # ... dont la longueur dit si les coups tombent sur une grille : 1 s'ils y
+    # sont tous, de l'ordre de 1/racine(n) s'ils tombent au hasard
+    tenue = float(abs(z16) / (w.sum() or 1e-9))
+    # ... et la double croche qui porte le temps : celle ou tombent les accents
+    cands = [(ph16 + j * p16) % temps for j in range(4)]
+    phase = max(cands, key=lambda c: float(
+        (acc * np.cos(2 * np.pi * (t - c) / temps)).sum()))
+    return {"bpm": 60.0 / temps, "temps": temps, "phase": float(phase),
+            "nettete": net, "mesure": net >= 3.0,
+            "phase_sure": tenue >= 0.25 and len(t) >= 4}
+
+
+def placer(chemin, grille, pistes=None):
+    """Les notes du fichier, posees sur la grille du morceau.
+
+    Deux lectures sont possibles, et le fichier dit lui-meme laquelle est la
+    bonne :
+
+    - **en temps** : si ses notes tombent sur les traits de sa propre grille —
+      un fichier ecrit dans un sequenceur, une boite a rythmes, un projet —
+      chaque note garde sa place dans la musique, et c'est la grille du
+      morceau qui dit a quelle seconde elle tombe. Le temps 0 du fichier va
+      sur le temps du morceau le plus proche du debut. C'est ce qui rattrape
+      un fichier qui annonce un autre tempo que le morceau, ou aucun, ou dont
+      la premiere mesure n'est pas au debut du son. Un fichier deja au tempo
+      exact du morceau et deja a sa place n'est pas touche : le reposer ne
+      ferait qu'ajouter l'imprecision de la mesure.
+    - **en secondes**, tel quel, si ses notes n'ont pas de grille a elles mais
+      tombent sur celle du morceau : un fichier tire du son par un logiciel,
+      une partie jouee sans clic. Si sa grille s'ecarte d'un rien de celle du
+      morceau — moins de 0,6 %, une horloge ou un tempo arrondi —, il est
+      etire d'autant. Au-dela, ce n'est plus une derive mais un autre tempo.
+
+    Si ni l'une ni l'autre ne tombe sur une grille, le fichier est pris tel
+    quel.
+
+    Rend (notes, compte rendu) : les notes en secondes du morceau, et de quoi
+    dire a la page ce qui a ete fait.
+    """
+    import numpy as np
+    temps, phase = float(grille["temps"]), float(grille["phase"])
+    sure = bool(grille.get("phase_sure", grille.get("mesure", True)))
+    if not sure:
+        # sans grille lisible dans le son, on suppose ce que fait un export :
+        # le premier temps au debut du fichier
+        phase = 0.0
+    # le temps du morceau le plus proche du debut : c'est la qu'un fichier
+    # exporte depuis le debut du projet pose sa premiere mesure
+    phase0 = phase if phase <= temps / 2.0 else phase - temps
+    secondes = lire_notes(chemin, pistes)
+    en_temps = lire_temps(chemin, pistes)
+    annonce = tempo_fichier(chemin)
+    cr = {"bpm_morceau": grille["bpm"], "tempo_mesure": sure,
+          "bpm_fichier": annonce["bpm"], "tempo_annonce": annonce["annonce"],
+          "changements": annonce["changements"], "phase": phase0,
+          "etirement": 1.0, "coherence_temps": 0.0,
+          "coherence_secondes": 0.0}
+    if not secondes:
+        cr.update(mode="secondes", debut=0.0)
+        return [], cr
+
+    # ---- en temps : les notes sur les traits de leur propre grille ?
+    c_temps = (sur_la_grille([n[0] for n in en_temps], 1.0)
+               if en_temps else -1.0)
+    # ---- en secondes : sur ceux du morceau, a une petite derive pres ?
+    t = np.asarray([n[0] for n in secondes], dtype=np.float64)
+    etir = 1.0
+    if len(t) >= 8:
+        # cherche large pour que le sommet ressorte, n'accepte que petit
+        pm, net = _sommet(t, temps / 4.0, 0.06)
+        if net >= 3.0 and pm > 0 and abs((temps / 4.0) / pm - 1.0) <= 0.006:
+            etir = (temps / 4.0) / pm
+    d0 = float(t.min())
+    t2 = d0 + (t - d0) * etir
+    c_sec = sur_la_grille(t2, temps, phase0) if sure else -1.0
+    cr.update(coherence_temps=max(0.0, c_temps),
+              coherence_secondes=max(0.0, c_sec))
+
+    mode, recale = "tel quel", 0.0
+    if c_temps >= 0.7:
+        mode = "temps"
+        deja = (annonce["annonce"] and not annonce["changements"]
+                and abs(annonce["bpm"] / grille["bpm"] - 1.0) < 0.0005
+                and abs(phase0) < 0.030)
+        if deja:
+            mode, etir = "secondes", 1.0
+    elif c_sec >= 0.5:
+        mode = "secondes"
+    elif sure:
+        # Reguliere mais posee entre les traits : la melodie a bien la grille
+        # du morceau, decalee d'une fraction de case — ce que laisse un
+        # logiciel qui tire les notes d'un son, ou un fichier cale a l'oeil.
+        # On la remet sur le trait le plus proche, a moins d'une demi-case :
+        # au-dela, on ne saurait plus lequel est le bon.
+        f = max(SUBDIVISIONS, key=lambda f: coherence(t2 - phase0, temps * f))
+        case = temps * f
+        if coherence(t2 - phase0, case) >= 0.6:
+            z = np.exp(2j * np.pi * (t2 - phase0) / case).mean()
+            recale = -float(np.angle(z) / (2 * np.pi) * case)
+            mode = "secondes"
+    if mode == "temps":
+        notes = [(phase0 + d * temps, phase0 + f * temps, h, v)
+                 for d, f, h, v in en_temps]
+    else:
+        if mode == "tel quel":
+            etir = 1.0
+        notes = [(d0 + (d - d0) * etir + recale, d0 + (f - d0) * etir + recale,
+                  h, v) for d, f, h, v in secondes]
+        cr["etirement"] = etir
+    cr["recale"] = recale
+    cr["mode"] = mode
+    notes.sort()
+    cr["debut"] = notes[0][0]
+    return notes, cr
+
+
+def raconter(cr):
+    """Le compte rendu du calage, en une phrase pour la page."""
+    def nb(x, f="%.2f"):
+        return (f % x).replace(".", ",")
+    bpm = nb(cr["bpm_morceau"])
+    if cr["mode"] == "temps":
+        ecart = abs(cr["bpm_fichier"] - cr["bpm_morceau"]) / cr["bpm_morceau"]
+        if not cr["tempo_annonce"]:
+            debut = ("le fichier n'annonce pas de tempo : ses notes sont "
+                     "relues a celui du morceau (%s BPM)" % bpm)
+        elif ecart > 0.0005:
+            debut = ("le fichier annonce %s BPM, le morceau en fait %s : ses "
+                     "notes sont relues au tempo du morceau"
+                     % (nb(cr["bpm_fichier"]), bpm))
+        else:
+            debut = ("le fichier est au tempo du morceau (%s BPM) mais pas a "
+                     "sa place : ses notes sont" % bpm)
+            return debut + (" posees sur sa grille, premier temps a %s s"
+                            % nb(cr["phase"], "%.3f"))
+        return debut + (" et posees sur sa grille, premier temps a %s s"
+                        % nb(cr["phase"], "%.3f"))
+    if cr["mode"] == "tel quel":
+        return ("ses notes ne tombent sur aucune grille : le fichier est pris "
+                "tel quel — verifiez le BPM du morceau")
+    if abs(cr.get("recale", 0.0)) > 1e-4:
+        txt = ("le fichier est date en secondes, a cote de la grille du "
+               "morceau (%s BPM) : il est remis sur ses traits, decale de %s ms"
+               % (bpm, nb(cr["recale"] * 1000.0, "%+.0f")))
+    else:
+        txt = ("le fichier tombe deja sur la grille du morceau (%s BPM) : il "
+               "est pris tel quel" % bpm)
+    if abs(cr["etirement"] - 1.0) > 1e-5:
+        txt += (", et etire de %s %% pour en suivre le tempo exact"
+                % nb((cr["etirement"] - 1.0) * 100.0, "%+.3f"))
+    return txt

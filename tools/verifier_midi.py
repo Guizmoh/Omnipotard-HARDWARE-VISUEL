@@ -44,6 +44,11 @@ class _Moteur:
         self.midi_force, self.midi_tempo = 1.0, tempo
 
 
+# l'avance d'une note sur son attaque : une demi-image, a 30 images par
+# seconde (voir Renderer._notes_actives)
+DEMI = 0.5 / _Moteur.fps
+
+
 def _eclat(m, t, k):
     """L'eclat de la touche k a l'instant t (0 si eteinte)."""
     return m.notes_midi(t, TOUCHES, NOTE0).get(k, 0.0)
@@ -137,17 +142,27 @@ def verifier():
        "batterie : la caisse claire change de pad selon ce qui joue avec elle")
 
     # 11. une note rejouee sur sa touche encore allumee : la touche s'eteint
-    # juste avant, et sur toute une image, ou que tombe l'image
+    # juste avant, et sur toute une image, ou que tombe l'image. Les instants
+    # se comptent depuis l'image ou la note s'allume, une demi-image avant elle
     k = 60 - NOTE0
     m = _Moteur([(1.0, 1.15, 60, 0.8), (1.176, 1.326, 60, 0.8)])
-    attaque = _eclat(m, 1.1765, k)
+    vue = 1.176 - DEMI
+    attaque = _eclat(m, vue + 0.0005, k)
     for avant in (0.002, 0.015, 0.030):
-        ok(_eclat(m, 1.176 - avant, k) < 0.25 * attaque,
+        ok(_eclat(m, vue - avant, k) < 0.25 * attaque,
            "une note rejouee ne se detache pas : %.0f ms avant elle, la touche"
            " garde %.0f %% de son eclat" % (avant * 1000, 100 * _eclat(
-               m, 1.176 - avant, k) / attaque))
-    ok(_eclat(m, 1.176 - 0.10, k) > 0.5 * attaque,
+               m, vue - avant, k) / attaque))
+    ok(_eclat(m, vue - 0.10, k) > 0.5 * attaque,
        "le creux avant une note rejouee commence trop tot")
+
+    # 14. une note s'allume sur l'image la plus proche de son attaque : pas
+    # plus d'une demi-image avant elle, ni apres
+    m = _Moteur([(2.0, 2.3, 60, 0.8)])
+    ok(not _allumees(m, 2.0 - DEMI - 0.001),
+       "la touche s'allume plus d'une demi-image avant sa note")
+    ok(_allumees(m, 2.0 - DEMI + 0.001) == {k},
+       "la touche ne s'allume pas sur l'image la plus proche de sa note")
     # ... et seulement la meme hauteur : une autre note n'eteint rien
     m = _Moteur([(1.0, 1.5, 60, 0.8), (1.2, 1.5, 64, 0.8)])
     seule = _Moteur([(1.0, 1.5, 60, 0.8)])
@@ -163,6 +178,9 @@ def verifier():
 
     # 13. la lecture du fichier : aucune note perdue, meme mal rangee
     fautes += _lecture()
+
+    # 15. le calage par le tempo du morceau
+    fautes += _calage_tempo()
 
     return fautes
 
@@ -226,6 +244,131 @@ def _lecture():
         if n not in attendu:
             fautes.append("lecture : une note %s de %.2f a %.2f s apparait"
                           % (M.nom_note(n[2]), n[0], n[1]))
+    return fautes
+
+
+def _ecrire_temps(chemin, notes, bpm=None, ppq=480):
+    """Un fichier ecrit en temps : (temps de debut, duree en temps, hauteur),
+    avec le tempo annonce `bpm` — ou aucun."""
+    def varlen(v):
+        o = [v & 0x7F]
+        v >>= 7
+        while v:
+            o.append((v & 0x7F) | 0x80)
+            v >>= 7
+        return bytes(reversed(o))
+    ev = []
+    if bpm is not None:
+        ev.append((0, 0, b"\xff\x51\x03" + int(round(60e6 / bpm)).to_bytes(3, "big")))
+    for b, d, h in notes:
+        t = int(round(b * ppq))
+        ev.append((t, 2, bytes([0x90, h, 100])))
+        ev.append((t + int(round(d * ppq)), 1, bytes([0x80, h, 0])))
+    ev.sort(key=lambda e: (e[0], e[1]))
+    corps, prec = bytearray(), 0
+    for tic, _o, m in ev:
+        corps += varlen(tic - prec) + m
+        prec = tic
+    corps += b"\x00\xff\x2f\x00"
+    with open(chemin, "wb") as f:
+        f.write(b"MThd" + (6).to_bytes(4, "big") + (0).to_bytes(2, "big")
+                + (1).to_bytes(2, "big") + ppq.to_bytes(2, "big")
+                + b"MTrk" + len(corps).to_bytes(4, "big") + bytes(corps))
+
+
+def _calage_tempo():
+    """La pose sur la grille : chaque genre de fichier retombe a sa place.
+
+    Un morceau a 85 BPM dont le premier temps tombe a 0,31 s, et une melodie
+    dont on connait la place de chaque note dans la musique. Ecrite de toutes
+    les facons qu'on rencontre, elle doit retomber au meme endroit.
+    """
+    import tempfile
+    fautes = []
+    bpm, amorce = 85.0, 0.31
+    P = 60.0 / bpm
+    rng = np.random.default_rng(3)
+    places = sorted(set(round(float(x) * 4) / 4 for x in rng.uniform(0, 48, 90)))
+    vrai = np.array([amorce + b * P for b in places])
+    grille = {"bpm": bpm, "temps": P, "phase": amorce, "mesure": True,
+              "phase_sure": True}
+
+    def ecart(chemin, g=grille):
+        notes, cr = M.placer(chemin, g)
+        t = np.array(sorted(n[0] for n in notes))
+        return float(np.abs(t - vrai).max()) * 1000.0, cr
+
+    d = tempfile.mkdtemp()
+    try:
+        cas = {
+            "qui annonce 120 BPM": (120.0, "temps"),
+            "qui n'annonce aucun tempo": (None, "temps"),
+            "qui annonce 86 BPM": (86.0, "temps"),
+            "au bon tempo, mais pas a sa place": (85.0, "temps"),
+        }
+        for nom, (annonce, mode) in cas.items():
+            ch = os.path.join(d, "a.mid")
+            _ecrire_temps(ch, [(b, 0.25, 60) for b in places], annonce)
+            e, cr = ecart(ch)
+            if e > 1.0 or cr["mode"] != mode:
+                fautes.append("calage : un fichier %s tombe a %.0f ms de sa "
+                              "place (lu %s)" % (nom, e, cr["mode"]))
+        # deja juste : le meme fichier, sur un morceau sans amorce, n'est pas
+        # touche du tout — meme si la grille, mesuree, tombe 4 ms a cote
+        ch = os.path.join(d, "b.mid")
+        _ecrire_temps(ch, [(b, 0.25, 60) for b in places], 85.0)
+        g0 = dict(grille, phase=0.004)
+        notes, cr = M.placer(ch, g0)
+        brut = sorted(n[0] for n in M.lire_notes(ch))
+        if cr["mode"] != "secondes" or max(
+                abs(a - b) for a, b in zip(sorted(n[0] for n in notes), brut)) > 1e-9:
+            fautes.append("calage : un fichier deja juste a ete deplace")
+        # au bon tempo et deja a sa place dans le son, mais pas sur ses
+        # propres temps : son temps 0 n'est pas un temps du morceau
+        ch = os.path.join(d, "d.mid")
+        _ecrire_temps(ch, [(t / P, 0.25, 60) for t in vrai], 85.0)
+        e, cr = ecart(ch)
+        if e > 1.0:
+            fautes.append("calage : un fichier deja a sa place, mais pas sur "
+                          "ses propres temps, a ete deplace de %.0f ms (lu %s)"
+                          % (e, cr["mode"]))
+        # date en secondes (tire d'un son) : pris tel quel, ses temps a 120
+        # ne veulent rien dire
+        ch = os.path.join(d, "c.mid")
+        sec = vrai + rng.normal(0, 0.006, len(vrai))
+        _ecrire_temps(ch, [(t / 0.5, 0.2, 60) for t in sec], 120.0)
+        notes, cr = M.placer(ch, grille)
+        t = np.array(sorted(n[0] for n in notes))
+        if cr["mode"] != "secondes" or np.abs(t - np.sort(sec)).max() > 0.002:
+            fautes.append("calage : un fichier date en secondes a ete deplace "
+                          "(lu %s)" % cr["mode"])
+        # en secondes, qui derive de 0,2 % et commence 40 ms a cote : remis
+        # sur la grille et etire
+        ch = os.path.join(d, "e.mid")
+        t0 = vrai[0]
+        der = t0 + 0.040 + (vrai - t0) / 1.002
+        _ecrire_temps(ch, [(t / 0.5, 0.2, 60) for t in der], 120.0)
+        e, cr = ecart(ch)
+        if e > 3.0:
+            fautes.append("calage : un fichier qui derive et commence a cote "
+                          "reste a %.0f ms de sa place (lu %s)" % (e, cr["mode"]))
+    finally:
+        for f in os.listdir(d):
+            os.remove(os.path.join(d, f))
+        os.rmdir(d)
+
+    # la grille elle-meme : retrouvee dans des coups qui tremblent. Le
+    # charley sur chaque double croche, la grosse caisse et la caisse claire
+    # sur les temps : ce sont elles qui disent ou ils tombent (`accents`)
+    coups = np.array([amorce + k * P / 4 for k in range(480)])
+    coups = coups + rng.normal(0, 0.004, len(coups))
+    accents = np.array([4.0 if k % 4 == 0 else 0.15 for k in range(480)])
+    for donne in (85.0, 84.0, 86.5):
+        g = M.grille_morceau(coups, donne, accents=accents)
+        ph = (g["phase"] - amorce + P / 2) % P - P / 2
+        if abs(g["bpm"] - bpm) > 0.01 or abs(ph) > 0.003:
+            fautes.append("grille : donnee a %.1f BPM, trouvee a %.3f BPM et "
+                          "%+.1f ms" % (donne, g["bpm"], ph * 1000))
     return fautes
 
 
@@ -322,7 +465,8 @@ def fichier(chemin):
             par_hauteur[h] = _Moteur([n for n in notes if n[2] == h],
                                      transpose=transpo)
         mh = par_hauteur[h]
-        avant, apres = _eclat(mh, d - 0.002, k), _eclat(mh, d + 0.002, k)
+        avant = _eclat(mh, d - DEMI - 0.002, k)
+        apres = _eclat(mh, d - DEMI + 0.002, k)
         if avant > 0.25 * apres:
             fautes.append("%s a %.3f s ne se detache pas de la note d'avant"
                           % (M.nom_note(h), d))

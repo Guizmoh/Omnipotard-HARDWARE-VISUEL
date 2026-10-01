@@ -58,6 +58,9 @@ SIMPLE = {
     # le passage d'une machine a l'autre et l'eclat des touches jouees :
     # ils accompagnent un reglage simple, ils doivent se voir avec lui
     "passage", "midiForce", "midiType",
+    # le tempo du morceau : c'est lui qui cale la melodie, il doit se voir
+    # des qu'il y en a une
+    "midiBpm",
 }
 REGLE = SIMPLE | {
     "trait", "bgColor", "bgClear", "bgAnim", "reflet", "tube", "nettete",
@@ -68,8 +71,10 @@ REGLE = SIMPLE | {
     "echo", "echoN", "echoDelay", "couleurs", "spectro",
     "cadence", "haloDoux", "poussiere", "flottement",
     "tranches", "tranchesOn", "stut", "stutOn", "kaleido", "kaleidoOn",
-    "scramble", "scrLen", "passageTurb", "midiOffset", "midiTempo",
-    "midiCale",
+    "scramble", "scrLen", "passageTurb", "midiOffset",
+    # la derive, le calage par les attaques et la lecture « telle quelle » ne
+    # servent plus qu'a un fichier qu'on refuse de poser sur la grille : ils
+    # restent au fond, au niveau « tout »
 }
 
 
@@ -843,7 +848,8 @@ async function envoyerMorceau(f) {
     $('#nomMorceau').textContent = j.name;
     $('#infos').hidden = false;
     $('#i-duree').textContent = fmt(j.duration);
-    $('#i-bpm').textContent = j.bpm.toFixed(1) + ' BPM';
+    $('#i-bpm').textContent = j.bpm.toFixed(2) + ' BPM';
+    if (typeof proposerBpm === 'function') { proposerBpm(j.bpm); majCalage(); }
     $('#i-coups').textContent = j.hits;
     $('#i-drops').textContent = drops.length;
     $('#title').placeholder = j.name.replace(/\.[^.]+$/, '');
@@ -1283,6 +1289,52 @@ async function mesurerDerive() {
   } catch (e) { etat('mesure impossible : ' + e.message, true); }
 }
 
+/* ---------- la grille du morceau ----------
+   La page demande au serveur ce que deviennent les notes du fichier sur ce
+   morceau, et le dit en une phrase. Elle en garde l'instant de la premiere
+   note, pour le rappel « premiere note a … », et la duree exacte d'un temps,
+   pour ses boutons. */
+let TEMPS_MIDI = 0, BPM_PROPOSE = '', minuteurCalage = null;
+function majCalage() {
+  clearTimeout(minuteurCalage);
+  minuteurCalage = setTimeout(async () => {
+    const z = $('#midiGrille');
+    if (!z) return;
+    if (!morceau || !$('#midi').value) {
+      z.textContent = morceau ? '' : 'deposez le morceau : la melodie se pose sur sa grille';
+      TEMPS_MIDI = 0;
+      return;
+    }
+    const q = new URLSearchParams({
+      track: morceau, midi: $('#midi').value,
+      bpm: $('#midiBpm') ? $('#midiBpm').value : '',
+      telQuel: $('#midiTelQuel') && $('#midiTelQuel').checked ? '1' : '0'});
+    try {
+      const j = await (await fetch('/calage?' + q)).json();
+      if (j.error) { z.textContent = j.error; return; }
+      z.textContent = j.raison + '.';
+      TEMPS_MIDI = +j.temps || 0;
+      MIDI_DEBUT = +j.debut;
+      // la premiere note la ou elle sera jouee, et non la ou le fichier
+      // l'ecrit : relu a un autre tempo, le fichier la mettait ailleurs
+      if ($('#mi-c')) $('#mi-c').textContent = instant(MIDI_DEBUT);
+      majOffset();
+    } catch (e) { z.textContent = ''; }
+  }, 250);
+}
+
+/* Le tempo propose a l'arrivee d'un morceau : celui de sa grille. Il ne
+   remplace pas un tempo tape a la main — seulement celui qu'on avait propose
+   pour le morceau d'avant. */
+function proposerBpm(bpm) {
+  const b = $('#midiBpm');
+  if (!b || !(bpm > 0)) return;
+  if (!b.value || b.value === BPM_PROPOSE) {
+    b.value = (+bpm).toFixed(2);
+    BPM_PROPOSE = b.value;
+  }
+}
+
 function brancherCalage() {
   const off = $('#midiOffset');
   if (!off) return;
@@ -1315,9 +1367,18 @@ function brancherCalage() {
   // deja bonne, ce qui lui manque est un nombre entier de temps
   for (const b of document.querySelectorAll('.calage [data-pas]'))
     b.onclick = () => {
-      const temps = 60 / Math.max(1, (FRAPPES && FRAPPES.bpm) || 120);
+      // le temps exact du morceau, tel que la grille l'a mesure
+      const bpm = +($('#midiBpm') && $('#midiBpm').value)
+                  || (FRAPPES && FRAPPES.bpm) || 120;
+      const temps = TEMPS_MIDI || 60 / Math.max(1, bpm);
       reglerDecalage((+off.value || 0) + (+b.dataset.pas) * temps);
     };
+  for (const id of ['midiBpm', 'midiTelQuel']) {
+    const el = $('#' + id);
+    if (!el) continue;
+    el.addEventListener('input', majCalage);
+    el.addEventListener('change', majCalage);
+  }
   const m = $('#midiMesure');
   if (m) m.onclick = mesurerDerive;
   majOffset();
@@ -1442,9 +1503,18 @@ const _duree = () => duree;
     champMachine.insertAdjacentElement('afterend', d);
   }
   const cible = $('#midiCurseurs');
-  for (const id of ['midiType', 'midiForce', 'midiOffset', 'midiTempo', 'midiCale']) {
+  for (const id of ['midiType', 'midiBpm', 'midiForce', 'midiOffset',
+                    'midiTempo', 'midiCale', 'midiTelQuel']) {
     const c = document.querySelector('[data-champ="' + id + '"]');
     if (c && cible) cible.appendChild(c);
+  }
+  // ce que la grille a fait des notes, dit sous le tempo qui la regle
+  const cBpm = document.querySelector('[data-champ="midiBpm"]');
+  if (cBpm) {
+    const g = document.createElement('p');
+    g.className = 'note';
+    g.id = 'midiGrille';
+    (cBpm.querySelector('input') || cBpm).insertAdjacentElement('afterend', g);
   }
   // Les outils de calage se posent sous leur curseur, et DANS son reglage :
   // ils se cachent et se montrent avec lui selon la profondeur choisie. Poses

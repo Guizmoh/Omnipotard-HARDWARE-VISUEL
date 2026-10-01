@@ -38,7 +38,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mpc_performance import (  # noqa: E402
     analyze, frame_performance, probe_duration, render_video, _renderer,
-    compute_spectro, preparer_midi,
+    compute_spectro, preparer_midi, grille_du_morceau,
 )
 import midi                                                   # noqa: E402
 from omnipotard_intro import (  # noqa: E402
@@ -198,6 +198,10 @@ def look_from(q):
         "scanlines": float(q.get("scanlines", 1.0)),
         "aberration": float(q.get("aberration", 0.0)),
         "midi_offset": float(q.get("midiOffset", 0.0)),
+        # le tempo du morceau, tape ou propose : les notes se posent sur sa
+        # grille (voir midi.placer) ; 0 = le tempo detecte
+        "midi_bpm": float(q.get("midiBpm") or 0.0),
+        "midi_tel_quel": _coche(q.get("midiTelQuel")),
         # la page le donne en pourcent — un rapport a six decimales ne se lit
         # pas sur un curseur — et le moteur veut un rapport
         "midi_tempo": 1.0 + float(q.get("midiTempo", 0.0)) / 100.0,
@@ -452,6 +456,35 @@ class Studio:
             raise KeyError("morceau inconnu (relancez l'envoi)")
         return t
 
+    def grille(self, tr, bpm=0.0):
+        """La grille du morceau entier pour ce tempo : mesuree une fois.
+
+        Mesuree sur le morceau entier et non sur l'extrait rendu : l'apercu et
+        le rendu posent ainsi les notes au meme endroit, et la mesure est
+        d'autant plus juste qu'elle porte sur plus de temps.
+        """
+        cle = round(float(bpm or 0.0), 3)
+        with self.lock:
+            g = tr.setdefault("grilles", {}).get(cle)
+        if g is None:
+            g = grille_du_morceau(tr["info"], cle or None)
+            with self.lock:
+                tr["grilles"][cle] = g
+        return g
+
+    def calage(self, tr, chemin, bpm=0.0, tel_quel=False, cale=False):
+        """Les notes du fichier posees sur le morceau, et le compte rendu.
+
+        Le meme calcul sert a l'apercu, au rendu et a la page : c'est ce qui
+        garantit que la touche s'allume dans la video la ou on l'a vue.
+        """
+        reg = {"midi": chemin, "midi_cale": cale, "midi_tel_quel": tel_quel}
+        if not tel_quel:
+            g = self.grille(tr, bpm)
+            reg["midi_bpm"] = g["bpm"]
+            reg["midi_phase"] = g["phase"] if g.get("phase_sure") else None
+        return preparer_midi(tr["info"], reg)
+
     def info_courante(self):
         """L'analyse du dernier morceau depose, s'il y en a un.
 
@@ -543,7 +576,8 @@ class Studio:
                         # le plan de machines et la melodie se posent a la
                         # main : l'un se relit, l'autre se lit dans un fichier
                         "machines", "midi", "midi_offset", "midi_cale",
-                        "midi_tempo", "midi_type")
+                        "midi_tempo", "midi_type", "midi_bpm",
+                        "midi_tel_quel")
         # La taille se pose avant l'allure : c'est elle qui decide du creux
         # que la texture garde derriere la machine, et set_look le recalcule.
         r.taille = float(kw["taille"])
@@ -562,20 +596,26 @@ class Studio:
         # la page s'ajoute a celui trouve tout seul.
         # La case « chercher le decalage » fait partie de la cle : la cocher
         # change le decalage calcule, il faut donc relire.
-        chemin = (kw["midi"], bool(kw["midi_cale"]))
+        # Le tempo et la lecture « telle quelle » en font partie : les changer
+        # repose les notes.
+        chemin = (kw["midi"], bool(kw["midi_cale"]), bool(kw["midi_tel_quel"]),
+                  round(float(kw["midi_bpm"]), 3))
         if getattr(r, "_midi_de", None) != chemin:
             r._midi_de = chemin
-            r.midi, r._midi_auto = None, 0.0
+            r.midi, r._midi_auto, r._midi_grille = None, 0.0, False
             if chemin[0]:
-                _, lu = preparer_midi(tr["info"], {"midi": chemin[0],
-                                                  "midi_cale": chemin[1]})
+                reg, lu = self.calage(tr, chemin[0], kw["midi_bpm"],
+                                      kw["midi_tel_quel"], chemin[1])
                 if lu and lu.get("notes"):
-                    r.midi = np.asarray(midi.lire_notes(chemin[0]),
+                    r.midi = np.asarray(reg["midi"],
                                         dtype=np.float64).reshape(-1, 4)
-                    r._midi_auto = float(lu.get("cale", 0.0))
-                    r.midi_transpose = int(lu.get("transpose", 0))
+                    r._midi_auto = float(reg["midi_offset"])
+                    r.midi_transpose = int(reg["midi_transpose"])
+                    r._midi_grille = not kw["midi_tel_quel"]
         r.midi_offset = r._midi_auto + float(kw["midi_offset"])
-        r.midi_tempo = float(kw["midi_tempo"])
+        # posees sur la grille, les notes ont deja le tempo du morceau : la
+        # derive ne s'applique qu'a un fichier lu tel quel
+        r.midi_tempo = 1.0 if r._midi_grille else float(kw["midi_tempo"])
         r.midi_type = kw["midi_type"]
 
         # Le spectrogramme est calcule a partir du son, pas repose comme une
@@ -659,6 +699,11 @@ class Studio:
                     raise RuntimeError(A_RELANCER)
                 job["state"] = "analyse"
                 palette, kw = look_from(q)
+                if kw.get("midi") and not kw.get("midi_tel_quel"):
+                    g = self.grille(tr, kw.get("midi_bpm"))
+                    kw["midi_bpm"] = g["bpm"]
+                    kw["midi_phase"] = (g["phase"] if g.get("phase_sure")
+                                        else None)
                 full = tr["info"]["duration"]
                 info = (tr["info"] if start <= 0.01 and (not dur or dur >= full - 0.01)
                         else analyze(tr["path"], start, dur))
@@ -986,6 +1031,29 @@ class Handler(BaseHTTPRequestHandler):
                 t = min(coups, key=lambda x: abs(x - t0))
                 # juste apres l'attaque : l'anneau et la poussee sont partis
                 return self._json({"t": t + 0.08, "coup": True})
+            if u.path == "/calage":
+                # Ce que deviennent les notes du fichier sur ce morceau : la
+                # page le dit en clair, et en tire l'instant de la premiere
+                # note et la duree d'un temps pour ses boutons.
+                tr = STUDIO.track(q["track"])
+                chemin = _melodie(q.get("midi"))
+                if not chemin or not os.path.exists(chemin):
+                    return self._fail("aucune melodie chargee")
+                tel_quel = _coche(q.get("telQuel"))
+                reg, lu = STUDIO.calage(tr, chemin, float(q.get("bpm") or 0.0),
+                                        tel_quel)
+                if not lu or not lu.get("notes"):
+                    return self._fail("ce fichier MIDI ne contient aucune note")
+                g = STUDIO.grille(tr, float(q.get("bpm") or 0.0))
+                return self._json({
+                    "mode": lu.get("mode", "tel quel"),
+                    "raison": lu.get("raison") or
+                    "le fichier est lu tel quel, en secondes, sans le poser "
+                    "sur la grille du morceau",
+                    "bpm": g["bpm"], "temps": g["temps"],
+                    "debut": float(lu.get("debut", 0.0)),
+                    "notes": int(lu.get("notes", 0)),
+                })
             if u.path == "/derive":
                 # De combien le fichier MIDI derive par rapport au morceau.
                 # Mesure a la demande et non a l'envoi : elle demande le
@@ -1061,9 +1129,13 @@ class Handler(BaseHTTPRequestHandler):
                     os.remove(path)
                     return self._fail("ffmpeg ne sait pas lire ce fichier")
                 tid, info = STUDIO.add_track(path, name)
+                # le tempo exact, mesure sur la grille du morceau : c'est lui
+                # que la page propose pour poser une melodie
+                g = STUDIO.grille(STUDIO.track(tid))
                 return self._json({
                     "track": tid, "name": name,
-                    "duration": info["total"], "bpm": info["bpm"],
+                    "duration": info["total"], "bpm": g["bpm"],
+                    "bpm_detecte": info["bpm"],
                     "hits": info["hits"], "drops": info["drops"],
                     "frappes": STUDIO.frappes(info),
                     "duree": info["duration"]})
@@ -1310,6 +1382,7 @@ function midiOte() {
   midiAvis();
   $('#midimeta').hidden = true;
   if ($('#mi-p')) $('#mi-p').textContent = '';
+  if (typeof majCalage === 'function') majCalage();
   $('#midiReglages').hidden = true;
   $('#midiDrop').innerHTML = '<b>Deposer un fichier MIDI</b>.mid, .midi<br>'
     + 'ou cliquer pour choisir';
@@ -1335,6 +1408,8 @@ async function sendMidi(f) {
     // que si la page en question le porte
     MIDI_DEBUT = +j.debut || 0;
     if (typeof majOffset === 'function') majOffset();
+    // la v2 pose la melodie sur la grille du morceau, et dit ce qu'elle a fait
+    if (typeof majCalage === 'function') majCalage();
     $('#midimeta').hidden = false;
     $('#midiReglages').hidden = false;
     $('#midiDrop').innerHTML = '<b>' + j.name
@@ -1545,6 +1620,8 @@ PAGE = r"""<!doctype html>
         <option value="piano">une melodie (touches du clavier)</option>
         <option value="batterie">une batterie (pads de toutes les machines)</option>
       </select>
+      <label for="midiBpm">BPM du morceau</label>
+      <input type="number" id="midiBpm" min="20" max="300" step="0.01" value="">
       <label for="midiForce">eclat des touches jouees &mdash;
         <span id="v-mif">1.00</span></label>
       <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1">
@@ -1566,6 +1643,8 @@ PAGE = r"""<!doctype html>
       <p class="hint" id="midiDerive">&nbsp;</p>
       <label class="coche"><input type="checkbox" id="midiCale">
         chercher le decalage tout seul</label>
+      <label class="coche"><input type="checkbox" id="midiTelQuel">
+        lire le fichier tel quel, sans le poser sur la grille du morceau</label>
       <button class="ghost" id="midiOte">Oter ce fichier</button>
     </div>
     <input type="hidden" id="midi">

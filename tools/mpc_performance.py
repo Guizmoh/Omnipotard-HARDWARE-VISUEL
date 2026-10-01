@@ -38,7 +38,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
-    detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, pool_context,
+    detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, PADS_REELS,
+    pool_context,
     fit_jobs, DECLENCHEURS, hasard_events, TRAVELLINGS,
     python_trop_petit,
     compute_spectro, PRESETS, QUALITES, APERCU, apercu_possible,
@@ -370,6 +371,74 @@ def analyze(music, start=0.0, duration=None):
             "_audio": audio, "_phi": phi}
 
 
+def attaques_fines(mono, sr, instants, avant=0.045, apres=0.020):
+    """L'instant ou chaque coup commence vraiment, relu sur l'onde.
+
+    Le detecteur voit un coup a travers une fenetre de vingt millisecondes :
+    il le date au mieux a quelques millisecondes pres, et pas au meme endroit
+    selon l'instrument. Mesure sur des coups synthetiques, la grille qu'on en
+    tire tombait onze millisecondes trop tard. On repart donc de l'onde : on
+    cherche le sommet du coup pres de l'instant releve, puis on remonte
+    jusqu'a ce que le son redescende au cinquieme de sa montee. Sur les memes
+    coups, l'ecart tombe a une milliseconde.
+    """
+    x = np.abs(np.asarray(mono, dtype=np.float64))
+    k = max(1, int(sr * 0.001))
+    c = np.concatenate([[0.0], np.cumsum(x)])
+    env = (c[k:] - c[:-k]) / k          # moyenne sur 1 ms, posee sur son debut
+    out = []
+    marge = int(0.02 * sr)
+    for t in instants:
+        i0, i1 = int((t - avant) * sr), int((t + apres) * sr)
+        if i0 < marge or i1 >= len(env):
+            out.append(float(t))
+            continue
+        seg = env[i0:i1]
+        m = int(np.argmax(seg))
+        pic = float(seg[m])
+        fond = float(np.median(env[i0 - marge:i0]))
+        seuil = fond + 0.2 * (pic - fond)
+        j = m
+        while j > 0 and seg[j] > seuil:
+            j -= 1
+        out.append((i0 + j) / sr)
+    return out
+
+
+def grille_du_morceau(info, bpm=None, indice=None):
+    """Le tempo exact du morceau et l'instant de ses temps, en secondes du
+    morceau entier.
+
+    `bpm` est celui que l'on donne. Sans lui, on part du tempo detecte — en
+    le doublant ou en le divisant par deux si le tempo annonce par le fichier
+    MIDI (`indice`) le designe : sur un morceau a 124, la detection trouvait
+    62, et une grille a 62 pose chaque note deux fois trop loin.
+    """
+    a = info["_audio"]
+    debut = float(info.get("start") or 0.0)
+    ev = [e for e in a["events"] if e[1] < PADS_REELS]
+    source = "donne"
+    if not bpm:
+        bpm, source = float(info["bpm"]), "detecte"
+        if indice:
+            meilleur = min((bpm * f for f in (0.5, 1.0, 2.0)),
+                           key=lambda b: abs(b / indice - 1.0))
+            if abs(meilleur / indice - 1.0) < 0.04:
+                bpm = meilleur
+                source = "detecte" if meilleur == float(info["bpm"]) else "fichier"
+    fins = [t + debut for t in attaques_fines(a["mono"], a["sr"],
+                                              [e[0] for e in ev])]
+    # ce qui marque le temps : la grosse caisse et la caisse claire d'abord,
+    # la basse ensuite ; le charley et les percussions, presque rien
+    poids_temps = {PAD_OF["kick"]: 4.0, PAD_OF["rim"]: 3.0,
+                   1: 1.5, 2: 1.5, 3: 1.5}
+    g = midi_fichier.grille_morceau(
+        fins, bpm, [e[2] for e in ev],
+        [e[2] * poids_temps.get(e[1], 0.15) for e in ev])
+    g["source"] = source
+    return g
+
+
 def preparer_midi(info, reglages):
     """Lit le fichier MIDI et le cale sur le morceau.
 
@@ -391,11 +460,40 @@ def preparer_midi(info, reglages):
     vitesse = float(reglages.pop("midi_tempo", 1.0) or 1.0)
     genre = reglages.pop("midi_type", "piano") or "piano"
     transpo = reglages.pop("midi_transpose", None)
+    # Le tempo du morceau, et l'instant de ses temps quand on les connait
+    # deja : le studio les mesure une fois sur le morceau entier et les passe
+    # au rendu, qui pose alors les notes exactement comme l'apercu.
+    bpm = float(reglages.pop("midi_bpm", 0.0) or 0.0)
+    phase = reglages.pop("midi_phase", None)
+    tel_quel = bool(reglages.pop("midi_tel_quel", False))
     if not chemin or not os.path.exists(chemin):
         reglages.pop("midi_force", None)
         return reglages, None
-    notes = midi_fichier.lire_notes(chemin)
+    debut = float(info.get("start") or 0.0)
+    calage = None
+    if tel_quel:
+        notes = midi_fichier.lire_notes(chemin)
+    else:
+        # La pose sur la grille du morceau : le fichier garde la place de ses
+        # notes dans la musique, le morceau donne le tempo et l'instant des
+        # temps. Ni decalage ni derive a regler, quel que soit le tempo que le
+        # fichier annonce (voir midi.placer).
+        if bpm > 0 and phase is not None:
+            grille = {"bpm": bpm, "temps": 60.0 / bpm,
+                      "phase": float(phase) % (60.0 / bpm), "mesure": True,
+                      "phase_sure": True}
+        else:
+            annonce = midi_fichier.tempo_fichier(chemin)
+            grille = grille_du_morceau(
+                info, bpm or None,
+                annonce["bpm"] if annonce["annonce"] else None)
+        notes, calage = midi_fichier.placer(chemin, grille)
+        calage["raison"] = midi_fichier.raconter(calage)
+        calage["temps"] = grille["temps"]
+        cale, vitesse = False, 1.0
     infos = midi_fichier.resume(notes)
+    if calage:
+        infos.update(calage)
     if not notes:
         reglages.pop("midi_force", None)
         return reglages, infos
@@ -404,7 +502,6 @@ def preparer_midi(info, reglages):
     # du debut du morceau : on remet donc les attaques dans le temps du morceau
     # avant de chercher, sinon le vrai decalage tombe hors de la fenetre des
     # qu'on rend un extrait pris au milieu.
-    debut = float(info.get("start") or 0.0)
     auto, nettete = (midi_fichier.caler(
         notes, [e[0] + debut for e in info["_audio"]["events"]])
         if cale else (0.0, 0.0))
@@ -593,6 +690,14 @@ def add_look_args(ap):
     ap.add_argument("--midi", default="", metavar="FICHIER",
                     help="fichier MIDI de la melodie : les touches du clavier "
                          "s'allument sur les vraies notes du morceau")
+    ap.add_argument("--midi-bpm", type=float, default=0.0, metavar="BPM",
+                    help="tempo du morceau : les notes du fichier sont posees "
+                         "sur sa grille, mesuree au millieme autour de ce "
+                         "tempo, quel que soit le tempo que le fichier annonce. "
+                         "0 = le tempo detecte")
+    ap.add_argument("--midi-tel-quel", action="store_true",
+                    help="lit le fichier en secondes, tel quel, sans le poser "
+                         "sur la grille du morceau (comme avant)")
     ap.add_argument("--midi-offset", type=float, default=0.0, metavar="S",
                     help="decalage du fichier MIDI, en secondes, ajoute au "
                          "calage automatique (negatif = plus tot)")
@@ -800,6 +905,8 @@ def look_kwargs(args):
             "machines": args.machines,
             "midi": args.midi,
             "midi_offset": args.midi_offset,
+            "midi_bpm": args.midi_bpm,
+            "midi_tel_quel": bool(args.midi_tel_quel),
             "midi_cale": bool(args.midi_cale),
             "midi_transpose": args.midi_transpose,
             "midi_tempo": args.midi_tempo,
@@ -930,6 +1037,9 @@ def main():
                  progress=show, **common)
     print("\n%s  (%.1f s, %dx%d @ %dfps)"
           % (args.out, info["duration"], args.width, args.height, args.fps))
+    lu = info.get("midi") or {}
+    if lu.get("raison"):
+        print("melodie : %d notes, %s" % (lu.get("notes", 0), lu["raison"]))
 
 
 if __name__ == "__main__":

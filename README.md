@@ -591,16 +591,96 @@ fichier n'y change rien. Plaquer une mélodie sur seize pads de batterie ne
 donnait rien de lisible : trois choses s'y disputaient les mêmes cellules — les
 coups, les pas et les notes.
 
-Le fichier est pris **tel quel**. Un MIDI exporté du même projet que le morceau
-est déjà à l'heure : son décalage vaut zéro, et c'est ce qu'on lui laisse.
+#### Le calage par le BPM du morceau
 
-Pour le vérifier, la carte annonce à quel instant **de la vidéo** tombe la
-première note. Lancez l'aperçu là et regardez si la touche s'allume avec le
-son — aucun calcul ne le dit mieux que cette comparaison-là. La ligne prévient
-aussi quand la note tombe hors du plan rendu, ce qui arrive vite : un fichier
-dont la première note est à 5 s et un plan qui démarre à 30 s ne montrent rien.
+**Il n'y a rien à régler, sauf à vérifier le BPM.** En déposant le morceau, le
+studio mesure son tempo et le propose dans le champ *BPM du morceau* ; on le
+corrige s'il se trompe — la détection annonce parfois la moitié du vrai tempo,
+62 pour un morceau à 124. Les notes du fichier sont alors **posées sur la
+grille du morceau**, et une phrase sous le champ dit ce qui a été fait :
 
-#### Si c'est décalé : les boutons, pas le curseur
+> le fichier annonce 120,00 BPM, le morceau en fait 85,00 : ses notes sont
+> relues au tempo du morceau et posées sur sa grille, premier temps à 0,305 s.
+
+Un fichier MIDI dit deux choses de ses notes : leur **place dans la musique**
+— tel temps de telle mesure — et, par le tempo qu'il annonce, **à quelle
+seconde** cela tombe. La première est sûre ; la seconde ne l'est que si le
+tempo annoncé est celui du morceau. Un fichier qui n'en annonce aucun est lu à
+120 ; un tempo arrondi (85 pour 84,6) ou une horloge de machine un rien
+différente de celle de la carte son font dériver la mélodie de quelques
+millisecondes par mesure, jusqu'à ce que tout soit à côté. On garde donc la
+place des notes, et l'on prend le tempo et la grille **dans le morceau
+lui-même** : mesurés sur ses coups de batterie, au millième de BPM, autour du
+tempo du champ. Rien ne peut plus dériver : chaque temps du fichier tombe sur
+un temps du morceau.
+
+Le fichier dit lui-même comment le lire :
+
+- **déjà à sa place** — au tempo exact du morceau et à l'heure, comme un
+  export du même projet : il n'est pas touché ;
+- **écrit sur une grille**, mais à un autre tempo, sans tempo, ou dont la
+  première mesure n'est pas au début du son : ses notes sont relues au tempo du
+  morceau, son temps 0 posé sur le temps du morceau le plus proche du début ;
+- **daté en secondes**, sans grille à lui — un fichier tiré du son par un
+  logiciel, une partie jouée sans clic : il est pris tel quel, étiré s'il dérive
+  de moins de 0,6 %, et remis sur les traits de la grille s'il en tombe à côté
+  d'une fraction de case.
+
+Mesuré sur quatre morceaux dont on connaît la grille (85 BPM, 85 avec une
+amorce de 0,31 s, 92,7 et 124 BPM) et sept façons d'écrire la même mélodie,
+soit vingt-huit cas :
+
+| le fichier | lu tel quel, comme avant | posé sur la grille |
+| --- | --- | --- |
+| au bon tempo, à sa place | exact | exact (pas touché) |
+| au bon tempo, morceau avec une amorce | 310 ms à côté | 5 ms |
+| qui annonce 120 BPM | jusqu'à **13 s** à côté | 5 à 9 ms |
+| sans tempo | jusqu'à **13 s** à côté | 5 à 9 ms |
+| tempo arrondi (86 pour 85) | jusqu'à 0,9 s à côté | 5 à 9 ms |
+| joué à la main, ±15 ms | exact | exact à 9 ms |
+| en triolets, annonce 120 BPM | jusqu'à **13 s** à côté | 5 à 9 ms |
+| tiré du son (±8 ms) | ±8 ms | ±8 ms (pas touché) |
+
+Sur le vrai morceau d'essai, le fichier qui dérivait de 0,19 % et commençait
+65 ms à côté est retrouvé tout seul : étiré de +0,191 %, décalé de −67 ms, ses
+notes tombent sur la grille à **0,3 ms** près (écart-type), contre 16,6 ms
+avant.
+
+La grille se lit sur l'onde même : le détecteur date un coup à travers une
+fenêtre de vingt millisecondes, et la grille qu'on en tirait tombait onze
+millisecondes trop tard. Chaque coup est relu sur l'onde, jusqu'à l'instant où
+il commence vraiment ; l'écart tombe à quelques millisecondes. Et c'est la
+grosse caisse, la caisse claire et la basse qui disent laquelle des quatre
+doubles-croches porte le temps : le charley tombe partout et ne le dit pas —
+sans cette pondération, un extrait de quatre secondes se calait un demi-temps
+à côté.
+
+**Ce qui reste à la main.** Une seule chose, que rien dans le son ne peut
+trancher : un fichier qui ne commence pas au début du morceau — un clip exporté
+seul, placé à la mesure 9 du projet. Son temps 0 se pose alors sur le premier
+temps du morceau, et les boutons **±1 mesure** le déplacent d'une mesure
+exacte, au tempo mesuré : la mélodie reste sur la grille d'un bout à l'autre.
+
+La case *lire le fichier tel quel* (au niveau *tout*) rend l'ancien
+comportement, pour le cas où la grille se tromperait — un morceau sans
+batterie, par exemple.
+
+#### Ce que mesure la vidéo, de bout en bout
+
+On a vérifié la chaîne entière, sur le fichier produit : un morceau fait de
+clics à des instants connus, un MIDI dont les notes tombent dessus, un vrai
+rendu, puis la piste son et les images relues dans le MP4. **Le son et l'image
+sont exacts** — en WAV comme en MP3, la touche s'allume sur l'image la plus
+proche du son. Le reste ne pouvait venir que du fichier MIDI.
+
+Une note s'allume désormais sur l'image **la plus proche** de son attaque, et
+non sur la suivante : l'écart tombe dans ±17 ms (moyenne −0,4 ms), contre 0 à
+33 ms de retard auparavant — un son en avance sur l'image se remarque dès
+45 ms, et ce retard s'ajoutait à tout le reste. Par le studio, sur un extrait
+pris au milieu d'un morceau à amorce et avec un fichier qui annonce un faux
+tempo, chaque touche s'allume entre −20 et +10 ms de sa note.
+
+#### Si c'est encore décalé : les boutons, pas le curseur
 
 Deux pannes différentes se ressemblent à l'oreille, et elles n'ont pas le même
 remède. Il faut d'abord les séparer :
@@ -623,6 +703,9 @@ au centième ajoutait cinq millisecondes d'erreur par clic, de quoi sortir de la
 grille au bout d'une quinzaine.
 
 #### La dérive : quand les deux tempos ne sont pas le même
+
+*Posée sur la grille, la mélodie ne dérive plus : ce qui suit ne sert qu'à un
+fichier lu tel quel.*
 
 Un fichier dont la grille n'a pas tout à fait le tempo du morceau se cale au
 début puis s'en écarte peu à peu. **Aucun décalage ne rattrape ça** : il faut
@@ -660,7 +743,11 @@ somme complexe ne dépend pas de la phase, là où une grille posée à zéro ra
 le vrai sommet — mesuré, l'écart valait 0,2 %, soit tout ce qu'on cherche à
 corriger.
 
-#### Pourquoi le calage automatique ne peut pas marcher
+#### Pourquoi le calage par les attaques ne peut pas marcher
+
+*C'est pourquoi le calage passe par la grille : chercher où tombent les temps
+ne demande que la batterie, là où chercher où tombe une mélodie demande de la
+reconnaître.*
 
 Une case **chercher le décalage tout seul** existe, décochée par défaut. Elle
 compare les attaques du fichier à celles du morceau. Mesuré sur le morceau
@@ -776,6 +863,14 @@ melodie.mid : 170 notes, toutes justes
     piste 1 : 170 notes, canal 1
 ```
 
+Il vérifie aussi le **calage par le tempo** : la même mélodie écrite de toutes
+les façons ci-dessus doit retomber à moins d'une milliseconde de sa place, un
+fichier déjà juste ne doit pas bouger d'un millionième, et la grille doit être
+retrouvée au centième de BPM dans des coups qui tremblent, qu'on la cherche à
+partir de 84, 85 ou 86,5. Quatre erreurs introduites exprès — ne jamais relire
+en temps, oublier de laisser un fichier déjà juste, ne pas recaler un fichier
+en secondes, juger la grille sans sa phase — sont attrapées toutes les quatre.
+
 Pour s'assurer qu'il n'est pas complaisant, on l'a lancé sur le moteur
 d'avant ces corrections : il y trouve **20 défauts** — cinq notes perdues et
 trois autres apparues à leur place, la note rejouée (sur trois images), la
@@ -804,8 +899,11 @@ tempo change en route reste en place). Rien à installer : le lecteur tient dans
 
 ```bash
 python3 tools/mpc_performance.py morceau.mp3 --machine minifreak \
-  --midi melodie.mid --midi-force 1.2
+  --midi melodie.mid --midi-bpm 85 --midi-force 1.2
 ```
+
+`--midi-bpm` donne le tempo du morceau (0 = le tempo détecté) ;
+`--midi-tel-quel` lit le fichier en secondes, sans le poser sur la grille.
 
 Avec `--machine mpc`, `sp404` ou `digitakt`, `--midi` est sans effet en mode
 mélodie ; en mode batterie (`--midi-type batterie`), il y allume les pads.
