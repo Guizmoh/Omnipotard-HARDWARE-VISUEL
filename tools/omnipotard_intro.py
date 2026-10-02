@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.9"
+VERSION = "2026-10-02.10"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -1075,87 +1075,111 @@ def downsample(a, f):
     return a[:h2 * f, :w2 * f].reshape(h2, f, w2, f).mean(axis=(1, 3))
 
 
-def upsample(a, f, shape):
-    b = np.repeat(np.repeat(a, f, axis=0), f, axis=1)
-    out = np.zeros(shape, dtype=b.dtype)
-    hh = min(shape[0], b.shape[0])
-    ww = min(shape[1], b.shape[1])
-    out[:hh, :ww] = b[:hh, :ww]
-    if hh < shape[0]:
-        out[hh:, :ww] = b[b.shape[0] - 1, :ww]
-    if ww < shape[1]:
-        out[:, ww:] = out[:, ww - 1:ww]
-    return out
-
-
 _AXES = {}
 
 
 def _axe(n_out, n_in):
-    """Indices et poids d'une interpolation lineaire de n_in points a n_out,
-    centres de pixels alignes — exactement le BILINEAR de Pillow, a 1e-8
-    pres. Gardes d'une image a l'autre : la definition ne change pas pendant
-    un rendu. La lumiere des coups, elle, travaille sur des decoupes de
-    taille variable : le carnet est vide quand il deborde, plutot que de
-    grossir tout le long d'un morceau (les refaire coute quelques
-    microsecondes)."""
+    """Quatre indices et quatre poids par point de sortie : B-spline cubique,
+    centres de pixels alignes, bords recopies. Gardes d'une image a l'autre ;
+    la lumiere des coups travaille sur des decoupes de taille variable, donc
+    le carnet est vide quand il deborde plutot que de grossir tout le long
+    d'un morceau (les refaire coute quelques microsecondes)."""
     cle = (n_out, n_in)
     tab = _AXES.get(cle)
     if tab is None:
         if len(_AXES) >= 64:
             _AXES.clear()
         s = (np.arange(n_out, dtype=np.float64) + 0.5) * (n_in / n_out) - 0.5
-        np.clip(s, 0.0, n_in - 1, out=s)
-        i0 = np.floor(s).astype(np.intp)
-        i1 = np.minimum(i0 + 1, n_in - 1)
-        tab = _AXES[cle] = (i0, i1, (s - i0).astype(np.float32))
+        i = np.floor(s)
+        t = s - i
+        i = i.astype(np.intp)
+        t2 = t * t
+        t3 = t2 * t
+        poids = ((1.0 - t) ** 3 / 6.0,
+                 (3.0 * t3 - 6.0 * t2 + 4.0) / 6.0,
+                 (-3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0) / 6.0,
+                 t3 / 6.0)
+        tab = _AXES[cle] = tuple(
+            (np.clip(i + k, 0, n_in - 1), w.astype(np.float32))
+            for k, w in zip((-1, 0, 1, 2), poids))
     return tab
 
 
 def agrandir(a, shape):
-    """Agrandit une image reduite sans marches : interpolation lineaire.
+    """Agrandit une image reduite, sans marche ni pli : B-spline cubique.
 
-    upsample() recopie chaque pixel reduit en un bloc de 4 x 4 ou 8 x 8. Sur
-    un flou, l'ecart d'un bloc a l'autre est faible, mais il se voyait en
-    1080p : des carres dans le halo du neon, dans la lumiere des coups, le
-    halo laiteux et le grain, nets surtout sur un fond clair et en qualite
-    « net », qui garde tout. Ici chaque pixel est la moyenne ponderee de ses
-    quatre voisins reduits : le degrade est continu.
+    Recopier chaque pixel en un bloc (l'ancien upsample) laissait des carres
+    de 4 et 8 pixels dans les halos. L'interpolation lineaire qui l'a
+    remplace les effacait, mais gardait un pli a chaque pixel reduit : le
+    degrade y change de pente d'un coup, et l'oeil, tres sensible a ces
+    cassures, y voyait une image basse definition agrandie. La B-spline
+    cubique a une pente et une courbure continues : plus de pli. Elle adoucit
+    un peu au passage, sans consequence sur un flou.
 
-    Les colonnes d'abord, tant que l'image est basse, puis les lignes, qui se
-    recopient d'un bloc : 5,4 ms pour un agrandissement par 4 en 1080p.
+    Les colonnes d'abord, tant que l'image est basse, puis les lignes.
     """
     h, w = shape
-    j0, j1, u = _axe(w, a.shape[1])
-    c0 = np.take(a, j0, axis=1)
-    c1 = np.take(a, j1, axis=1)
-    c1 -= c0
-    c1 *= u
-    c0 += c1
-    i0, i1, t = _axe(h, a.shape[0])
-    r0 = np.take(c0, i0, axis=0)
-    r1 = np.take(c0, i1, axis=0)
-    r1 -= r0
-    r1 *= t[:, None]
-    r0 += r1
-    return r0
+    (j, u), *reste = _axe(w, a.shape[1])
+    c = np.take(a, j, axis=1)
+    c *= u
+    for j, u in reste:
+        x = np.take(a, j, axis=1)
+        x *= u
+        c += x
+    (i, t), *reste = _axe(h, a.shape[0])
+    r = np.take(c, i, axis=0)
+    r *= t[:, None]
+    for i, t in reste:
+        x = np.take(c, i, axis=0)
+        x *= t[:, None]
+        r += x
+    return r
 
 
-def halo_reduit(k, ecart, pres, loin, shape):
-    """Le halo d'un trace : deux flous larges, en quart et en huitieme de
-    definition, melanges en quart puis agrandis d'une seule passe lisse.
+def decimation(sigma):
+    """La reduction (une puissance de 2) a laquelle calculer un flou
+    d'ecart-type `sigma` pixels : celle qui lui laisse de 3,5 a 7 points de
+    mesure par ecart-type. Moins, et le flou agrandi garde la trace de sa
+    grille ; plus, et le calcul est long pour rien."""
+    d = 1
+    while sigma / (2 * d) >= 3.5:
+        d *= 2
+    return d
 
-    Les deux flous etaient agrandis chacun par blocs puis additionnes en
-    pleine definition : deux fois plus de travail, et des carres de 4 et
-    8 pixels dans la lueur.
+
+def flou_large(a, sigma):
+    """Flou gaussien d'ecart-type `sigma` pixels, calcule en definition
+    reduite puis agrandi sans pli."""
+    d = decimation(sigma)
+    if d == 1:
+        return gauss(a, sigma)
+    return agrandir(gauss(downsample(a, d), sigma / d), a.shape)
+
+
+def halo_reduit(k, ecart, pres, loin, shape, H):
+    """Le halo d'un trace : un flou serre et un flou large.
+
+    Leur taille suit la hauteur de l'image — 10,4 et 36 pixels a 1080p,
+    l'ancien halo —, si bien que l'apercu en 960x540, le rendu 1080p et le
+    rendu 4K ont la meme lueur. Elle etait fixee en pixels : la 4K avait un
+    halo quatre fois plus etroit que l'apercu, colle au trait, et le rendu
+    final ne ressemblait pas a ce qu'on avait regle.
+
+    Chacun est calcule a la reduction qui lui laisse assez de points (voir
+    decimation), le large est ramene sur la grille du serre, et l'ensemble
+    est agrandi d'une seule passe lisse.
     """
-    g4 = gauss(downsample(k, 4), 2.6 * ecart)
-    g8 = gauss(downsample(k, 8), 4.5 * ecart)
-    g4 *= np.float32(2.6 * pres)
-    g8 = agrandir(g8, g4.shape)
-    g8 *= np.float32(3.4 * loin)
-    g4 += g8
-    return agrandir(g4, shape)
+    ech = H / 1080.0
+    s_n, s_f = 10.4 * ecart * ech, 36.0 * ecart * ech
+    dn, df = decimation(s_n), decimation(s_f)
+    gn = gauss(downsample(k, dn) if dn > 1 else k, s_n / dn)
+    gn *= np.float32(2.6 * pres)
+    gf = gauss(downsample(k, df), s_f / df)
+    gf *= np.float32(3.4 * loin)
+    gn += agrandir(gf, gn.shape)
+    if gn.shape == tuple(shape):
+        return gn
+    return agrandir(gn, shape)
 
 
 class Beam:
@@ -5704,9 +5728,10 @@ class Renderer:
             # du faisceau : un flou large n'a aucun detail a perdre, et le
             # faire en pleine definition doublait le temps de calcul d'une
             # image 1080p a lui seul.
-            petit = downsample(img[:, :, 0] + img[:, :, 1] + img[:, :, 2], 4)
-            petit *= np.float32(1.0 / 3.0)
-            flou = agrandir(gauss(petit, max(1.5, H / 600.0)), (H, W))
+            somme = img[:, :, 0] + img[:, :, 1]
+            somme += img[:, :, 2]
+            somme *= np.float32(1.0 / 3.0)
+            flou = flou_large(somme, max(6.0, H / 150.0))
             img *= (1.0 - 0.10 * k)
             img += flou[..., None] * (0.42 * k)
             img += 0.035 * k                    # les noirs ne sont plus noirs
@@ -5817,7 +5842,7 @@ class Renderer:
             if not a.any():
                 continue
             k = gauss(a, self.sigma)
-            hc = halo_reduit(k, ecart, pres, loin, (h, w))
+            hc = halo_reduit(k, ecart, pres, loin, (h, w), self.H)
             np.clip(hc, 0, 3.0, out=hc)
             hc *= g
             halo[c] = hc
@@ -5958,7 +5983,7 @@ class Renderer:
         fond = self._fond_de(t, False)
         H, W = self.H, self.W
         lum = fond[:, :, 0] * 0.30 + fond[:, :, 1] * 0.55 + fond[:, :, 2] * 0.15
-        lum = agrandir(gauss(downsample(lum, 8), 2.0), (H, W))
+        lum = flou_large(lum, 16.0 * H / 1080.0)
         beta = np.clip((lum - 0.28) / 0.30, 0.0, 1.0)
         beta *= beta * (3.0 - 2.0 * beta)
         for c in range(3):
@@ -5986,7 +6011,7 @@ class Renderer:
         k = float(np.clip(self.reflet, 0.0, 1.0))
         ecart = 1.45 - 0.9 * k
         pres, loin = 1.0 + 1.2 * (k - 0.5), 1.0 - 1.2 * (k - 0.5)
-        glow = halo_reduit(core, ecart, pres, loin, (H, W))
+        glow = halo_reduit(core, ecart, pres, loin, (H, W), H)
 
         inten = core * 1.15
         hot = np.clip(inten - 0.72, 0, None)
@@ -6093,12 +6118,17 @@ class Renderer:
         img *= ((scan * roll).astype(np.float32) * vign)[..., None]
         self._aberration(img)
 
-        # Le grain : un tirage au quart de la definition, agrandi en douceur.
-        # Recopie en blocs, il faisait une mosaique de carres de 4 pixels sur
-        # les aplats clairs. L'interpolation en reduit l'ecart-type aux deux
-        # tiers : 0,0167 au lieu de 0,011 lui rend sa force.
-        img += agrandir(rng.standard_normal((H // 4, W // 4)).astype(np.float32),
-                        (H, W))[..., None] * np.float32(0.0167)
+        # Le grain : fin — un tirage par pixel — et discret, 1,4 niveau sur 255.
+        # Tire au quart de la definition puis agrandi, il faisait des carres
+        # (recopie en blocs), puis des taches molles (agrandi en douceur) qui
+        # salissaient la lueur et le noir. On garde le meme tirage, pour que
+        # le hasard qui suit — les glitchs — ne bouge pas, mais il est pose en
+        # mosaique a pleine definition : seize carreaux de bruit, dont la
+        # repetition, a ce niveau et renouvelee a chaque image, ne se voit pas.
+        n = rng.standard_normal((H // 4, W // 4)).astype(np.float32)
+        n *= np.float32(0.0055)
+        grain = np.tile(n, (-(-H // n.shape[0]), -(-W // n.shape[1])))[:H, :W]
+        img += grain[..., None]
 
         self._reactions_glitch(img, t, rng)
 

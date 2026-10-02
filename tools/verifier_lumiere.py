@@ -41,12 +41,13 @@ def _plein(accent, forme):
     return out
 
 
-def _rendu(mach, events, t=VU, **kw):
+def _rendu(mach, events, t=VU, taille=None, **kw):
     """Une image ; rend le renderer, l'image, le champ du trait et celui des
     couleurs (None quand la lumiere des coups a la couleur du trait)."""
     son = {"sr": SR, "mono": np.zeros(int(SR * DUREE), np.float32),
            "beat": 0.5, "events": events}
-    r = P.make_performance_renderer(W, H, 30, DUREE, son, 0.0, [], curve=False,
+    w, h = taille or (W, H)
+    r = P.make_performance_renderer(w, h, 30, DUREE, son, 0.0, [], curve=False,
                                     machine=mach, glitch=0.0, split=0.0,
                                     punch=0.0, **kw)
     vu = {}
@@ -162,8 +163,12 @@ def couleurs():
         if abs(c2 / tr - 1.0) > 0.05:
             fautes.append("%s : en couleur au choix, la lumiere du coup vaut "
                           "%.2f fois celle du trait" % (nom, c2 / tr))
-        # orange : il ne doit ni jaunir ni blanchir, meme frappe a fond
-        r, img, _f, _a = _rendu(nom, [(COUP, 5, 1.0, 6.0)],
+        # orange : il ne doit ni jaunir ni blanchir, meme frappe a fond.
+        # Juge a la definition de l'apercu, celle sur laquelle on regle : la
+        # lueur suit la hauteur de l'image, mais en dessous le trait bute sur
+        # son epaisseur minimale (0,55 pixel) et devient, en proportion, plus
+        # epais et plus lumineux — en 480x270, l'orange y prenait 0,67 de vert.
+        r, img, _f, _a = _rendu(nom, [(COUP, 5, 1.0, 6.0)], taille=(960, 540),
                                 couleur_coups="libre",
                                 couleur_coups_libre=(1.0, 0.48, 0.12))
         x0, y0, x1, y1 = O.MACHINES[nom]["pads"][5]

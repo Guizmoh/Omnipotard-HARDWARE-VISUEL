@@ -1752,8 +1752,8 @@ Les trois partagent les mêmes réglages fins de `x264` : le débit réparti sel
 le détail de chaque zone (`aq-mode 2`), et le filtre anti-blocs à sa force
 normale. L'ancien réglage — débit donné en priorité aux zones sombres et
 anti-blocs affaibli, pour ménager les traits fins — laissait une grille de
-blocs de 8 pixels sans rien gagner sur le trait : voir *Plus de carrés dans la
-lumière*, plus bas.
+blocs de 8 pixels sans rien gagner sur le trait : voir *La lueur du néon*,
+plus bas.
 
 ### Vitesse du séquenceur
 
@@ -2033,34 +2033,58 @@ l'image ; la qualité garde une ligne, qui dit ce que donne celle qui est
 choisie. Un rendu terminé ne laisse plus traîner le bouton *Arrêter* à côté
 de *Télécharger*.
 
-## Plus de carrés dans la lumière
+## La lueur du néon : propre, et la même de l'aperçu à la 4K
 
-En 1080p, même en qualité *net*, le néon et la lumière des coups se couvraient
-de petits carrés, nets surtout à l'encre sur un ciel clair. Deux causes, qui
-s'additionnaient.
+En 1080p puis en 4K, la lueur du néon faisait image basse définition agrandie —
+« un site web de 1995 limité à 360p » —, quels que soient les réglages. Quatre
+défauts, corrigés ensemble.
 
-**Le moteur.** Les flous larges — le halo du trait, celui des coups, le halo
-laiteux, la clarté qui choisit entre encre et néon en mode auto — se calculent
-en quart ou en huitième de définition : un flou large n'a pas de détail à
-perdre, et c'est ce qui les rend abordables. Mais ils étaient ensuite
-**recopiés par blocs** : chaque pixel réduit devenait un carré de 4 × 4 ou
-8 × 8 pixels identiques. Le grain de l'image, tiré au quart, l'était aussi, et
-le fond « bruit » par carrés de 3. D'un carré au suivant l'écart est faible,
-mais c'est une marche franche : sur une image 1080p, les petites marches
-étaient en moyenne **quatre à neuf fois plus fortes** sur la grille de
-4 pixels qu'ailleurs.
+**Une lueur qui rétrécissait avec la définition.** L'épaisseur du trait suit
+la hauteur de l'image, mais pas sa lueur : ses deux flous étaient fixés en
+pixels (10,4 et 36). En 960×540 — l'aperçu, celui sur lequel on règle — la
+lueur baignait toute la machine ; en 4K elle était quatre fois plus étroite,
+collée au trait. Le fichier final ne ressemblait pas à ce qu'on avait réglé.
+Les deux flous ont maintenant une taille relative à la hauteur : 10,4 et 36 px
+en 1080p comme avant, 20,8 et 72 en 4K, 5,2 et 18 dans l'aperçu. Le 1080p garde
+sa lueur ; l'aperçu et la 4K le rejoignent. Conséquence : dans l'aperçu, la
+lueur est moitié moins large qu'avant — c'est désormais celle du fichier. Un
+*éclat du néon* trouvé sur l'ancien aperçu peut demander à être remonté.
 
-Ils sont désormais **agrandis par interpolation** : chaque pixel est la
-moyenne pondérée de ses quatre voisins réduits, le dégradé est continu. Sur les
-mêmes images, l'excès de marches sur la grille tombe de +300 à +840 % à +8 à
-+15 % — la trace normale de l'interpolation, sans marche. Les deux flous du
-halo sont maintenant mêlés en quart de définition puis agrandis d'une seule
-passe, au lieu d'être agrandis chacun puis additionnés en pleine définition :
-l'image coûte le même temps de calcul qu'avant. La luminosité moyenne ne bouge
-pas (à 0,04 niveau près sur 255), le grain garde sa force — l'interpolation
-l'adoucit d'un tiers, son écart-type est compensé — et le hasard est tiré
-exactement comme avant : les glitchs tombent aux mêmes instants, aux mêmes
-endroits.
+**Des carrés, puis des plis.** Les flous larges se calculent en définition
+réduite — un flou large n'a pas de détail à perdre —, puis sont agrandis. Ils
+étaient recopiés par blocs de 4 × 4 et 8 × 8 pixels identiques : des carrés,
+nets surtout à l'encre sur un ciel clair (sur une image 1080p, les petites
+marches étaient en moyenne quatre à neuf fois plus fortes sur la grille de
+4 pixels qu'ailleurs). La version 2026-10-02.9 les agrandissait par
+interpolation linéaire : plus de carrés, mais un pli à chaque point de la
+grille réduite, là où le dégradé change de pente d'un coup — et l'œil, très
+sensible à ces cassures, y lit une petite image agrandie. Désormais :
+
+- chaque flou est calculé à la réduction qui lui laisse de 3,5 à 7 points par
+  écart-type — en 1080p, le flou serré en demi-définition, le large en
+  huitième ; le premier était calculé en quart, avec 2,6 points seulement ;
+- l'agrandissement est une **B-spline cubique**, à pente et courbure
+  continues : plus de pli. Mesuré sur un tracé de test, l'ancienne lueur
+  concentrait toute sa courbure sur la grille de 4 pixels ; la nouvelle la
+  répartit uniformément. Et sur les images 1080p du début, l'excès de marches
+  sur la grille, de +300 à +840 % avec les blocs et +8 à +15 % avec
+  l'interpolation linéaire, tombe à zéro (± 1 %).
+
+Le halo laiteux et la clarté du mode auto passent par le même chemin.
+
+**Un grain qui salissait.** Le grain de l'image, tiré au quart de la
+définition puis agrandi, faisait des carrés ; adouci en 2026-10-02.9, des
+taches molles qui salissaient la lueur et le noir — c'est lui qu'on voyait sur
+la 4K. Il est maintenant **fin — un tirage par pixel — et discret** : 1,4 niveau
+sur 255 au lieu de 4. Le tirage reste le même, pour que la suite du hasard —
+les glitchs — ne bouge pas : il est posé en mosaïque de seize carreaux, dont la
+répétition, à ce niveau et renouvelée à chaque image, ne se voit pas.
+
+Coût mesuré, par image : +7 % en 1080p (357 ms contre 335), −9 % en 4K
+(1,59 s contre 1,75 : le nouveau grain coûte moins cher que l'ancien), +16 %
+avec le grain de fond, le halo laiteux et le mode auto. Et les fichiers sont
+**deux fois plus légers** à qualité égale (1,2 Mo par seconde en *net* au lieu
+de 2,5) : le grain taché coûtait cher à encoder.
 
 **L'encodage.** `x264` était réglé pour des traits fins sur du noir : débit
 donné en priorité aux zones sombres (`aq-mode 3`) et filtre anti-blocs
@@ -2080,7 +2104,9 @@ affaibli (`deblock -2`), pour qu'il ne lisse pas les traits. Mesuré sur
 L'anti-blocs affaibli ne protégeait donc rien : il laissait passer les bords
 de blocs de l'encodeur, sur fond noir comme sur un ciel. Un anti-blocs à −1
 garde une grille plus faible (+10 %) pour un trait à peine meilleur (5,14) ;
-on a préféré n'en garder aucune.
+on a préféré n'en garder aucune. Remesuré avec la nouvelle lueur, `aq-mode 3`
+ne fait pas mieux que `aq-mode 2` dans les dégradés sombres (même erreur, 1,96)
+et rend le trait un peu moins net (5,10 contre 4,97) : le réglage reste.
 
 **Le fond vidéo**, lui, reste doux par choix : au réglage par défaut de
 *netteté du fond*, il est lu au tiers de la définition et flouté — le faisceau
