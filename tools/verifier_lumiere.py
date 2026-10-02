@@ -180,9 +180,9 @@ def couleurs():
                 fautes.append("%s : l'orange frappe a fond devient (1, %.2f, "
                               "%.2f) — jauni ou blanchi" % (nom, g, b))
     # par instrument : la grosse caisse rouge, le charley cyan
-    r, img, _f, acc = _rendu("mpc", [(COUP, 0, 1.0, 6.0), (COUP, 10, 1.0, 6.0)],
+    r, img, _f, acc = _rendu("mpc", [(COUP, 0, 1.0, 6.0), (COUP, 4, 1.0, 6.0)],
                              couleur_coups="instrument")
-    for pad in (0, 10):
+    for pad in (0, 4):
         fam = O.PAD_FAMILLE.get(pad)
         z = _zone(r, O.MACHINES["mpc"]["pads"][pad])
         vu = np.array([float(a[z].sum()) for a in acc])

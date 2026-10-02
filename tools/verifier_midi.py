@@ -124,14 +124,26 @@ def verifier():
     ok(not _allumees(m, 1.0 + O.TENUE_MAX + 0.40),
        "la note tenue reste allumee au-dela de %.1f s" % O.TENUE_MAX)
 
-    # 9. batterie : un instrument, un pad ; la grosse caisse sur le premier
-    kit = [36, 38, 42, 46, 49, 51]         # caisse, claire, charleys, cymbales
+    # 9. batterie : chaque instrument sur le pad de sa famille, comme la
+    #    reconnaissance range le son — grosse caisse au pad 1, caisse claire
+    #    au 3, charley ferme au 5, ouvert et cymbales au 6, toms des 9
+    kit = [36, 38, 42, 46, 49, 51, 45, 56]
+    attendu = [0, 2, 4, 5, 5, 5, 8, 12]
     notes = [(1.0 + i * 0.5, 1.1 + i * 0.5, h, 0.9) for i, h in enumerate(kit)]
     m = _Moteur(notes)
-    for i, h in enumerate(kit):
+    for i, (h, p) in enumerate(zip(kit, attendu)):
         vu = _allumees(m, 1.0 + i * 0.5 + 0.002, batterie=True)
-        ok(vu == {i}, "batterie : l'instrument %d allume %s au lieu du pad %d"
-           % (h, sorted(vu), i))
+        ok(vu == {p}, "batterie : l'instrument %d allume %s au lieu du pad %d"
+           % (h, sorted(vu), p + 1))
+    # deux grosses caisses : la plus jouee au pad 1, l'autre au 2
+    m = _Moteur([(1.0, 1.1, 35, 0.9), (2.0, 2.1, 36, 0.9), (3.0, 3.1, 36, 0.9)])
+    ok(_allumees(m, 1.002, batterie=True) == {1}
+       and _allumees(m, 2.002, batterie=True) == {0},
+       "batterie : la grosse caisse la plus jouee n'est pas au pad 1")
+    # un fichier sans rien d'un kit General MIDI garde l'ordre des hauteurs
+    m = _Moteur([(1.0, 1.1, 60, 0.9), (2.0, 2.1, 62, 0.9)])
+    ok(_allumees(m, 2.002, batterie=True) == {1},
+       "batterie : un fichier hors General MIDI ne suit plus l'ordre des hauteurs")
 
     # 10. batterie : un instrument garde son pad, quoi qu'il joue avec lui
     m = _Moteur([(1.0, 1.1, 38, 0.9),

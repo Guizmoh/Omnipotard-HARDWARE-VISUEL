@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.3"
+VERSION = "2026-10-02.4"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -481,9 +481,10 @@ COMPTE = {
     "stepDiv": "sequenceur",
     # pas une frequence : ce que coute et ce que rend l'encodage choisi
     "quality": "qualite",
-    # L'eclair jaune n'a pas de selecteur : il est cable sur la caisse claire
-    # et les percussions. Une liste de familles dit lesquelles compter.
-    "snare": ["caisse claire", "percussions"],
+    # L'eclair jaune n'a pas de selecteur : il est cable sur les caisses
+    # claires (principale et secondaire). Une liste de familles dit
+    # lesquelles compter.
+    "snare": ["caisse claire"],
     "echo": "continu", "couleurs": "continu", "spectro": "continu",
     "cadence": "continu", "haloDoux": "continu", "poussiere": "continu",
     "flottement": "continu", "travel": "continu", "wobble": "continu",
@@ -2783,8 +2784,21 @@ PERCS = ()
 SKANKS = (2, 6, 10, 14)        # l'accord des contretemps
 BASSLINE = (((0, "A1", 6), (10, "C2", 4)),)
 
-# pad allume par famille d'evenement (grille 4x4, 0 = en bas a gauche)
-PAD_OF = {"kick": 0, "rim": 5, "hat": 10, "perc": 6}
+# La disposition des pads, celle qu'on donne a une batterie sur une MPC
+# (grille 4x4, numerotee ici a partir de 0, 0 = en bas a gauche) :
+#
+#     pad  1      la grosse caisse        2   la grosse caisse secondaire
+#     pad  3      la caisse claire        4   la secondaire : clap, rim,
+#                                             coups fantomes
+#     pad  5      le charley ferme        6   le charley ouvert, les cymbales
+#     pad  7      la basse                8   les autres instruments
+#     pads 9-12   les toms, du grave a l'aigu
+#     pads 13-15  les percussions, du grave a l'aigu
+#     pad 16      les effets : les montees
+PAD_OF = {"kick": 0, "kick2": 1, "rim": 2, "rim2": 3, "hat": 4, "hat2": 5,
+          "bass": 6, "inst": 7, "perc": 12, "fx": 15}
+PADS_TOMS = (8, 9, 10, 11)
+PADS_PERCUS = (12, 13, 14)
 
 # Les familles sur lesquelles chaque effet peut se caler. C'est la meme liste
 # partout : une fois la batterie reconnue, pointer une reaction sur la caisse
@@ -2792,12 +2806,12 @@ PAD_OF = {"kick": 0, "rim": 5, "hat": 10, "perc": 6}
 PADS_REELS = 16           # au-dela, ce sont des declencheurs sans pad
 
 FAMILLES = {
-    "grosse caisse": (0,),
-    "basse": (1, 2, 3),
-    "caisse claire": (5,),
-    "percussions": (6,),
-    "charley": (10, 11),
-    "accords": (12, 13, 14, 15),
+    "grosse caisse": (0, 1),
+    "caisse claire": (2, 3),
+    "charley": (4, 5),
+    "basse": (6,),
+    "autres instruments": (7,),
+    "percussions": PADS_TOMS + PADS_PERCUS + (PAD_OF["fx"],),
     # « tout » ne veut dire que les vrais coups de la machine : les
     # declencheurs virtuels ci-dessous n'y entrent pas, sans quoi les regler
     # sur « tout » ferait partir l'effet des dizaines de fois par seconde.
@@ -2811,17 +2825,69 @@ PAD_FAMILLE = {pad: fam for fam, pads in FAMILLES.items() if fam != "tout"
                for pad in pads}
 
 
+GM_GROSSES_CAISSES = (36, 35)
+GM_CAISSES = (38, 40, 39, 37)       # caisse claire, electrique, clap, rim
+GM_CHARLEYS_FERMES = (42, 44)
+GM_OUVERTS = (46, 49, 51, 52, 53, 55, 57, 59)    # charley ouvert, cymbales
+GM_TOMS = (41, 43, 45, 47, 48, 50)
+
+
 def famille_gm(hauteur):
     """La famille d'une note de batterie General MIDI : 36 la grosse caisse,
     38 la caisse claire, 42 le charley ferme..."""
     h = int(hauteur)
-    if h in (35, 36):
+    if h in GM_GROSSES_CAISSES:
         return "grosse caisse"
-    if h in (37, 38, 39, 40):
+    if h in GM_CAISSES:
         return "caisse claire"
-    if h in (42, 44, 46, 49, 51, 52, 53, 55, 57, 59):
+    if h in GM_CHARLEYS_FERMES + GM_OUVERTS:
         return "charley"          # charleys et cymbales : le metal
     return "percussions"          # toms, cloches, tout le reste
+
+
+def pads_gm(hauteurs, n=16):
+    """La table hauteur -> pad d'un fichier de batterie, rangee comme la
+    reconnaissance range le son (voir PAD_OF).
+
+    Un fichier General MIDI dit l'instrument par sa hauteur : 36 la grosse
+    caisse, 38 la caisse claire, 42 le charley ferme. Chaque famille prend
+    donc ses pads — la plus jouee des deux grosses caisses le pad 1, l'autre
+    le 2 ; la caisse claire le 3 et clap, rim ou seconde caisse le 4 ; le
+    charley ferme le 5, l'ouvert et les cymbales le 6 ; les toms les pads 9
+    a 12 du grave a l'aigu, le reste les pads 13 a 15.
+
+    Un fichier qui n'a rien d'un kit General MIDI — moins de deux des notes
+    de reference — garde la lecture d'avant : du plus grave au plus aigu, un
+    pad chacun, comme un programme de MPC rangé chromatiquement.
+    """
+    h, cpt = np.unique(np.asarray(hauteurs, dtype=np.int64), return_counts=True)
+    if not len(h):
+        return {}
+    combien = dict(zip(h.tolist(), cpt.tolist()))
+    reperes = {35, 36, 38, 40, 42, 44, 46}
+    if len(reperes & set(combien)) < 2:
+        return {int(x): k % n for k, x in enumerate(h)}
+    table = {}
+
+    def paire(notes, p1, p2):
+        la = sorted((x for x in notes if x in combien), key=lambda x: -combien[x])
+        for k, x in enumerate(la):
+            table[x] = p1 if k == 0 else p2
+    paire(GM_GROSSES_CAISSES, PAD_OF["kick"], PAD_OF["kick2"])
+    paire(GM_CAISSES, PAD_OF["rim"], PAD_OF["rim2"])
+    for x in GM_CHARLEYS_FERMES:
+        table[x] = PAD_OF["hat"]
+    for x in GM_OUVERTS:
+        table[x] = PAD_OF["hat2"]
+    toms = sorted(x for x in combien if x in GM_TOMS)
+    for k, x in enumerate(toms):
+        table[x] = PADS_TOMS[min(len(PADS_TOMS) - 1,
+                                 k * len(PADS_TOMS) // max(1, len(toms)))]
+    autres = sorted(x for x in combien if x not in table)
+    for k, x in enumerate(autres):
+        table[x] = PADS_PERCUS[min(len(PADS_PERCUS) - 1,
+                                   k * len(PADS_PERCUS) // max(1, len(autres)))]
+    return {int(x): int(p) % n for x, p in table.items() if x in combien}
 
 
 # ==========================================================================
@@ -2888,8 +2954,8 @@ PARTS = {
 }
 # Les familles auxquelles on propose les parts : les bandes et le hasard ont
 # deja de quoi se separer, et la liste resterait lisible.
-PARTAGEES = ("grosse caisse", "basse", "caisse claire", "percussions",
-             "charley", "accords")
+PARTAGEES = ("grosse caisse", "caisse claire", "charley", "basse",
+             "autres instruments", "percussions")
 
 
 def decoupe_declencheur(nom):
@@ -2960,17 +3026,19 @@ def hasard_events(dur, beat, phi, seed=7):
 # choisies bien separees sur le cercle : le faisceau etant additif et passant
 # ensuite dans un halo, deux teintes voisines se melangeraient en une bouillie.
 TEINTES = {
-    "grosse caisse": (1.00, 0.24, 0.20),      # rouge
-    "basse":         (0.62, 0.30, 1.00),      # violet
-    "caisse claire": (1.00, 0.92, 0.36),      # jaune
-    "percussions":   (1.00, 0.56, 0.14),      # orange
-    "charley":       (0.34, 0.95, 1.00),      # cyan
-    "accords":       (0.40, 1.00, 0.52),      # vert
+    "grosse caisse":      (1.00, 0.24, 0.20),      # rouge
+    "basse":              (0.62, 0.30, 1.00),      # violet
+    "caisse claire":      (1.00, 0.92, 0.36),      # jaune
+    "percussions":        (1.00, 0.56, 0.14),      # orange
+    "charley":            (0.34, 0.95, 1.00),      # cyan
+    "autres instruments": (0.40, 1.00, 0.52),      # vert
 }
-PAD_BASS = {"A1": 1, "G1": 1, "C2": 2, "D2": 2, "E2": 3}
-PAD_SKANK = (12, 13, 14, 15)
-DECAY_OF = {"kick": 4.5, "rim": 8.0, "hat": 14.0, "perc": 13.0,
-            "bass": 3.0, "skank": 5.0}
+PAD_BASS = {"A1": PAD_OF["bass"], "G1": PAD_OF["bass"], "C2": PAD_OF["bass"],
+            "D2": PAD_OF["bass"], "E2": PAD_OF["bass"]}
+PAD_SKANK = (PAD_OF["inst"],)
+DECAY_OF = {"kick": 4.5, "kick2": 6.0, "rim": 8.0, "rim2": 10.0, "hat": 14.0,
+            "hat2": 5.0, "perc": 12.0, "tom": 7.0, "bass": 3.0, "skank": 5.0,
+            "inst": 4.0, "fx": 2.5}
 
 
 def _lowpass(x, width):
@@ -3124,7 +3192,7 @@ def synth_audio(duration=DUREE_REF, sr=SR, seed=3):
         add(dry, s, at, 0.05 * f)
         add(ech, s, at, 0.17 * f)
         add(rev, s, at, 0.11 * f)
-        fire(at, "skank", PAD_SKANK[k % 4], f)
+        fire(at, "skank", PAD_SKANK[k % len(PAD_SKANK)], f)
 
     def shaker(at, f=1.0):
         t = seg(0.11)
@@ -3377,7 +3445,9 @@ class Renderer:
         self.ev_pad = np.array([e[1] for e in ev], dtype=np.int32)
         self.ev_f = np.array([e[2] for e in ev], dtype=np.float64)
         self.ev_d = np.array([e[3] for e in ev], dtype=np.float64)
-        self.ev_bass = self.ev_pad <= 3          # grosse caisse et notes de basse
+        # grosses caisses et notes de basse
+        self.ev_bass = np.isin(self.ev_pad, FAMILLES["grosse caisse"]
+                               + FAMILLES["basse"])
         # les declencheurs sans pad (bandes, hasard) ne rallument rien sur la
         # machine et ne comptent pas dans la densite du morceau
         self.ev_reel = self.ev_pad < PADS_REELS
@@ -3673,23 +3743,23 @@ class Renderer:
         ferme. La replier par octaves comme une melodie n'aurait aucun sens :
         une grosse caisse et un tom tomberaient sur la meme touche.
 
-        Les instruments presents dans le fichier sont donc ranges du plus grave
-        au plus aigu, et chacun prend un pad, dans l'ordre. La grosse caisse
-        est presque toujours la plus grave et tombe sur le premier pad, comme
-        sur une vraie boite a rythmes. La table est faite sur **tout** le
+        Chaque instrument va sur le pad de sa famille, comme la reconnaissance
+        range le son (voir pads_gm) : la grosse caisse au pad 1, la caisse
+        claire au 3, le charley au 5. La table est faite sur **tout** le
         fichier et non sur ce qui sonne a l'instant : sans cela un instrument
-        changerait de pad selon ceux qui jouent avec lui.
-
-        Au-dela de n instruments, les suivants reprennent les pads depuis le
-        premier. La transposition n'entre pas en jeu : transposer une batterie
-        changerait d'instrument, pas de hauteur.
+        changerait de pad selon ceux qui jouent avec lui. La transposition
+        n'entre pas en jeu : transposer une batterie changerait d'instrument,
+        pas de hauteur.
         """
         actives = self._notes_actives(t, avec_debut=True)
         if actives is None or n <= 0:
             return ({}, {}) if detail else {}
         haut, v, deb = actives
-        table = np.unique(self.midi[:, 2])
-        k = np.searchsorted(table, haut) % n
+        cle = (id(self.midi), len(self.midi), n)
+        if getattr(self, "_table_gm", (None,))[0] != cle:
+            self._table_gm = (cle, pads_gm(self.midi[:, 2], n))
+        table = self._table_gm[1]
+        k = [table.get(int(h), 0) for h in haut]
         out, quoi = {}, {}
         for kk, vv, hh, dd in zip(k, v, haut, deb):
             if vv > 0.02:
@@ -3885,7 +3955,8 @@ class Renderer:
     def kick_hit(self, t):
         """Enveloppe des grosses caisses seules : sert au zoom de l'image."""
         dt = t - self.ev_t
-        m = (dt >= 0.0) & (dt < 0.45) & (self.ev_pad == PAD_OF["kick"])
+        m = (dt >= 0.0) & (dt < 0.45) & np.isin(self.ev_pad,
+                                                FAMILLES["grosse caisse"])
         if not np.any(m):
             return 0.0
         return float(np.max(self.ev_f[m] * np.exp(-9.0 * dt[m])))
@@ -3932,7 +4003,7 @@ class Renderer:
         return float(np.max(np.exp(-1.35 * dt[m])))
 
     def snare_hit(self, t, thresh=0.42):
-        """Caisse claire et percussions : elles eclairent le trait en jaune.
+        """Les caisses claires : elles eclairent le trait en jaune.
 
         Volontairement breve — la bande medium est bien fournie, et sans une
         retombee rapide la machine resterait jaune en permanence au lieu d'etre
@@ -3940,7 +4011,7 @@ class Renderer:
         """
         dt = t - self.ev_t
         m = ((dt >= 0.0) & (dt < 0.40) & (self.ev_f >= thresh)
-             & ((self.ev_pad == PAD_OF["rim"]) | (self.ev_pad == PAD_OF["perc"])))
+             & np.isin(self.ev_pad, FAMILLES["caisse claire"]))
         if not np.any(m):
             return 0.0
         return float(np.max(self.ev_f[m] * np.exp(-11.0 * dt[m])))
@@ -6234,76 +6305,344 @@ def pick_split_times(ev_t, ev_f, eligibles, dur, count):
     return np.array(sorted(out), dtype=np.float64)
 
 
+class _Grave:
+    """Le grave du morceau, filtre : sa hauteur par ses passages a zero, et
+    l'instant ou il attaque vraiment.
+
+    Calcule sur le son reduit a ~5,5 kHz : on n'y cherche que des hauteurs
+    sous 250 Hz (500 pour les toms), et un morceau de six minutes a pleine
+    definition demandait une transformee de 33 millions de points.
+    """
+
+    def __init__(self, x, sr, fc=250.0):
+        x = np.asarray(x, dtype=np.float64)
+        r = max(1, int(sr // 5500))
+        n = len(x) // r
+        y = x[:n * r].reshape(n, r).mean(axis=1)
+        self.sr = sr / float(r)
+        N = 1 << max(1, (max(n, 2) - 1).bit_length())
+        X = np.fft.rfft(y, N)
+        f = np.fft.rfftfreq(N, 1.0 / self.sr)
+        X *= 1.0 / (1.0 + (f / fc) ** 8)
+        b = np.fft.irfft(X, N)[:n]
+        self.zc = np.nonzero(np.diff(np.signbit(b)))[0] / self.sr
+        self.pas = max(1, int(self.sr * 0.002))
+        k = len(b) // self.pas
+        self.amp = np.abs(b[:k * self.pas]).reshape(k, self.pas).max(axis=1)
+
+    def hauteur(self, a, b):
+        n = np.searchsorted(self.zc, b) - np.searchsorted(self.zc, a)
+        return n / 2.0 / max(b - a, 1e-6)
+
+    def attaque(self, t, avant=0.03, apres=0.05):
+        """L'instant ou le grave monte vraiment, pres de t."""
+        d = self.pas / self.sr
+        i0 = max(0, int((t - avant) / d))
+        i1 = min(len(self.amp), int((t + apres) / d))
+        if i1 - i0 < 3:
+            return t
+        a = self.amp[i0:i1]
+        fond = a[:max(1, int(0.01 / d))].min()
+        j = int(np.argmax(a >= fond + 0.5 * (a.max() - fond)))
+        return (i0 + j) * d
+
+    def glisse(self, t0):
+        """(hauteur au debut, hauteur ensuite), a partir de l'attaque t0."""
+        return (self.hauteur(t0 + 0.002, t0 + 0.022),
+                self.hauteur(t0 + 0.035, t0 + 0.095))
+
+
+def _secondaires(X, forces):
+    """Quels coups d'une famille sont « secondaires » : un second timbre net,
+    ou des coups fantomes. X : les traits du timbre, une ligne par coup.
+
+    Deux timbres se cherchent par une coupure sur chaque trait et sur leur
+    axe principal : la meilleure, si les deux groupes sont nettement separes
+    et que le plus petit pese au moins 8 % des coups. Les 2-moyennes,
+    essayees d'abord, se laissaient prendre par un coup aberrant — un groupe
+    d'un seul coup contre trente-neuf, et la vraie secondaire passait.
+    Sans second timbre, les secondaires sont les coups fantomes : moins de
+    0,45 fois la force ordinaire.
+    """
+    forces = np.asarray(forces, dtype=np.float64)
+    n = len(X)
+    if n >= 8:
+        med = np.median(X, axis=0)
+        # des traits par paliers (une hauteur comptee en passages a zero) ont
+        # un ecart median nul : on le borne, sans quoi deux paliers voisins
+        # paraissaient infiniment separes
+        mad = np.maximum(1.4826 * np.median(np.abs(X - med), axis=0),
+                         np.maximum(0.3 * X.std(axis=0), 1e-6))
+        Z = np.clip((X - med) / mad, -6, 6)
+        _u, _s, vt = np.linalg.svd(Z - Z.mean(axis=0), full_matrices=False)
+        m = max(3, int(np.ceil(0.08 * n)))
+        meilleur, lab = 0.0, None
+        for x in [Z[:, k] for k in range(Z.shape[1])] + [Z @ vt[0]]:
+            o = np.argsort(x)
+            xs = x[o]
+            c1, c2 = np.cumsum(xs), np.cumsum(xs ** 2)
+            for k in range(m, n - m + 1):
+                n1, n2 = k, n - k
+                m1, m2 = c1[k - 1] / n1, (c1[-1] - c1[k - 1]) / n2
+                v1 = c2[k - 1] / n1 - m1 ** 2
+                v2 = (c2[-1] - c2[k - 1]) / n2 - m2 ** 2
+                r = abs(m2 - m1) / max(np.sqrt(max(v1 * n1 + v2 * n2, 0.0) / n), 0.35)
+                if r > meilleur:
+                    meilleur = r
+                    lab = np.zeros(n, dtype=np.int64)
+                    lab[o[k:]] = 1
+        if lab is not None and meilleur >= 4.0:
+            poids = [(lab == k).sum() * forces[lab == k].mean() for k in (0, 1)]
+            return lab != int(np.argmax(poids))
+    return forces < 0.45 * np.median(forces) if n else np.zeros(0, bool)
+
+
 def detect_hits(mono, sr):
-    """Coups de batterie -> evenements de pads.
+    """Coups -> evenements de pads, ranges comme une batterie sur une MPC
+    (voir PAD_OF).
 
     Le flux par bande ne suffisait pas a distinguer les instruments : dans un
-    morceau dub la basse occupe la meme bande que la grosse caisse, et le pad
-    de kick s'allumait donc sur chaque note de basse. Chaque famille est ici
-    reconnue par ce qui la distingue physiquement.
+    morceau dub la basse occupe la meme bande que la grosse caisse. Chaque
+    famille est reconnue par ce qui la distingue physiquement.
 
-    - **Grosse caisse** : une attaque dans le grave *accompagnee d'un clic*
-      entre 2 et 6 kHz. Une note de basse n'a pas ce clic. Mesure sur Hint :
-      sans ce test, 2,05 attaques graves par temps reparties au hasard
-      (concentration 1,15 sur la grille) ; avec, 0,6 par temps nettement
-      calees (concentration 3,3).
+    - **Grosse caisse** : une attaque grave dont la **hauteur tombe** — de
+      136 a 67 Hz en soixante millisecondes sur le banc d'essai, quand une
+      note de basse reste a sa hauteur (68 -> 58). Avec, en plus, le clic
+      entre 2 et 6 kHz d'avant. Mesure sur deux vrais morceaux : les attaques
+      « avec clic mais sans chute » tombaient au hasard de la grille
+      (concentration 0,05 a 0,15) — des notes de basse sous un charley — et
+      celles qui chutent deux fois plus sur le temps. La **secondaire** est un
+      second timbre net (une hauteur a part), ou a defaut un coup fantome.
     - **Caisse claire** : un corps entre 180 et 450 Hz accompagne de bruit
-      entre 2,5 et 8 kHz. Le bruit elimine les notes tenues et les accords,
-      qui sont harmoniques. De 3,98 coups par temps a 1,34, concentration
-      1,47 -> 3,0.
-    - **Charley** : l'aigu seul, sans corps. Il reste dense, et c'est normal.
-    - Une attaque grave **sans** clic est une note de basse : elle a son
-      propre pad, plus discret, au lieu de se faire passer pour un kick.
+      (la regle d'avant). Ses coups appuyes vont au pad 3, les faibles au 4.
+    - **Clap** : du bruit sans corps, riche en medium — 1,6 a 2,3 fois plus
+      d'energie entre 1 et 3 kHz qu'au-dessus de 6, la ou un charley en a
+      0,02 a 1,1. Il va a la caisse claire secondaire, ou a la principale
+      s'il n'y a pas de caisse claire.
+    - **Charley** : l'aigu seul, sans corps. Ferme s'il s'eteint vite, sinon
+      ouvert — et les cymbales avec lui.
+    - **Basse** : une attaque grave dont la hauteur ne tombe pas.
+    - **Toms** : une peau accordee plus haut que la grosse caisse, dont la
+      hauteur tombe et qui retombe vite, sans bruit.
+    - **Percussions** et **autres instruments** : une attaque tonale dans le
+      medium ; breve, c'est une percussion, tenue, un instrument.
+    - **Effets** : un souffle qui enfle pendant des secondes — une montee.
+
+    Sur un morceau synthetique dont chaque coup est connu (voir le README) :
+    grosses caisses 31/32, secondaires 7/8, caisses claires 24/28, claps
+    7/8, basse 52/56, accords 15/16, percussions 14/16, montee 1/1. L'ancienne
+    reconnaissance ne voyait ni secondaire, ni clap, ni charley ouvert, ni
+    tom, ni percussion, ni instrument.
     """
     S, freqs, fps = _frames(mono, sr)
     lag = 0.025          # la detection voit l'attaque au debut de sa fenetre
     nyq = sr * 0.5
+    d0 = int(round(lag * fps))      # la trame du coup lui-meme
 
-    low = _env(S, freqs, 35, 110, smooth=max(2, int(fps * 0.045)))
-    body = _env(S, freqs, 180, 450, smooth=2)
-    click = _env(S, freqs, 2000, min(6000, nyq))
-    noise = _env(S, freqs, 2500, min(8000, nyq))
-    air = _env(S, freqs, min(8000, nyq * 0.8), min(15000, nyq))
+    def env(lo, hi, sm=1):
+        return _env(S, freqs, lo, min(hi, nyq), smooth=sm)
 
+    E = {"low": env(35, 110, max(2, int(fps * 0.045))),
+         "body": env(180, 450, 2), "click": env(2000, 6000),
+         "noise": env(2500, 8000), "air": env(8000, 15000),
+         "claq": env(1000, 4000), "mid": env(250, 2500, 2),
+         "lomid": env(80, 300, 2), "bruit": env(1200, 16000)}
+    n = len(E["low"])
     ev = []
+    if n < 8:
+        return ev
+    grave = _Grave(mono, sr)
+    tom_g = _Grave(mono, sr, 500.0)
+    # le fond de chaque bande, une fois pour toutes : le recalculer coup par
+    # coup refaisait une moyenne glissante sur tout le morceau a chaque fois
+    B = {k: _lowpass(e, max(1, int(fps * 1.5))) + 1e-12 for k, e in E.items()}
 
-    # ---- grave : grosse caisse si ca claque, note de basse sinon
-    idx = _attacks(low, fps, 0.16, 2.2)
-    cl = _salience(click, fps, idx)
-    st = _salience(low, fps, idx, 0.04)
-    for i, c, v in zip(idx, cl, st):
-        t = i / fps + lag
-        f = float(np.clip(v / 6.0, 0.30, 1.0))
-        if c > 1.6:
-            ev.append((t, PAD_OF["kick"], f, DECAY_OF["kick"]))
+    def sal(nom, J, ahead=0.02):
+        """Combien la bande ressort a ces trames, rapportee a son fond."""
+        J = np.clip(np.asarray(J, dtype=np.int64), 0, n - 1)
+        if not len(J):
+            return np.zeros(0)
+        k = np.arange(-1, max(1, int(fps * ahead)))
+        M = E[nom][np.clip(J[:, None] + k[None, :], 0, n - 1)].max(axis=1)
+        return M / B[nom][J]
+
+    def tenue(nom, i, dt):
+        """Ce qui reste d'une enveloppe dt apres l'attaque, fond retire."""
+        e = E[nom]
+        fond = e[max(0, i - int(0.06 * fps)):i + 1].min()
+        pic = e[i:i + 4].max() - fond
+        return float(max(0.0, e[min(n - 1, i + int(dt * fps))] - fond)
+                     / (pic + 1e-12))
+
+    def centroide(i, lo, hi):
+        m = (freqs >= lo) & (freqs < min(hi, nyq))
+        sp = S[i + d0:i + d0 + 3, m].mean(axis=0)
+        return float((sp * freqs[m]).sum() / (sp.sum() + 1e-12))
+
+    def platitude(i, lo, hi):
+        m = (freqs >= lo) & (freqs < min(hi, nyq))
+        sp = S[i + 2:i + 6, m].mean(axis=0) + 1e-9
+        return float(np.exp(np.mean(np.log(sp))) / np.mean(sp))
+
+    m_med = (freqs >= 1000) & (freqs < 3000)
+    m_aig = (freqs >= 6000) & (freqs < min(16000, nyq))
+
+    def pente(i):
+        k = slice(i + d0, i + d0 + 3)
+        return float(S[k, m_med].sum() / (S[k, m_aig].sum() + 1e-9))
+
+    def force(v, k=6.0):
+        return float(np.clip(v / k, 0.30, 1.0))
+
+    def pres(ts, t, tol=0.03):
+        if not len(ts):
+            return False
+        j = np.searchsorted(ts, t)
+        return any(0 <= k < len(ts) and abs(ts[k] - t) <= tol for k in (j - 1, j))
+
+    def instants(pads):
+        return np.array(sorted(e[0] for e in ev if e[1] in pads))
+
+    # ---- grave : grosse caisse si sa hauteur tombe, tom si elle tombe plus
+    # haut, basse sinon. L'instant et la force se lisent a l'attaque
+    # retrouvee dans le grave filtre : la trame qui la signale tombe parfois
+    # 20 ms avant, sur la fin de la note precedente, ou un coup plein
+    # paraissait faible.
+    idx = _attacks(E["low"], fps, 0.11, 2.2)
+    T = np.array([grave.attaque(i / fps + lag) for i in idx])
+    J = np.array([min(n - 2, max(1, int(round(t * fps)))) for t in T],
+                 dtype=np.int64)
+    kicks = []
+    for t, j, c, v in zip(T, J, sal("click", J), sal("low", J, 0.04)):
+        f_deb, f_fin = grave.glisse(t)
+        g = f_deb / max(f_fin, 1.0)
+        if f_fin < 130 and ((c > 1.6 and g >= 1.1) or (g >= 1.8 and f_fin < 100)):
+            kicks.append((float(t), force(v), f_fin, f_deb, v))
+            continue
+        td, tf = tom_g.glisse(tom_g.attaque(t))
+        if 95 <= tf <= 300 and td >= 1.06 * tf and tenue("lomid", j, 0.10) < 0.6:
+            k = int(np.clip(np.searchsorted([120, 160, 220], tf), 0, 3))
+            ev.append((float(t), PADS_TOMS[k], force(v), DECAY_OF["tom"]))
         else:
-            ev.append((t, 1, f * 0.7, DECAY_OF["bass"]))
+            ev.append((float(t), PAD_OF["bass"], force(v) * 0.7, DECAY_OF["bass"]))
+    if kicks:
+        # le timbre d'une grosse caisse, c'est sa hauteur, au debut et
+        # ensuite ; sa tenue ne vaut rien ici — la note de basse qui la suit
+        # la fait varier du simple au triple
+        sec = _secondaires(np.array([[k[2], k[3]] for k in kicks]),
+                           [k[4] for k in kicks])
+        for (t, f, _a, _b, _v), s_ in zip(kicks, sec):
+            ev.append((t, PAD_OF["kick2" if s_ else "kick"], f,
+                       DECAY_OF["kick2" if s_ else "kick"]))
+    t_kick = instants(FAMILLES["grosse caisse"])
+    t_basse = instants((PAD_OF["bass"],))
+    t_tom0 = instants(PADS_TOMS)
 
-    # ---- medium : caisse claire, si le coup est bruite et pas un grave
-    idx = _attacks(body, fps, 0.11, 2.2)
-    nz = _salience(noise, fps, idx)
-    lo = _salience(low, fps, idx, 0.03)
-    st = _salience(body, fps, idx)
-    for i, n_, l_, v in zip(idx, nz, lo, st):
-        if n_ <= 1.8 or l_ >= 2.0:
-            continue
-        f = float(np.clip(v / 6.0, 0.30, 1.0))
-        # le partage se fait sur la force : les coups appuyes du contretemps
-        # vont a la caisse claire, les petites frappes aux percussions.
-        pad = PAD_OF["rim"] if f > 0.42 else PAD_OF["perc"]
-        ev.append((i / fps + lag, pad, f, DECAY_OF["rim"]))
+    # ---- caisse claire : le corps qui attaque, avec du bruit
+    caisses = []
+    idx = _attacks(E["body"], fps, 0.11, 2.2)
+    for i, a, b, v in zip(idx, sal("noise", idx), sal("low", idx, 0.03),
+                          sal("body", idx)):
+        if a > 1.8 and b < 2.0:
+            # un coup faible doit sonner comme une peau : du bruit dans le
+            # medium. Un accord pose sur un charley a lui aussi du corps et
+            # du bruit, mais son medium est fait de notes.
+            if force(v) <= 0.42 and platitude(i + d0 - 2, 1000, 4000) < 0.45:
+                continue
+            caisses.append((i / fps + lag, force(v), "caisse"))
+    t_cc = np.array(sorted(c[0] for c in caisses))
 
-    # ---- aigu : charleston, s'il n'a pas de corps
-    idx = _attacks(air, fps, 0.05, 2.0)
-    bd = _salience(body, fps, idx)
-    st = _salience(air, fps, idx)
-    k = 0
-    for i, b_, v in zip(idx, bd, st):
-        if b_ >= 1.8:
+    # ---- charleys et cymbales : l'air seul, sans corps
+    idx = _attacks(E["air"], fps, 0.05, 2.0)
+    for i, b0, h in zip(idx, sal("body", idx), sal("air", idx)):
+        t = i / fps + lag
+        if b0 >= 1.8 or pres(t_cc, t):
             continue
-        f = float(np.clip(v / 5.0, 0.30, 1.0))
-        ev.append((i / fps + lag, (10, 11)[k % 2], f, DECAY_OF["hat"]))
-        k += 1
+        if pres(t_kick, t) and h < 3.0:
+            continue                          # le clic d'une grosse caisse
+        pad = PAD_OF["hat2" if tenue("air", i, 0.15) > 0.30 else "hat"]
+        ev.append((t, pad, force(h, 5.0),
+                   DECAY_OF["hat2" if pad == PAD_OF["hat2"] else "hat"]))
+
+    # ---- clap : du bruit riche en medium, sans corps, et dont le medium
+    # est du bruit, pas des notes
+    idx = _attacks(E["claq"], fps, 0.05, 2.0)
+    for i, b0, a, v in zip(idx, sal("body", idx), sal("noise", idx),
+                           sal("claq", idx)):
+        t = i / fps + lag
+        if pres(t_cc, t):
+            continue
+        if (b0 < 1.5 and a > 2.2 and pente(i) > 1.4
+                and platitude(i + d0 - 2, 1000, 4000) > 0.5):
+            caisses.append((t, force(v), "clap"))
+    if caisses:
+        genre = np.array([c[2] for c in caisses])
+        fort = np.array([c[1] > 0.42 for c in caisses])
+        # la principale : le timbre qui a le plus de coups appuyes ; ses
+        # coups faibles et l'autre timbre vont a la secondaire
+        princ = ("caisse" if (fort & (genre == "caisse")).sum()
+                 >= (fort & (genre == "clap")).sum() else "clap")
+        for (t, f, g), fo in zip(caisses, fort):
+            cle = "rim2" if (g != princ or not fo) else "rim"
+            ev.append((float(t), PAD_OF[cle], f, DECAY_OF[cle]))
+    t_bruit = instants(FAMILLES["caisse claire"])
+
+    # ---- toms, entendus dans le bas medium seulement
+    idx = _attacks(E["lomid"], fps, 0.08, 2.2)
+    for i, v in zip(idx, sal("lomid", idx)):
+        t = i / fps + lag
+        if (v < 2.5 or pres(t_kick, t) or pres(t_bruit, t)
+                or pres(t_basse, t, 0.04) or pres(t_tom0, t, 0.06)):
+            continue
+        if tenue("lomid", i, 0.10) >= 0.6 or platitude(i, 60, 600) > 0.5:
+            continue
+        f_deb, f_fin = tom_g.glisse(tom_g.attaque(t))
+        if not (90 <= f_fin <= 400 and f_deb >= 1.04 * f_fin):
+            continue
+        k = int(np.clip(np.searchsorted([120, 160, 220], f_fin), 0, 3))
+        ev.append((t, PADS_TOMS[k], force(v), DECAY_OF["tom"]))
+    t_tom = instants(PADS_TOMS)
+
+    # ---- medium tonal : percussions breves, autres instruments
+    idx = _attacks(E["mid"], fps, 0.08, 2.0)
+    for i, v in zip(idx, sal("mid", idx)):
+        t = i / fps + lag
+        if pres(t_kick, t) or pres(t_bruit, t) or pres(t_tom, t, 0.06):
+            continue
+        if platitude(i, 250, 2500) > 0.6:
+            continue                       # du bruit : deja vu plus haut
+        if tenue("mid", i, 0.15) < 0.22:
+            cen = centroide(i, 250, 6000)
+            k = int(np.clip(np.searchsorted([600, 1500], cen), 0, 2))
+            ev.append((t, PADS_PERCUS[k], force(v), DECAY_OF["perc"]))
+        else:
+            ev.append((t, PAD_OF["inst"], force(v), DECAY_OF["inst"]))
+
+    # ---- montees : un souffle qui enfle pendant des secondes. Lisse sur une
+    # seconde, pour que charleys et caisses claires n'y fassent plus que des
+    # vaguelettes. La moyenne glissante regarde devant elle : le sommet
+    # exact se cherche ensuite dans le souffle peu lisse.
+    db = 10.0 * np.log10(_lowpass(E["bruit"], max(1, int(fps * 1.0))) + 1e-9)
+    fin = _lowpass(E["bruit"], max(1, int(fps * 0.05)))
+    demi, loin = int(fps * 0.5), int(fps * 6.0)
+    dernier = -9.0
+    sommets = np.nonzero((db[1:-1] >= db[:-2]) & (db[1:-1] > db[2:]))[0] + 1
+    for j in sommets:
+        if j < int(fps * 2.0) or j >= n - demi:
+            continue
+        if db[j] < db[j - demi:j + demi + 1].max():
+            continue
+        seg = db[max(0, j - loin):j + 1]
+        a = int(np.argmin(seg))
+        if (len(seg) - a) / fps < 1.5 or seg[-1] - seg[a] < 6.0:
+            continue
+        if np.corrcoef(np.arange(len(seg) - a), seg[a:])[0, 1] < 0.9:
+            continue
+        a1 = min(n, j + int(fps * 1.0))
+        t = (j + int(np.argmax(fin[j:a1]))) / fps + lag
+        if t - dernier > 4.0:
+            ev.append((t, PAD_OF["fx"], 1.0, DECAY_OF["fx"]))
+            dernier = t
 
     # ---- bandes de frequences : des declencheurs qui ecoutent une hauteur
     #

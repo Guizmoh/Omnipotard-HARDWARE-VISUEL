@@ -63,7 +63,11 @@ refaire à la main :
   Un piège trouvé en chemin : dans le grave, l'enveloppe redressée ondule à
   deux fois la fréquence du son (100 Hz pour un sub à 50 Hz). Sans un lissage
   d'au moins 45 ms, on prend cette ondulation pour des coups et on en compte
-  deux fois trop — c'était la moitié du problème ;
+  deux fois trop — c'était la moitié du problème.
+
+  Voir plus bas, *La batterie rangée comme sur une MPC*, pour la disposition
+  actuelle des pads et la reconnaissance des secondaires, claps, cymbales,
+  toms, percussions et montées ;
 - la bande de 16 pas suit le pas courant du séquenceur. Le tempo est affiné
   sur les attaques graves après l'autocorrélation, dont le pas vaut 5,3 ms :
   deux millisecondes d'erreur suffisent à décaler d'un quart de temps au bout
@@ -80,6 +84,78 @@ refaire à la main :
   de la bande ;
 - les Q-Links, les bandeaux, le touch strip et les vu-mètres de l'écran suivent
   les enveloppes grave / medium / aigu.
+
+### La batterie rangée comme sur une MPC
+
+Chaque famille a ses pads, toujours les mêmes, sur les trois machines à pads
+(numérotés comme sur la machine, le pad 1 en bas à gauche sur la MPC) :
+
+| pads | ce qui s'y allume |
+| --- | --- |
+| 1 · 2 | la grosse caisse · la grosse caisse secondaire |
+| 3 · 4 | la caisse claire · la secondaire (clap, rim, coups fantômes) |
+| 5 · 6 | le charley fermé · le charley ouvert et les cymbales |
+| 7 | la basse |
+| 8 | les autres instruments (accords, nappes, voix qui attaquent) |
+| 9 à 12 | les toms, du grave à l'aigu |
+| 13 à 15 | les percussions (cloche, conga, bois…), du grave à l'aigu |
+| 16 | les effets : les montées |
+
+Les familles des déclencheurs suivent : `grosse caisse` = pads 1-2, `caisse
+claire` = 3-4, `charley` = 5-6, `basse` = 7, `autres instruments` = 8,
+`percussions` = 9 à 16. Les couleurs par instrument aussi.
+
+**La reconnaissance a été refaite** pour remplir ces pads, et mesurée sur un
+morceau synthétique dont chaque coup est connu (313 coups, douze familles) :
+
+| famille | ce qui la reconnaît | avant | après |
+| --- | --- | --- | --- |
+| grosse caisse | une attaque grave dont **la hauteur tombe** (136 → 67 Hz en 60 ms ; une note de basse reste à 68 → 58) | 20/32 | **31/32** |
+| grosse caisse secondaire | un second timbre net — une autre hauteur —, ou un coup fantôme | 0/8 | **7/8** |
+| caisse claire | corps 180-450 Hz avec du bruit (la règle d'avant) | 24/28 | 24/28 |
+| clap | du bruit sans corps, **1,6 à 2,3 fois plus riche en médium qu'en aigu** (un charley : 0,02 à 1,1) | 0/8 | **7/8** |
+| charley fermé | l'aigu seul, sans corps, qui s'éteint vite | 40/112 | 35/112 |
+| charley ouvert, cymbales | l'aigu seul, qui **tient** au-delà de 150 ms | 0/20 | **12/20** |
+| basse | une attaque grave dont la hauteur ne tombe pas | 51/56 | **52/56** |
+| autres instruments | une attaque **tonale** dans le médium, qui tient | 0/16 | **15/16** |
+| percussions | une attaque tonale brève | 0/16 | **14/16** |
+| toms | plus haut qu'une grosse caisse, la hauteur qui tombe | 0/16 | 3/16 |
+| montée | un souffle qui enfle pendant des secondes | 0/1 | **1/1** |
+
+Les charleys fermés ne se comptent que là où ils sonnent seuls : sur une
+grosse caisse ou une caisse claire, leur bruit se confond avec celui du coup
+(64 des 112 du banc), et l'ancienne règle n'en voyait guère plus.
+
+La hauteur se mesure par les passages à zéro du grave filtré, après avoir
+retrouvé l'attaque exacte : la trame d'analyse la signalait parfois 20 ms trop
+tôt, sur la fin de la note précédente, où un coup plein paraissait faible.
+
+**Sur de vrais morceaux**, il n'y a pas de vérité connue, mais un critère : un
+coup de batterie tombe sur la grille. Les attaques graves « avec clic mais sans
+chute de hauteur », que l'ancienne règle prenait pour des grosses caisses,
+tombaient au hasard (concentration 0,05 à 0,15 sur la grille) — des notes de
+basse sous un charley ; celles dont la hauteur tombe y sont deux fois plus.
+La caisse claire principale garde la règle d'avant et sa concentration (0,66
+contre 0,70 sur l'Ave Maria). Les secondaires ne se déclarent qu'à coup sûr :
+2 grosses caisses secondaires sur 156 dans *Hint*, aucune n'est inventée. Les
+toms sont volontairement prudents : une note de basse aiguë prise pour un tom
+s'allumerait à contretemps.
+
+Le calage d'une mélodie sur la grille, qui s'appuie sur ces coups, en sort un
+peu plus juste : sur les 28 cas du banc, le pire écart passe de 5,2 à 3,5 ms
+(8,6 à 6,6 ms à 124 BPM), et l'Ave Maria tombe au même millième.
+
+L'analyse reste rapide : 1,5 s pour un morceau de quatre minutes (1,0 avant),
+le grave étant filtré sur un son réduit à 5,5 kHz.
+
+`tools/verifier_batterie.py` refait cette mesure en deux secondes et
+signale toute famille qui perdrait des coups.
+
+**Une batterie en MIDI** suit la même disposition quand le fichier est en
+General MIDI (36 la grosse caisse, 38 la caisse claire, 42 le charley…) :
+la plus jouée des deux grosses caisses au pad 1, l'autre au 2, et ainsi de
+suite. Un fichier qui n'a rien d'un kit General MIDI garde la lecture d'avant
+— un pad par instrument, du plus grave au plus aigu.
 
 ### Le vérificateur de façades
 
@@ -987,8 +1063,9 @@ claire » veut vraiment dire caisse claire. À zéro, la réaction est éteinte.
 | pulsation de la grille | la grille du fond s'allume | `--grid-pulse`, `--grid-on` |
 | éclat du fond | la photo est éclairée comme par un flash | `--bg-flash`, `--flash-on` |
 
-Les instruments disponibles : `grosse caisse`, `basse`, `caisse claire`,
-`percussions`, `charley`, `accords`, `tout`.
+Les instruments disponibles : `grosse caisse`, `caisse claire`, `charley`,
+`basse`, `autres instruments`, `percussions`, `tout` (voir *La batterie
+rangée comme sur une MPC*).
 
 Les **étincelles** naissent du dessin lui-même : chaque braise part d'un point
 pris au hasard sur un trait de la machine, perpendiculairement à lui, comme une
@@ -1045,7 +1122,7 @@ groupés dans le menu :
 
 | groupe | ce que c'est |
 | --- | --- |
-| **Instruments** (7) | grosse caisse, basse, caisse claire, percussions, charley, accords, tout |
+| **Instruments** (7) | grosse caisse, caisse claire, charley, basse, autres instruments, percussions, tout |
 | **Bandes de fréquences** (7) | sous-basses (20-60 Hz), graves (60-160), bas médium (160-400), médium (400-1000), haut médium (1000-2500), aigus (2500-6000), très aigus (6000-15000) |
 | **Hasard** (3) | rare, moyen, dense |
 | **Un coup sur deux** (24) | pour chaque famille : `1 sur 2`, `l'autre sur 2`, `1 sur 3`, `1 sur 4` |
@@ -1197,7 +1274,7 @@ coûteraient 300.
 
 **Couleurs par instrument** : le trait prend la teinte du dernier coup — rouge
 la grosse caisse, jaune la caisse claire, cyan le charley, violet la basse,
-orange les percussions, vert les accords. Le classement se fait sur la
+orange les percussions, vert les autres instruments. Le classement se fait sur la
 *fraîcheur* du coup et presque pas sur sa force : classées à la force, les
 familles denses comme le charley gagnaient jusque sur la grosse caisse, dont la
 teinte ne sortait jamais.

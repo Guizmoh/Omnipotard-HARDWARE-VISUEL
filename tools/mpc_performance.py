@@ -61,6 +61,10 @@ def estimate_phase(events, six):
     """Cale la grille de 16 pas sur les vraies grosses caisses du morceau :
     cherche le decalage qui les rapproche le plus d'un pas de sequenceur."""
     kicks = np.array([t for t, pad, f, d in events if pad == PAD_OF["kick"]])
+    if len(kicks) < 4:
+        # sans grosse caisse principale, les secondaires font l'affaire
+        kicks = np.array([t for t, pad, f, d in events
+                          if pad in (PAD_OF["kick"], PAD_OF["kick2"])])
     if len(kicks) == 0:
         return 0.0
     cands = np.linspace(0.0, six, 48, endpoint=False)
@@ -447,7 +451,8 @@ def grille_du_morceau(info, bpm=None, indice=None):
     # ce qui marque le temps : la grosse caisse et la caisse claire d'abord,
     # la basse ensuite ; le charley et les percussions, presque rien
     poids_temps = {PAD_OF["kick"]: 4.0, PAD_OF["rim"]: 3.0,
-                   1: 1.5, 2: 1.5, 3: 1.5}
+                   PAD_OF["kick2"]: 2.0, PAD_OF["rim2"]: 1.0,
+                   PAD_OF["bass"]: 1.5}
     g = midi_fichier.grille_morceau(
         fins, bpm, [e[2] for e in ev],
         [e[2] * poids_temps.get(e[1], 0.15) for e in ev])
