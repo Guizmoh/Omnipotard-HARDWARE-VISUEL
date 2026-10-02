@@ -1525,6 +1525,18 @@ Ce que chacune en fait :
   pas : aucune machine ne fait défiler un séquenceur sur ses touches de piano,
   et cela brouillait la note jouée.
 
+  Une touche jouée s'allume **sur toute sa surface**, pas seulement par ses
+  traits : le remplissage est une grille de points espacés de trois millièmes
+  d'unité, soit un pixel et demi en 1080p. C'est l'échelle du faisceau lui-même
+  — à cette distance les halos se rejoignent et la surface s'éclaire. À
+  l'espacement d'origine, trente millièmes, les lignes restaient séparées d'une
+  douzaine de pixels et la touche avait l'air rayée. La grille étant dix-huit
+  fois plus dense, le poids de chaque point baisse d'autant : c'est la lumière
+  par unité de surface qui compte, et `ECLAT_TOUCHE` la fixe. Des traits plus
+  espacés (`TRAIT_SERRE`, réglés par `ECLAT_TRAIT`) repassent par-dessus : la
+  surface reste pleine, mais le trait s'y voit encore. C'est cette « nappe »
+  que la texture des touches remplace quand on en choisit une autre.
+
   Les blanches sont **échancrées** là où une noire s'appuie dessus, comme sur
   un vrai clavier. Tracées en rectangles pleine hauteur, elles passaient sous
   les noires et la couture entre deux blanches traversait chaque noire par le
