@@ -43,7 +43,7 @@ from mpc_performance import (  # noqa: E402
 import midi                                                   # noqa: E402
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
-    menage_fonds,
+    menage_fonds, apercu_fonds, genre_fond, BOUCLES_FOND,
     VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs, MACHINES,
     NOMS_MACHINES, COULEURS_COUPS, TEXTURES_TOUCHES, MODES_TRAIT,
     compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
@@ -282,7 +282,12 @@ def look_from(q):
         # a defaut de titre saisi, celui du fichier : un champ vide laissait la
         # dalle sans nom, alors que la page affichait le nom en invite.
         "screen_title": str(q.get("title") or q.get("fallbackTitle") or ""),
-        "backdrop": backdrop_path(q.get("backdrop")),
+        "backdrop": backdrop_paths(q.get("backdrop")),
+        # la vitesse arrive en puissance de deux : le milieu du curseur vaut 1
+        "fond_vitesse": 2.0 ** min(3.0, max(-3.0, float(q.get("fondVitesse", 0.0)))),
+        "fond_boucle": _dans(q.get("fondBoucle"), BOUCLES_FOND, "boucle"),
+        "fond_fondu": float(q.get("fondFondu", 0.0)),
+        "fond_photo": float(q.get("fondPhoto", 6.0)),
         "backdrop_strength": float(q.get("bdStrength", 0.78)),
         "backdrop_clear": float(q.get("bdClear", 0.40)),
         "screen_dim": float(q.get("screenDim", 0.40)),
@@ -412,13 +417,19 @@ def _entier(v, defaut):
         return int(defaut)
 
 
-def backdrop_path(name):
-    """Chemin du fond depose, ou None. Le nom vient de la page, donc on le
-    ramene a un simple nom de fichier dans le dossier prevu."""
-    if not name:
+def backdrop_paths(noms):
+    """Les chemins des fonds deposes, dans l'ordre de la page, ou None. Les
+    noms viennent de la page, separes par « | » : chacun est ramene a un
+    simple nom de fichier dans le dossier prevu."""
+    if not noms:
         return None
-    p = os.path.join(FONDS, safe_name(name))
-    return p if os.path.exists(p) else None
+    chemins = []
+    for nom in str(noms).split("|"):
+        if nom.strip():
+            p = os.path.join(FONDS, safe_name(nom))
+            if os.path.exists(p):
+                chemins.append(p)
+    return chemins or None
 
 
 # --------------------------------------------------------------------------
@@ -593,6 +604,8 @@ class Studio:
                 "texture_touches", "mode_trait", "encre", "detourage",
                 "inverser")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
+                        "fond_vitesse", "fond_boucle", "fond_fondu",
+                        "fond_photo",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
                         "backdrop_sharp", "spectro", "nettete", "taille",
                         "machine",
@@ -655,10 +668,11 @@ class Studio:
         # plutot que de detailler tout le fichier, ce que le rendu fera.
         r._split_t = None            # le classement depend de split_count
         bd = kw["backdrop"]
-        stamp = (bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
-                 kw["screen_dim"], round(float(t), 1),
+        stamp = (tuple(bd or ()), w, h, kw["backdrop_strength"],
+                 kw["backdrop_clear"], kw["screen_dim"], round(float(t), 1),
                  kw["travel"], kw["travel_mode"], kw["backdrop_sharp"],
-                 kw["taille"], kw["machine"])
+                 kw["taille"], kw["machine"], kw["fond_vitesse"],
+                 kw["fond_boucle"], kw["fond_fondu"], kw["fond_photo"])
         # set_look, plus haut, remet le fond a zero — il fait partie de
         # l'allure. On le repose donc ici a chaque fois, en ne le rechargeant
         # que si un de ses reglages a bouge : sans cela, tout apercu qui ne
@@ -667,13 +681,17 @@ class Studio:
             if getattr(r, "_bd_stamp", None) != stamp:
                 # le travelling s'etale sur tout le morceau : l'apercu montre
                 # le cadre de l'instant regarde, pas celui du debut
-                r._bd = load_backdrop(
-                    bd, w, h, kw["backdrop_strength"], kw["backdrop_clear"],
-                    scale=r.scale * r.taille, screen_dim=kw["screen_dim"],
-                    ecran=r.ecran, seek=float(t),
-                    travel=kw["travel"], travel_mode=kw["travel_mode"],
-                    dur=max(tr["info"]["duration"], 1e-3),
-                    blur=backdrop_quality(kw["backdrop_sharp"])[0])
+                # le meme plan que le rendu : quelle video, a quel instant,
+                # ou quel fondu entre deux, a la vitesse choisie
+                r._bd = apercu_fonds(
+                    bd, w, h, float(t), max(tr["info"]["duration"], 1e-3),
+                    vitesse=kw["fond_vitesse"], boucle=kw["fond_boucle"],
+                    fondu=kw["fond_fondu"], photo=kw["fond_photo"],
+                    blur=backdrop_quality(kw["backdrop_sharp"])[0],
+                    strength=kw["backdrop_strength"],
+                    clear=kw["backdrop_clear"], scale=r.scale * r.taille,
+                    screen_dim=kw["screen_dim"], ecran=r.ecran,
+                    travel=kw["travel"], travel_mode=kw["travel_mode"])
                 r._bd_stamp = stamp
             r.backdrop = r._bd
         else:
@@ -1259,7 +1277,9 @@ class Handler(BaseHTTPRequestHandler):
                     # on repasse le vrai motif : il nomme le format en cause,
                     # ce qu'un « ffmpeg ne sait pas lire ce fichier » taisait
                     return self._fail(e)
-                return self._json({"name": name, "video": is_video(path)})
+                g = genre_fond(path)
+                return self._json({"name": name, "video": g[0] == "video",
+                                   "duree": round(g[1], 2)})
 
             if u.path == "/midi":
                 os.makedirs(MELODIES, exist_ok=True)
@@ -1612,6 +1632,17 @@ PAGE = r"""<!doctype html>
   #carteRendu .tete h2{margin:0}
   #carteRendu .tete button{width:auto;padding:9px 18px}
   #carteRendu label.bombe{margin:0 0 8px;line-height:1.35}
+  /* la suite de fonds : un fichier par ligne, dans l'ordre de passage */
+  #bdliste{list-style:none;counter-reset:fond;margin:10px 0 0;padding:0}
+  #bdliste[hidden]{display:none}
+  #bdliste li{counter-increment:fond;display:grid;align-items:center;gap:4px;
+    grid-template-columns:minmax(0,1fr) auto auto auto;padding:4px 0;
+    border-bottom:1px solid var(--line);font-size:12px}
+  #bdliste li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #bdliste li span::before{content:counter(fond) ". ";color:var(--dim)}
+  #bdliste li small{color:var(--dim);font-family:var(--mono)}
+  #bdliste button{width:auto;padding:3px 8px;font-size:12px;line-height:1.2}
+  #bdjeu[hidden],#bdphoto[hidden]{display:none}
   details.plus{margin-top:8px}
   details.plus summary{color:var(--dim);font-size:11px;cursor:pointer}
   details.plus summary:hover{color:var(--ink)}
@@ -1900,13 +1931,31 @@ PAGE = r"""<!doctype html>
     </div>
   </div>
   <div class="card">
-    <h2>Image ou video de fond</h2>
+    <h2>Fonds : images et videos</h2>
     <div class="drop" id="bdrop">
-      <b id="bdname">Deposer une image ou une video</b>
-      jpg, png, mp4, mov&hellip; ou cliquer
+      <b id="bdname">Deposer une ou plusieurs images ou videos</b>
+      jpg, png, mp4, mov&hellip; ou cliquer. Plusieurs fichiers se jouent
+      a la suite.
     </div>
-    <input type="file" id="bdfile" accept="image/*,video/*" hidden>
+    <input type="file" id="bdfile" accept="image/*,video/*" multiple hidden>
+    <ol id="bdliste" hidden></ol>
     <div id="bdopts" hidden>
+      <div id="bdjeu" hidden>
+        <label for="fondVitesse">vitesse des videos &mdash;
+          <span id="v-fv">1.00 &times;</span></label>
+        <input type="range" id="fondVitesse" min="-2" max="2" step="0.05" value="0">
+        <label for="fondBoucle">au bout de la suite</label>
+        <select id="fondBoucle">
+          <option value="boucle">reprendre du debut (boucle)</option>
+          <option value="allerretour">repartir a l'envers (aller-retour)</option>
+        </select>
+        <label for="fondFondu">fondu enchaine &mdash; <span id="v-ff">0.0 s</span></label>
+        <input type="range" id="fondFondu" min="0" max="4" step="0.1" value="0">
+        <div id="bdphoto" hidden>
+          <label for="fondPhoto">duree d'une photo &mdash; <span id="v-fp">6.0 s</span></label>
+          <input type="range" id="fondPhoto" min="1" max="30" step="0.5" value="6">
+        </div>
+      </div>
       <label for="bdStrength">presence du fond &mdash; <span id="v-bds">0.78</span></label>
       <input type="range" id="bdStrength" min="0" max="1.6" step="0.02" value="0.78">
       <label for="bdClear">degagement derriere la machine &mdash; <span id="v-bdc">0.40</span></label>
@@ -1919,10 +1968,16 @@ PAGE = r"""<!doctype html>
       <input type="range" id="travel" min="0" max="0.5" step="0.01" value="0">
       <label for="travelMode">sens du travelling</label>
       <select id="travelMode"></select>
-      <button class="ghost" id="bdclear" style="margin-top:8px">retirer le fond</button>
+      <button class="ghost" id="bdclear" style="margin-top:8px">retirer tous les fonds</button>
       <p class="hint">Sur une video, l'apercu montre l'image de l'instant
-        regarde ; le rendu, lui, la joue en entier (et la boucle si elle est
-        plus courte que le morceau).<br>
+        regarde ; le rendu, lui, la joue en entier, et la reprend quand elle
+        est plus courte que le morceau.<br>
+        <b>Plusieurs fichiers</b> se jouent dans l'ordre de la liste, chacun
+        jusqu'au bout pour une video, le temps choisi pour une photo ; le
+        <b>fondu enchaine</b> passe de l'un a l'autre, et du dernier au premier
+        quand la suite reprend. En <b>aller-retour</b>, la suite se rejoue a
+        l'envers au lieu de repartir du debut : pas de saut, meme sans
+        fondu.<br>
         Le travelling s'etale sur tout le morceau : l'image est chargee plus
         grande que l'ecran et on s'y deplace lentement. Quelques pour cent
         suffisent a lui oter son air de decor colle derriere la machine.</p>
@@ -2467,7 +2522,10 @@ function params() {
     splitOn: $('#splitOn').value, glitch: $('#glitch').value,
     snare: $('#snare').value, wave: $('#wave').value,
     waveSmooth: $('#waveSmooth').value,
-    wavePunch: $('#wavePunch').value, backdrop,
+    wavePunch: $('#wavePunch').value,
+    backdrop: fonds.map(f => f.name).join('|'),
+    fondVitesse: $('#fondVitesse').value, fondBoucle: $('#fondBoucle').value,
+    fondFondu: $('#fondFondu').value, fondPhoto: $('#fondPhoto').value,
     bdStrength: $('#bdStrength').value, bdClear: $('#bdClear').value,
     screenDim: $('#screenDim').value,
     travel: $('#travel').value, travelMode: $('#travelMode').value,
@@ -2634,15 +2692,16 @@ function calculerApercu() {
   const ecran = $('#ecran');
   ecran.ondragover = e => { e.preventDefault(); ecran.classList.add('over'); };
   ecran.ondragleave = () => ecran.classList.remove('over');
-  ecran.ondrop = e => {
+  ecran.ondrop = async e => {
     e.preventDefault(); ecran.classList.remove('over');
-    const f = e.dataTransfer.files[0];
-    if (!f) return;
-    const ext = (f.name.split('.').pop() || '').toLowerCase();
-    if (['mid', 'midi'].includes(ext)) return sendMidi(f);
-    if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic', 'mp4', 'mov',
-         'webm', 'mkv', 'avi', 'm4v'].includes(ext)) return sendBackdrop(f);
-    upload(f);
+    for (const f of Array.from(e.dataTransfer.files || [])) {
+      const ext = (f.name.split('.').pop() || '').toLowerCase();
+      if (['mid', 'midi'].includes(ext)) await sendMidi(f);
+      else if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic', 'mp4',
+                'mov', 'webm', 'mkv', 'avi', 'm4v'].includes(ext))
+        await sendBackdrop(f);
+      else await upload(f);
+    }
   };
   // tant qu'il n'y a pas de morceau, un clic sur l'ecran le fait choisir
   ecran.onclick = () => { if (ecran.classList.contains('vide')) $('#file').click(); };
@@ -2751,17 +2810,74 @@ $('#modeTrait').onchange = () => shot();
 $('#encre').oninput = () => shot();
 $('#inverser').onchange = () => shot();
 
-/* ---- fond : image ou video ---- */
-let backdrop = '';
+/* ---- fonds : une image, une video, ou plusieurs a la suite ----
+   Chaque fichier depose s'ajoute au bout de la liste ; l'ordre se change
+   avec les fleches. Le moteur recoit les noms separes par « | ». */
+let fonds = [];
 const bdrop = $('#bdrop'), bdfile = $('#bdfile');
 bdrop.onclick = () => bdfile.click();
 bdrop.ondragover = e => { e.preventDefault(); bdrop.classList.add('over'); };
 bdrop.ondragleave = () => bdrop.classList.remove('over');
 bdrop.ondrop = e => { e.preventDefault(); bdrop.classList.remove('over');
-                      if (e.dataTransfer.files[0]) sendBackdrop(e.dataTransfer.files[0]); };
-bdfile.onchange = () => bdfile.files[0] && sendBackdrop(bdfile.files[0]);
-$('#bdclear').onclick = () => { backdrop = ''; $('#bdopts').hidden = true;
-  $('#bdname').textContent = 'Deposer une image ou une video'; shot(); };
+                      deposerFonds(e.dataTransfer.files); };
+bdfile.onchange = () => { deposerFonds(bdfile.files); bdfile.value = ''; };
+$('#bdclear').onclick = () => { fonds = []; majFonds(); shot(); };
+async function deposerFonds(liste) {
+  for (const f of Array.from(liste || [])) await sendBackdrop(f);
+}
+function dureeTexte(d) {
+  return d >= 60 ? Math.floor(d / 60) + ' min ' + Math.round(d % 60) + ' s'
+                 : d.toFixed(d < 10 ? 1 : 0) + ' s';
+}
+function majFonds() {
+  const ol = $('#bdliste');
+  ol.innerHTML = '';
+  fonds.forEach((f, i) => {
+    const li = document.createElement('li');
+    const nom = document.createElement('span');
+    nom.textContent = f.name + ' ';
+    const q = document.createElement('small');
+    q.textContent = f.video ? 'video ' + dureeTexte(f.duree || 0) : 'photo';
+    nom.appendChild(q);
+    li.appendChild(nom);
+    for (const [txt, titre, act] of [['\u2191', 'passer avant', -1],
+                                    ['\u2193', 'passer apres', 1],
+                                    ['\u2715', 'retirer de la liste', 0]]) {
+      const b = document.createElement('button');
+      b.className = 'ghost'; b.textContent = txt; b.title = titre;
+      b.onclick = () => {
+        if (act === 0) fonds.splice(i, 1);
+        else {
+          const j = i + act;
+          if (j < 0 || j >= fonds.length) return;
+          [fonds[i], fonds[j]] = [fonds[j], fonds[i]];
+        }
+        majFonds(); shot();
+      };
+      li.appendChild(b);
+    }
+    ol.appendChild(li);
+  });
+  const n = fonds.length, videos = fonds.some(f => f.video);
+  ol.hidden = n === 0;
+  $('#bdopts').hidden = n === 0;
+  // la vitesse, la boucle et le fondu n'ont de sens qu'avec une video ou
+  // plusieurs fichiers ; la duree d'une photo, qu'avec une suite
+  $('#bdjeu').hidden = !(videos || n > 1);
+  $('#bdphoto').hidden = !(n > 1 && fonds.some(f => !f.video));
+  $('#bdname').textContent = n ? 'Ajouter une image ou une video'
+                               : 'Deposer une ou plusieurs images ou videos';
+}
+function vitesseFond() { return Math.pow(2, +$('#fondVitesse').value); }
+$('#fondVitesse').oninput = () => {
+  const v = vitesseFond();
+  $('#v-fv').textContent = v.toFixed(2) + ' \u00d7'
+    + (v < 0.97 ? ' (ralenti)' : v > 1.03 ? ' (accelere)' : '');
+  shot();
+};
+$('#fondBoucle').onchange = () => shot();
+$('#fondFondu').oninput = e => { $('#v-ff').textContent = (+e.target.value).toFixed(1) + ' s'; shot(); };
+$('#fondPhoto').oninput = e => { $('#v-fp').textContent = (+e.target.value).toFixed(1) + ' s'; shot(); };
 
 /* Un depot de fichier, avec sa progression.
 
@@ -2808,10 +2924,10 @@ const _duree = () => duration;
 async function sendBackdrop(f) {
   try {
     const j = await deposer('/backdrop', f, 'du fond');
-    backdrop = j.name;
-    $('#bdname').textContent = j.name + (j.video ? ' (video)' : '');
-    $('#bdopts').hidden = false;
-    setStatus('fond en place');
+    fonds.push({name: j.name, video: !!j.video, duree: j.duree || 0});
+    majFonds();
+    setStatus(fonds.length > 1 ? 'fond ajoute a la suite (' + fonds.length
+                                 + ' fichiers)' : 'fond en place');
     shot();
   } catch (e) { setStatus('fond refuse : ' + e.message, true); }
 }
@@ -3730,7 +3846,7 @@ def main():
     retirer_obsoletes(par_v2=args.v2)
     # les vignettes de fond laissees par les rendus d'avant : les versions
     # precedentes n'en effacaient aucune, et elles finissaient par remplir le
-    # disque (voir VideoBackdrop)
+    # disque (voir SuiteDeFonds)
     libere = menage_fonds()
     if libere > 50e6:
         print("  menage : %.1f Go de vignettes de fond laissees par d'anciens "

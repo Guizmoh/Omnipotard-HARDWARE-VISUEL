@@ -46,6 +46,7 @@ from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     python_trop_petit,
     compute_spectro, PRESETS, QUALITES, APERCU, apercu_possible,
     MACHINES, NOMS_MACHINES, TEXTURES_TOUCHES, COULEURS_COUPS, disque_plein,
+    BOUCLES_FOND,
 )
 import midi as midi_fichier          # noqa: E402 -- lecteur de fichiers MIDI
 
@@ -170,7 +171,10 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               travel=0.0, travel_mode="avant",
                               backdrop=None, backdrop_strength=1.00,
                               backdrop_clear=0.28, screen_dim=0.40,
-                              backdrop_sharp=0.37, taille=1.0, presence=1.0,
+                              backdrop_sharp=0.37, fond_vitesse=1.0,
+                              fond_boucle="boucle", fond_fondu=0.0,
+                              fond_photo=6.0, fond_debut=0.0, fond_total=0.0,
+                              taille=1.0, presence=1.0,
                               neon=1.0, reflet=0.5, tube=0.0,
                               midi_force=1.0,
                               vignettage=1.0, scanlines=1.0, aberration=0.0,
@@ -246,7 +250,9 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
             backdrop, w, h, fps, duration, strength=backdrop_strength,
             clear=backdrop_clear, scale=r.scale * r.taille,
             screen_dim=screen_dim, ecran=r.ecran,
-            travel=r.travel, travel_mode=r.travel_mode, sharp=backdrop_sharp)
+            travel=r.travel, travel_mode=r.travel_mode, sharp=backdrop_sharp,
+            vitesse=fond_vitesse, boucle=fond_boucle, fondu=fond_fondu,
+            photo=fond_photo, debut=fond_debut, total=fond_total)
     # La machine est deja entierement deployee et joue en continu : on
     # neutralise tout ce qui, dans le moteur de l'intro, appartient au
     # scenario (reveal, pre-lueur, ecran qui se cache au zoom, extinction
@@ -556,6 +562,10 @@ def _renderer(info, width, height, fps, seed, curve, palette, bgkw):
     bgkw = dict(bgkw)
     palette = bgkw.pop("palette", palette)
     bgkw, info["midi"] = preparer_midi(info, bgkw)
+    # le fond suit le temps du morceau : un rendu qui commence a la trentieme
+    # seconde montre le fond de la trentieme seconde, comme l'apercu
+    bgkw.setdefault("fond_debut", float(info.get("start") or 0.0))
+    bgkw.setdefault("fond_total", float(info.get("total") or 0.0))
     return make_performance_renderer(
         width, height, fps, info["duration"], info["_audio"], info["_phi"],
         info["drops"], curve=curve, seed=seed, palette=palette, **bgkw)
@@ -648,7 +658,7 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
 
     # Les vignettes d'une video de fond ne servent qu'a ce rendu : on dit
     # qu'on s'en sert encore a chaque paquet d'images, et on les efface en
-    # finissant, quoi qu'il arrive (voir VideoBackdrop).
+    # finissant, quoi qu'il arrive (voir SuiteDeFonds).
     fond = getattr(_R, "backdrop", None)
 
     def toucher():
@@ -978,8 +988,19 @@ def add_look_args(ap):
                     help="trainee de la bande (0 = trait net)")
     ap.add_argument("--title", default=None,
                     help="titre affiche sur la dalle (defaut : nom du fichier)")
-    ap.add_argument("--backdrop", default=None,
-                    help="image de fond (jpg, png, webp...)")
+    ap.add_argument("--backdrop", default=None, nargs="+", metavar="FICHIER",
+                    help="image ou video de fond (jpg, png, mp4...) ; plusieurs "
+                         "fichiers se jouent a la suite")
+    ap.add_argument("--fond-vitesse", type=float, default=1.0, metavar="X",
+                    help="vitesse des videos de fond : 0.5 = ralenti, 2 = accelere")
+    ap.add_argument("--fond-boucle", default="boucle", choices=BOUCLES_FOND,
+                    help="au bout de la suite : reprendre du debut (boucle) ou "
+                         "se rejouer a l'envers (allerretour)")
+    ap.add_argument("--fond-fondu", type=float, default=0.0, metavar="S",
+                    help="fondu enchaine entre deux fonds, et au bout de la "
+                         "boucle, en secondes (0 = coupe franche)")
+    ap.add_argument("--fond-photo", type=float, default=6.0, metavar="S",
+                    help="duree d'une photo dans une suite de fonds")
     ap.add_argument("--backdrop-strength", type=float, default=1.00)
     ap.add_argument("--backdrop-clear", type=float, default=0.28)
     ap.add_argument("--backdrop-sharp", type=float, default=0.37,
@@ -1100,7 +1121,9 @@ def look_kwargs(args):
                              else os.path.splitext(os.path.basename(args.music))[0]),
             "backdrop": args.backdrop,
             "backdrop_strength": args.backdrop_strength,
-            "backdrop_clear": args.backdrop_clear}
+            "backdrop_clear": args.backdrop_clear,
+            "fond_vitesse": args.fond_vitesse, "fond_boucle": args.fond_boucle,
+            "fond_fondu": args.fond_fondu, "fond_photo": args.fond_photo}
     # ce que l'utilisateur n'a pas nomme, le prereglage le decide
     for k, v in socle.items():
         if k not in donnes:

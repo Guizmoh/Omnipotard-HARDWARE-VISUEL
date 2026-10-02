@@ -2153,6 +2153,56 @@ Désormais :
   un disque plein est appelé par son nom — plus de conseil hors de propos sur
   les photos de téléphone.
 
+## Une suite de fonds : vitesse, aller-retour, fondus
+
+La carte **Fonds : images et vidéos** accepte plusieurs fichiers — déposés
+d'un coup ou l'un après l'autre, sur la carte ou directement sur l'aperçu.
+Ils se jouent dans l'ordre de la liste, que les flèches changent ; la croix
+en retire un.
+
+- **Vitesse des vidéos** : au milieu du curseur, leur vitesse normale ; à
+  gauche le ralenti, jusqu'à quatre fois plus lent ; à droite l'accéléré,
+  jusqu'à quatre fois plus vite. Le curseur est gradué en puissances de deux
+  pour que ralentir et accélérer d'autant tombent à égale distance du milieu.
+  Un ralenti n'invente pas d'images que la vidéo n'a pas : entre deux des
+  siennes, le studio fond l'une dans l'autre, ce qui évite la saccade d'une
+  image tenue trop longtemps.
+- **Au bout de la suite** : *reprendre du début* (la boucle), ou *repartir à
+  l'envers* — l'aller-retour, qui rejoue la suite à reculons puis à
+  l'endroit, sans fin, et ne saute donc jamais.
+- **Fondu enchaîné** : d'un fichier au suivant, et du dernier au premier quand
+  la boucle reprend. À zéro, une coupe franche. Il ne peut pas dépasser
+  45 % du plus court des fichiers : au-delà, un fondu en chevaucherait un
+  autre.
+- **Durée d'une photo** dans une suite : le temps qu'elle reste à l'écran,
+  fondus compris. Une photo seule, elle, reste du début à la fin.
+
+Ces réglages n'apparaissent que lorsqu'ils servent : la vitesse, la boucle et
+le fondu dès qu'il y a une vidéo ou plusieurs fichiers ; la durée d'une photo
+dès qu'une suite en contient une.
+
+Le même calcul — quel fichier à quel instant, ou quel fondu entre deux —
+décide de l'aperçu et du rendu : ils montrent la même image au même instant
+(vérifié sur une vidéo dont le gris marque le temps : deux niveaux sur 255
+d'écart au plus, ceux de la compression). Et **le fond suit le temps du
+morceau** : un rendu qui commence à la trentième seconde, ou un aperçu
+animé lancé là, montre le fond de la trentième seconde. Les versions
+d'avant y repartaient du début du fond, alors que l'aperçu fixe, lui, était
+déjà calé sur le morceau.
+
+Le rendu ne découpe que les passages qu'il montrera, chacun une seule fois :
+une boucle ou un aller-retour relisent les mêmes images, un ralenti n'en
+découpe pas plus que la vidéo n'en a, un accéléré en saute. Le découpage est
+effacé à la fin du rendu (voir plus haut).
+
+En ligne de commande :
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 \
+    --backdrop ciel1.mp4 nuages.jpg ciel2.mp4 \
+    --fond-vitesse 0.5 --fond-boucle allerretour --fond-fondu 1.5 --fond-photo 6
+```
+
 ## STUDIO WEB — une page HTML, rien a installer
 
 `tools/build_web_studio.py` fabrique **un seul fichier HTML autonome** : on

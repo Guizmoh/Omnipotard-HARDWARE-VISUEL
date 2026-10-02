@@ -42,7 +42,10 @@ DEBUT = 19.2                     # la neuvieme mesure : tout y joue — grosse
 SANS = {"splitPx", "splitCount", "partsN", "partsSpeed", "partsLife",
         "stutLoop", "scrLen", "echoN", "echoDelay", "waveSmooth", "midiForce",
         "midiOffset", "midiTempo", "scrub", "couleurCoupsLibre", "trait",
-        "bgColor", "title", "encre"}
+        "bgColor", "title", "encre",
+        # la vitesse, la boucle et le fondu des fonds ne se voient qu'avec une
+        # video de fond, et sur plus d'une mesure : pas d'exemple
+        "fondVitesse", "fondFondu", "fondPhoto"}
 # Les listes dont chaque choix a son exemple
 OPTIONS = ("machine", "palette", "bg", "couleurCoups", "textureTouches",
            "travelMode", "modeTrait")

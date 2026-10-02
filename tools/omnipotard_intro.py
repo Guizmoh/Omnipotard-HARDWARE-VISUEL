@@ -37,7 +37,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.11"
+VERSION = "2026-10-02.12"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -387,6 +387,17 @@ AIDE = {
               "morceau. Vingt pour cent suffisent.",
     "travelMode": "Le sens du deplacement : on entre dans l'image, on s'en "
                   "eloigne, ou on la balaye.",
+    "fondVitesse": "La vitesse des videos de fond : au milieu, leur vitesse "
+                   "normale ; a gauche le ralenti (jusqu'a quatre fois plus "
+                   "lent), a droite l'accelere (quatre fois plus vite). Un "
+                   "time-lapse de ciel prend vie accelere, s'apaise ralenti.",
+    "fondBoucle": "Ce que fait la suite arrivee au bout : reprendre du debut, "
+                  "ou repartir a l'envers puis a l'endroit, sans fin — "
+                  "l'aller-retour ne saute jamais.",
+    "fondFondu": "Le fondu enchaine d'un fond au suivant, et du dernier au "
+                 "premier quand la suite reprend. A zero, une coupe franche.",
+    "fondPhoto": "Le temps qu'une photo reste a l'ecran dans une suite de "
+                 "fonds, fondus compris.",
     "split": "Le trait se separe en trois copies decalees, rouge et bleu, puis "
              "se recolle. La liste dit quels coups ont le droit de le lancer.",
     "splitCount": "Combien de fois au plus dans la video. Deux dedoublements "
@@ -705,16 +716,30 @@ def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
     #
     # Une photo, elle, n'a pas de duree : lui demander sa quarantieme seconde
     # ne renvoie rien non plus. On ne la cherche donc pas la ou elle n'est pas.
-    if seek > 0:
-        duree = media_duration(path)
-        seek = seek % duree if duree > 0.5 else 0.0
     # Avec un travelling, on charge plus grand que l'ecran : c'est cette marge
     # qu'on parcourt. Elle est prise sur l'image d'origine, donc le cadre reste
     # net d'un bout a l'autre — l'agrandir apres coup le rendrait flou.
-    aw, ah = w, h
+    aw, ah = _cadre_fond(w, h, travel, travel_mode)
+    img = _image_fond(path, aw, ah, seek, blur)
+    return StillBackdrop(img, _backdrop_mask(w, h, strength, clear, scale,
+                                             screen_dim, ecran),
+                         dur=dur, travel=travel, travel_mode=travel_mode)
+
+
+def _cadre_fond(w, h, travel, travel_mode):
+    """La taille a laquelle charger un fond : celle de l'ecran, plus la marge
+    que le travelling parcourt."""
     if travel > 1e-4 and travel_mode != "aucun":
-        aw = int(round(w * (1.0 + travel)))
-        ah = int(round(h * (1.0 + travel)))
+        return int(round(w * (1.0 + travel))), int(round(h * (1.0 + travel)))
+    return w, h
+
+
+def _image_fond(path, aw, ah, seek=0.0, blur=0.0):
+    """Une image d'un fichier — photo, ou video a l'instant `seek` —, recadree
+    en « couvrant » aw x ah et floutee : un tableau de 0 a 1."""
+    if seek > 0:
+        duree = media_duration(path)
+        seek = seek % duree if duree > 0.5 else 0.0
     out = subprocess.run(
         ["ffmpeg", "-v", "error"]
         + (["-ss", "%.3f" % seek] if seek > 0 else [])
@@ -729,10 +754,7 @@ def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
            .reshape(ah, aw, 3).astype(np.float32) / 255.0)
     if blur > 0:
         img = np.stack([gauss(img[:, :, c], blur) for c in range(3)], axis=-1)
-    return StillBackdrop(np.ascontiguousarray(img, dtype=np.float32),
-                         _backdrop_mask(w, h, strength, clear, scale,
-                                        screen_dim, ecran),
-                         dur=dur, travel=travel, travel_mode=travel_mode)
+    return np.ascontiguousarray(img, dtype=np.float32)
 
 
 def _fond_illisible(path, err=b""):
@@ -780,33 +802,144 @@ def is_video(path):
     return any(x.replace(".", "").isdigit() and float(x) > 1.5 for x in out)
 
 
-class VideoBackdrop:
-    """Fond anime : une video derriere la machine.
+# Ce que fait une suite de fonds quand elle arrive au bout
+BOUCLES_FOND = ("boucle", "allerretour")
+
+_GENRES = {}
+
+
+def genre_fond(path):
+    """("video", duree, cadence) ou ("photo", 0, 0), garde par fichier : la
+    page en redemande a chaque apercu, et ffprobe coute un dixieme de
+    seconde."""
+    try:
+        cle = (path, os.path.getsize(path), os.path.getmtime(path))
+    except OSError:
+        cle = (path, 0, 0)
+    g = _GENRES.get(cle)
+    if g is None:
+        g = ("photo", 0.0, 0.0)
+        if is_video(path):
+            duree, cadence = media_duration(path), 0.0
+            try:
+                out = subprocess.run(
+                    ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                     "-show_entries", "stream=avg_frame_rate,r_frame_rate",
+                     "-of", "default=nw=1:nk=1", path],
+                    stdout=subprocess.PIPE, check=True).stdout.decode().split()
+                for x in out:
+                    a, _, b = x.partition("/")
+                    if float(b or 1) > 0 and 1.0 < float(a) / float(b or 1) < 241.0:
+                        cadence = float(a) / float(b or 1)
+                        break
+            except Exception:                             # noqa: BLE001
+                pass
+            if duree > 0.05:
+                g = ("video", duree, cadence or 30.0)
+        _GENRES[cle] = g
+    return g
+
+
+def _lisse(x):
+    return x * x * (3.0 - 2.0 * x)
+
+
+def plan_fonds(durees, t, boucle="boucle", fondu=0.0):
+    """Ce que montre une suite de fonds a l'instant t du morceau.
+
+    `durees` : le temps que chaque element reste a l'ecran, en secondes de
+    morceau — une video, sa duree divisee par la vitesse ; une photo, la duree
+    choisie. Rend [(element, instant dans l'element, poids)], les poids
+    sommant a 1 : un element, ou deux pendant un fondu enchaine.
+
+    En boucle, la suite repart du debut ; avec un fondu, la fin du tour se
+    fond dans le debut du suivant au lieu d'y sauter. En aller-retour, elle
+    se rejoue a l'envers, puis a l'endroit, et ainsi de suite : pas de saut,
+    donc pas de fondu au demi-tour — seulement d'un element a l'autre.
+    """
+    n = len(durees)
+    F = max(0.0, float(fondu))
+    if F > 0.0:
+        F = min(F, 0.45 * min(durees))
+    debuts = [0.0]
+    for P in durees[:-1]:
+        debuts.append(debuts[-1] + P - F)
+    T = debuts[-1] + durees[-1]                # un aller complet
+    t = max(0.0, float(t))
+    if boucle == "allerretour":
+        tau = t % (2.0 * T)
+        u = tau if tau < T else 2.0 * T - tau
+        return _au_point(debuts, durees, min(u, T - 1e-6), F)
+    periode = T - F if n > 1 or F > 0.0 else T
+    tour, u = divmod(t, periode)
+    res = _au_point(debuts, durees, u, F)
+    if F > 0.0 and tour >= 1 and u < F:
+        # le dernier element du tour precedent s'efface dans le premier
+        x = _lisse(u / F)
+        res = [(k, v, w * x) for k, v, w in res]
+        res.append((n - 1, durees[-1] - F + u, 1.0 - x))
+    return res
+
+
+def _au_point(debuts, durees, u, F):
+    n = len(durees)
+    res = []
+    for k in range(n):
+        s0, P = debuts[k], durees[k]
+        if not (s0 <= u < s0 + P or (k == n - 1 and u >= s0)):
+            continue
+        w = 1.0
+        if F > 0.0:
+            if k + 1 < n and u >= debuts[k + 1]:
+                w *= 1.0 - _lisse(min(1.0, (u - debuts[k + 1]) / F))
+            if k > 0 and u < s0 + F:
+                w *= _lisse((u - s0) / F)
+        res.append((k, min(u - s0, P - 1e-6), w))
+    tot = sum(w for _k, _v, w in res)
+    if tot <= 0.0:
+        return [(0, 0.0, 1.0)]
+    return [(k, v, w / tot) for k, v, w in res]
+
+
+def _durees_fonds(genres, vitesse, photo):
+    return [g[1] / vitesse if g[0] == "video" else max(0.5, float(photo))
+            for g in genres]
+
+
+class SuiteDeFonds:
+    """Le fond anime : une video, ou plusieurs videos et photos a la suite.
+
+    Les videos se jouent a la vitesse choisie — ralenties ou accelerees —,
+    les photos restent le temps choisi, et l'on passe de l'une a l'autre d'un
+    fondu enchaine. Au bout, la suite reprend du debut (avec un fondu si on en
+    a mis un) ou se rejoue a l'envers, en aller-retour. Tout cela est decide
+    par plan_fonds, qui sert aussi a l'apercu (apercu_fonds) : les deux
+    montrent la meme chose au meme instant.
 
     Le rendu calcule les images en parallele et dans un ordre quelconque : une
-    lecture sequentielle de la video ne s'y prete pas. On la detaille donc une
-    fois en vignettes sur le disque, que chaque tache relit par son numero.
+    lecture sequentielle des videos ne s'y prete pas. On les detaille donc
+    une fois en vignettes sur le disque, que chaque tache relit par leur
+    numero — seulement les passages que le rendu montrera, et chacun une seule
+    fois : une boucle ou un aller-retour relisent les memes vignettes. Une
+    video ralentie n'est pas detaillee plus finement que sa propre cadence :
+    entre deux de ses images, on les fond l'une dans l'autre, ce qui donne un
+    ralenti sans saccade.
 
     Les vignettes sont volontairement petites — le fond est floute de toute
-    facon, et les garder en pleine definition coûterait des gigaoctets sur un
-    morceau entier. Le flou et le recadrage sont faits par ffmpeg pendant
-    l'extraction, si bien qu'il ne reste plus qu'une lecture et une
-    multiplication par image.
+    facon. Le flou et le recadrage sont faits par ffmpeg pendant l'extraction.
 
-    Elles ne vivent que le temps d'un rendu. Avant, chaque rendu laissait les
-    siennes dans le dossier temporaire du systeme, pour toujours : une par
-    image du morceau, a chaque duree, definition ou nettete differente — des
-    gigaoctets, jusqu'a remplir le disque (« No space left on device »).
-    Desormais :
+    Elles ne vivent que le temps d'un rendu. Les versions d'avant laissaient
+    les leurs dans le dossier temporaire du systeme, pour toujours, jusqu'a
+    remplir le disque (« No space left on device »). Desormais la place libre
+    est verifiee avant : si les vignettes n'y tiennent pas, elles sont faites
+    plus petites, et si rien ne tient, on le dit. Le rendu les efface en
+    finissant (liberer), y compris s'il echoue ou s'il est arrete ; celles
+    qu'un rendu interrompu aurait laissees — studio ferme en route — sont
+    effacees au rendu suivant, une fois qu'aucun rendu ne les touche plus
+    depuis une demi-heure (toucher).
 
-    - une video plus courte que le morceau tourne en boucle : on n'en detaille
-      qu'un tour, au lieu de toute la duree du morceau ;
-    - la place libre est verifiee avant : si les vignettes n'y tiennent pas,
-      elles sont faites plus petites, et si rien ne tient, on le dit ;
-    - le rendu les efface en finissant (liberer), y compris s'il echoue ou
-      s'il est arrete ; celles qu'un rendu interrompu aurait laissees — studio
-      ferme en route — sont effacees au rendu suivant, une fois qu'aucun rendu
-      ne les touche plus depuis une demi-heure (toucher).
+    Le temps du fond est celui du morceau : un rendu qui commence a la
+    trentieme seconde montre le fond de la trentieme seconde, comme l'apercu.
     """
 
     DIV = 3            # les vignettes font le tiers de la definition finale
@@ -814,9 +947,11 @@ class VideoBackdrop:
     RESERVE = 1.5e9            # laisses libres : la video rendue, le systeme
     ABANDON = 1800.0           # secondes sans rendu avant d'effacer un reste
 
-    def __init__(self, path, w, h, fps, duration, strength=0.80, clear=0.45,
+    def __init__(self, paths, w, h, fps, duration, strength=0.80, clear=0.45,
                  scale=None, blur=2.2, screen_dim=0.40, cache_dir=None,
-                 travel=0.0, travel_mode="avant", div=None, ecran=None):
+                 travel=0.0, travel_mode="avant", div=None, ecran=None,
+                 vitesse=1.0, boucle="boucle", fondu=0.0, photo=6.0,
+                 debut=0.0, total=0.0):
         try:
             from PIL import Image                # noqa: F401 -- verifie tot
         except ImportError:
@@ -824,72 +959,126 @@ class VideoBackdrop:
                 "un fond anime a besoin de la bibliotheque pillow. "
                 "A installer une seule fois avec :  pip install pillow  "
                 "(une image fixe en fond, elle, fonctionne sans)")
+        if isinstance(paths, str):
+            paths = [paths]
         self.w, self.h = w, h
         self.mask = _backdrop_mask(w, h, strength, clear, scale, screen_dim,
                                    ecran)
         self.fps = float(fps)
-        self.DIV = int(div) if div else VideoBackdrop.DIV
-        self.dur = max(float(duration), 1e-3)
+        self.debut = max(0.0, float(debut))
+        # le travelling s'etale sur tout le morceau, comme dans l'apercu
+        self.dur = max(float(total) if total and total > 0
+                       else self.debut + float(duration), 1e-3)
         self.travel, self.mode = float(travel), travel_mode
-        marge = (1.0 + self.travel) if (self.travel > 1e-4
-                                        and travel_mode != "aucun") else 1.0
-        # un tour de la video suffit quand elle est plus courte que le morceau
-        src = media_duration(path)
-        self.boucle = 0.5 < src < duration
-        tour = src if self.boucle else duration
-        n = int(tour * fps) + 2
+        self.vitesse = min(max(float(vitesse), 0.05), 20.0)
+        self.boucle = boucle if boucle in BOUCLES_FOND else "boucle"
+        self.fondu = max(0.0, float(fondu))
+        self.DIV = int(div) if div else SuiteDeFonds.DIV
+        self.paths = list(paths)
+        self.genres = [genre_fond(p) for p in self.paths]
+        self.durees = _durees_fonds(self.genres, self.vitesse, photo)
+        self.cible = _cadre_fond(w, h, self.travel, travel_mode)
+
+        # Ce que le rendu montrera : on parcourt ses images une a une. Pour
+        # chaque video, le passage lu, et la cadence a laquelle le detailler :
+        # une image par image rendue, sans depasser celles de la video.
+        n_img = int(round(float(duration) * self.fps)) + 1
+        lu = {}
+        for i in range(n_img):
+            for k, v, _w in plan_fonds(self.durees, self.debut + i / self.fps,
+                                       self.boucle, self.fondu):
+                if self.genres[k][0] == "video":
+                    sv = v * self.vitesse
+                    a, b = lu.get(k, (sv, sv))
+                    lu[k] = (min(a, sv), max(b, sv))
+        self._x = {}
+        n_vignettes = 0
+        for k, g in enumerate(self.genres):
+            if g[0] == "photo":
+                n_vignettes += 1
+                continue
+            if k not in lu:
+                continue
+            cad = min(self.fps / self.vitesse, g[2])
+            a = max(0.0, lu[k][0] - 1.0 / cad)
+            b = min(g[1], lu[k][1] + 2.0 / cad)
+            self._x[k] = [a, cad, b - a]
+            n_vignettes += int((b - a) * cad) + 2
 
         root = cache_dir or os.path.join(tempfile.gettempdir(), "omnipotard-fonds")
         os.makedirs(root, exist_ok=True)
         menage_fonds(root, self.ABANDON)
         libre = shutil.disk_usage(root).free - self.RESERVE
+        cw, ch = self.cible
 
         def taille(div):
-            return (max(16, int(w * marge) // div), max(16, int(h * marge) // div))
+            return max(16, cw // div), max(16, ch // div)
 
         def besoin(div):
             sw, sh = taille(div)
-            return n * sw * sh * self.OCTETS_PAR_PIXEL
+            return n_vignettes * sw * sh * self.OCTETS_PAR_PIXEL
 
         demande = self.DIV
         while besoin(self.DIV) > libre and self.DIV < 8:
             self.DIV += 1
+        noms = ", ".join("« %s »" % os.path.basename(p) for p in self.paths)
         if besoin(self.DIV) > libre:
             raise RuntimeError(disque_plein(
                 root, besoin(demande) + self.RESERVE,
-                "decouper la video de fond « %s »" % os.path.basename(path)))
+                "decouper le fond %s" % noms))
         if self.DIV != demande:
-            print("  place limitee sur le disque : la video de fond est "
-                  "decoupee en %dx%d au lieu de %dx%d" % (
-                      taille(self.DIV) + taille(demande)), flush=True)
+            print("  place limitee sur le disque : le fond est decoupe en "
+                  "%dx%d au lieu de %dx%d" % (taille(self.DIV) + taille(demande)),
+                  flush=True)
         sw, sh = taille(self.DIV)
+        self.taille_vignette = (sw, sh)
 
         # un dossier par rendu : deux rendus ne se partagent rien, et chacun
         # peut effacer le sien en finissant
-        cle = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(path))[:40]
+        cle = re.sub(r"[^A-Za-z0-9._-]+", "_",
+                     os.path.basename(self.paths[0]))[:40]
         self.dir = tempfile.mkdtemp(prefix=cle + "-", dir=root)
-        vf = ("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d"
-              % (sw, sh, sw, sh))
+        vf0 = ("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d"
+               % (sw, sh, sw, sh))
         if blur > 0:
-            vf += ",gblur=sigma=%.2f" % max(0.4, blur / self.DIV)
-        r = subprocess.run(
-            ["ffmpeg", "-v", "error", "-y", "-stream_loop", "-1", "-i", path,
-             "-t", "%.3f" % (tour + 1.0 / max(fps, 1)),
-             "-vf", vf, "-r", "%.4f" % fps, "-q:v", "4",
-             os.path.join(self.dir, "%06d.jpg")], stderr=subprocess.PIPE)
-        if r.returncode:
-            self.liberer()
-            if b"No space left" in (r.stderr or b""):
-                raise RuntimeError(disque_plein(
-                    root, besoin(self.DIV) + self.RESERVE,
-                    "decouper la video de fond « %s »" % os.path.basename(path)))
-            raise RuntimeError(_fond_illisible(path, r.stderr))
+            vf0 += ",gblur=sigma=%.2f" % max(0.4, blur / self.DIV)
+        self.files = {}
+        for k, path in enumerate(self.paths):
+            if self.genres[k][0] == "photo":
+                cmd = ["ffmpeg", "-v", "error", "-y", "-i", path, "-vf", vf0,
+                       "-frames:v", "1", "-q:v", "2",
+                       os.path.join(self.dir, "%02d_photo.jpg" % k)]
+            elif k in self._x:
+                a, cad, d = self._x[k]
+                cmd = ["ffmpeg", "-v", "error", "-y"]
+                if a > 0:
+                    cmd += ["-ss", "%.3f" % a]
+                cmd += ["-i", path, "-t", "%.3f" % d,
+                        "-vf", "fps=%.5f,%s" % (cad, vf0), "-q:v", "4",
+                        os.path.join(self.dir, "%02d_%%06d.jpg" % k)]
+            else:
+                continue
+            r = subprocess.run(cmd, stderr=subprocess.PIPE)
+            if r.returncode:
+                self.liberer()
+                if b"No space left" in (r.stderr or b""):
+                    raise RuntimeError(disque_plein(
+                        root, besoin(self.DIV) + self.RESERVE,
+                        "decouper le fond %s" % noms))
+                raise RuntimeError(_fond_illisible(path, r.stderr))
+            pref = "%02d_" % k
+            self.files[k] = sorted(f for f in os.listdir(self.dir)
+                                   if f.startswith(pref) and f.endswith(".jpg"))
+            if not self.files[k]:
+                self.liberer()
+                raise RuntimeError("aucune image extraite de %s" % path)
+        self._memo = {}
+        self._dernier = (None, None)
 
-        self.files = sorted(f for f in os.listdir(self.dir) if f.endswith(".jpg"))
-        if not self.files:
-            self.liberer()
-            raise RuntimeError("aucune image extraite de %s" % path)
-        self._cache = (None, None)
+    def __getstate__(self):
+        etat = dict(self.__dict__)
+        etat["_memo"], etat["_dernier"] = {}, (None, None)
+        return etat
 
     def toucher(self):
         """Dit qu'un rendu se sert encore des vignettes (voir menage_fonds)."""
@@ -902,27 +1091,64 @@ class VideoBackdrop:
         """Efface les vignettes : le rendu qui les a faites est fini."""
         shutil.rmtree(self.dir, ignore_errors=True)
 
+    def _vignette(self, k, j):
+        """La j-ieme vignette de l'element k, en octets (gardees par deux)."""
+        from PIL import Image
+        cle = (k, j)
+        v = self._memo.get(cle)
+        if v is None:
+            if len(self._memo) >= 3:
+                self._memo.pop(next(iter(self._memo)))
+            nom = os.path.join(self.dir, self.files[k][j])
+            v = np.asarray(Image.open(nom).convert("RGB"))
+            self._memo[cle] = v
+        return v
+
+    def _lectures(self, t):
+        """Les vignettes a fondre ensemble a l'instant t : [(k, j, poids)]."""
+        out = []
+        for k, v, w in plan_fonds(self.durees, self.debut + t, self.boucle,
+                                  self.fondu):
+            if self.genres[k][0] == "photo":
+                out.append((k, 0, w))
+                continue
+            n = len(self.files[k])
+            a, cad, _d = self._x[k]
+            p = min(max((v * self.vitesse - a) * cad, 0.0), n - 1.0)
+            j = int(p)
+            f = p - j
+            if self.vitesse >= 0.999 or f < 0.02 or j + 1 >= n:
+                # a vitesse normale ou acceleree, une image rendue tombe sur
+                # une vignette ; ralentie, elle tombe entre deux
+                out.append((k, min(n - 1, int(p + 0.5)) if self.vitesse >= 0.999 else j, w))
+            else:
+                out.append((k, j, w * (1.0 - f)))
+                out.append((k, j + 1, w * f))
+        return out
+
     def at(self, t):
         from PIL import Image
-        i = max(0, int(t * self.fps + 0.5))
-        i = i % len(self.files) if self.boucle else min(len(self.files) - 1, i)
-        if self._cache[0] == i and self.travel <= 1e-4:
-            return self._cache[1]        # sans travelling, le cadre ne bouge pas
-        im = Image.open(os.path.join(self.dir, self.files[i])).convert("RGB")
-        # la vignette est agrandie a la taille du cadre a parcourir, puis on y
-        # decoupe l'instant voulu — comme pour une photo
-        cible = (int(round(self.w * (1.0 + self.travel)))
-                 if self.travel > 1e-4 and self.mode != "aucun" else self.w)
-        cibleh = (int(round(self.h * (1.0 + self.travel)))
-                  if self.travel > 1e-4 and self.mode != "aucun" else self.h)
-        if im.size != (cible, cibleh):
-            im = im.resize((cible, cibleh), Image.BILINEAR)
+        lect = tuple((k, j, round(w, 4)) for k, j, w in self._lectures(t))
+        if self._dernier[0] == lect and (self.travel <= 1e-4
+                                         or self.mode == "aucun"):
+            return self._dernier[1]       # sans travelling, le cadre ne bouge pas
+        if len(lect) == 1:
+            im = Image.fromarray(self._vignette(lect[0][0], lect[0][1]))
+        else:
+            acc = None
+            for k, j, w in lect:
+                x = self._vignette(k, j).astype(np.float32)
+                x *= np.float32(w)
+                acc = x if acc is None else acc + x
+            im = Image.fromarray(np.clip(acc + 0.5, 0, 255).astype(np.uint8))
+        if im.size != self.cible:
+            im = im.resize(self.cible, Image.BILINEAR)
         img = np.asarray(im, dtype=np.float32) / 255.0
-        brut = travel_crop(img, t / self.dur, self.travel, self.mode,
-                           self.w, self.h)
+        brut = travel_crop(img, (self.debut + t) / self.dur, self.travel,
+                           self.mode, self.w, self.h)
         self._brut = brut
         img = np.ascontiguousarray(brut * self.mask, dtype=np.float32)
-        self._cache = (i, img)
+        self._dernier = (lect, img)
         return img
 
     def clair(self, t):
@@ -931,7 +1157,33 @@ class VideoBackdrop:
         return _eclaircir(self._brut, self.mask)
 
 
-def menage_fonds(root=None, age=VideoBackdrop.ABANDON):
+def apercu_fonds(paths, w, h, t, total, vitesse=1.0, boucle="boucle",
+                 fondu=0.0, photo=6.0, blur=2.2, strength=0.80, clear=0.45,
+                 scale=None, screen_dim=0.40, ecran=None, travel=0.0,
+                 travel_mode="avant"):
+    """Le fond de l'apercu a l'instant t du morceau : le meme plan que le
+    rendu (plan_fonds), mais seulement la ou les deux images de l'instant,
+    extraites directement — rien n'est detaille."""
+    if isinstance(paths, str):
+        paths = [paths]
+    vitesse = min(max(float(vitesse), 0.05), 20.0)
+    genres = [genre_fond(p) for p in paths]
+    durees = _durees_fonds(genres, vitesse, photo)
+    aw, ah = _cadre_fond(w, h, travel, travel_mode)
+    acc = None
+    for k, v, wk in plan_fonds(durees, t, boucle, fondu):
+        seek = v * vitesse if genres[k][0] == "video" else 0.0
+        img = _image_fond(paths[k], aw, ah, seek, blur)
+        img *= np.float32(wk)
+        acc = img if acc is None else acc + img
+    return StillBackdrop(np.ascontiguousarray(acc, dtype=np.float32),
+                         _backdrop_mask(w, h, strength, clear, scale,
+                                        screen_dim, ecran),
+                         dur=max(float(total), 1e-3), travel=travel,
+                         travel_mode=travel_mode)
+
+
+def menage_fonds(root=None, age=SuiteDeFonds.ABANDON):
     """Efface les vignettes de fond qu'aucun rendu ne touche plus depuis
     `age` secondes : celles d'un rendu interrompu, studio ferme en route, et
     celles que les versions d'avant laissaient derriere chaque rendu. Un
@@ -994,14 +1246,25 @@ def _eclaircir(brut, mask):
                                 dtype=np.float32)
 
 
-def make_backdrop(path, w, h, fps=30, duration=0.0, sharp=0.37, **kw):
-    """Image ou video, selon ce que contient le fichier."""
+def make_backdrop(path, w, h, fps=30, duration=0.0, sharp=0.37, vitesse=1.0,
+                  boucle="boucle", fondu=0.0, photo=6.0, debut=0.0, total=0.0,
+                  **kw):
+    """Le fond : une photo, une video, ou une suite des deux (liste de
+    chemins), jouee a la vitesse et de la facon choisies."""
     blur, div = backdrop_quality(sharp)
-    if duration > 0 and is_video(path):
-        return VideoBackdrop(path, w, h, fps, duration, blur=blur, div=div, **kw)
-    # une photo a besoin de connaitre la duree du morceau : c'est sur elle que
-    # s'etale le travelling
-    return load_backdrop(path, w, h, blur=blur, dur=max(duration, 1e-3), **kw)
+    paths = [path] if isinstance(path, str) else [p for p in path if p]
+    total = total if total and total > 0 else debut + duration
+    if len(paths) == 1 and genre_fond(paths[0])[0] == "photo":
+        # une photo a besoin de connaitre la duree du morceau : c'est sur elle
+        # que s'etale le travelling
+        return load_backdrop(paths[0], w, h, blur=blur,
+                             dur=max(duration, 1e-3), **kw)
+    if duration <= 0:
+        return apercu_fonds(paths, w, h, debut, total, vitesse, boucle, fondu,
+                            photo, blur, **kw)
+    return SuiteDeFonds(paths, w, h, fps, duration, blur=blur, div=div,
+                        vitesse=vitesse, boucle=boucle, fondu=fondu,
+                        photo=photo, debut=debut, total=total, **kw)
 
 
 def hex_to_rgb(x):
