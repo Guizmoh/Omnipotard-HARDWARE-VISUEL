@@ -561,13 +561,23 @@ def render_still(music, t, width=960, height=540, fps=30, start=0.0,
     return frame_performance(r, t, info["duration"])
 
 
+class RenduArrete(Exception):
+    """Le rendu a ete arrete a la demande, avant sa fin."""
+
+
 def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
                  fps=30, crf=None, jobs=None, seed=7, curve=True, palette="vert",
-                 info=None, progress=None, quality="compatible", **bgkw):
+                 info=None, progress=None, quality="compatible", arret=None,
+                 **bgkw):
     """Rend la video complete et y remet le son.
 
     `progress(done, total, elapsed)` est appele au fil de l'eau ; renvoie le
     dictionnaire d'analyse.
+
+    `arret`, s'il est donne, est interroge entre deux paquets d'images : s'il
+    repond vrai, le rendu s'arrete la, le fichier commence est efface et
+    RenduArrete est levee. Un paquet, c'est au plus une ou deux secondes de
+    calcul : l'arret est quasi immediat.
     """
     global _R, _DUR
     info = info or analyze(music, start, duration)
@@ -614,6 +624,7 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
 
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     t0 = time.time()
+    arrete = False
     try:
         if jobs > 1:
             # Le moteur est construit : la memoire qu'il reste est celle dont
@@ -639,6 +650,10 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
             with ctx.Pool(jobs, initializer=_init_worker,
                           initargs=(_R, _DUR)) as pool:
                 for s0 in range(0, nframes, chunk):
+                    if arret and arret():
+                        # la sortie du bloc « with » termine les taches
+                        arrete = True
+                        break
                     idx = range(s0, min(nframes, s0 + chunk))
                     for buf in pool.map(_worker, idx, chunksize=1):
                         proc.stdin.write(buf)
@@ -646,12 +661,35 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
                         progress(min(nframes, s0 + chunk), nframes, time.time() - t0)
         else:
             for i in range(nframes):
+                if arret and i % 6 == 0 and arret():
+                    arrete = True
+                    break
                 proc.stdin.write(_worker(i))
                 if progress and i % 12 == 0:
                     progress(i + 1, nframes, time.time() - t0)
+    except BaseException:
+        # une erreur, ou Ctrl-C : ffmpeg ne doit pas rester en vie a attendre
+        # des images, ni laisser un fichier a moitie ecrit
+        arrete = True
+        raise
     finally:
-        proc.stdin.close()
-        proc.wait()
+        if arrete:
+            proc.kill()
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+            proc.wait()
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            try:
+                os.remove(out)
+            except OSError:
+                pass
+        else:
+            proc.stdin.close()
+            proc.wait()
+    if arrete:
+        raise RenduArrete("rendu arrete")
     if proc.returncode:
         raise RuntimeError("ffmpeg a echoue (code %d)" % proc.returncode)
     if progress:

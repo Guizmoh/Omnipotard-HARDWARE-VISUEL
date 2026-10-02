@@ -29,6 +29,10 @@ HORS_ALLURE = {"size", "fps", "quality", "start", "dur", "preset", "scrub",
                # la duree de l'apercu en mouvement : elle ne decrit rien de
                # l'image, elle dit seulement combien de secondes calculer
                "clipDur"}
+# Les champs qui aident a regler sans etre des reglages : le decalage en
+# millisecondes ecrit dans le curseur du decalage, le nom d'un reglage a
+# enregistrer, l'ecart du sequenceur automatique.
+AIDES = {"midiMs", "presetNom", "seqChaque"}
 # Ce que la page envoie en plus des reglages d'allure.
 META = {"track", "t", "w", "h", "curve", "width", "height", "fps", "quality",
         "start", "duration", "crf",
@@ -39,8 +43,9 @@ META = {"track", "t", "w", "h", "curve", "width", "height", "fps", "quality",
 
 
 def ids_de_la_page():
-    """Les identifiants des curseurs et des listes, tels que la page les pose."""
-    curseurs, listes, tous = set(), set(), set()
+    """Les identifiants des curseurs, des listes et des autres champs (cases,
+    nombres, couleurs, texte), tels que la page les pose."""
+    curseurs, listes, champs, tous = set(), set(), set(), set()
     for m in re.finditer(r'<(input|select)\b([^>]*)>', S.PAGE):
         balise, attrs = m.group(1), m.group(2)
         ident = re.search(r'id="([^"]+)"', attrs)
@@ -52,7 +57,9 @@ def ids_de_la_page():
             listes.add(nom)
         elif 'type="range"' in attrs:
             curseurs.add(nom)
-    return curseurs, listes, tous
+        elif re.search(r'type="(number|checkbox|color|text)"', attrs):
+            champs.add(nom)
+    return curseurs, listes, champs, tous
 
 
 def envoyes_par_la_page():
@@ -81,7 +88,7 @@ class Espion(dict):
 
 
 def main():
-    curseurs, listes, tous = ids_de_la_page()
+    curseurs, listes, champs, tous = ids_de_la_page()
     envoi = envoyes_par_la_page()
     soucis = []
 
@@ -96,10 +103,15 @@ def main():
     #    aurait vu les effets rester a l'ecran sans jamais atteindre le fichier
     gronder("curseurs de la page jamais envoyes",
             (curseurs | listes) - envoi - HORS_ALLURE)
+    # les cases, nombres et couleurs aussi : le tempo du morceau et la lecture
+    # « telle quelle » de la melodie sont restes des semaines sans partir,
+    # parce que seuls curseurs et listes etaient controles
+    gronder("champs de la page jamais envoyes",
+            champs - envoi - HORS_ALLURE - AIDES)
 
     # 3. le moteur lit bien tout ce que la page lui envoie
     espion = Espion({k: "0" for k in envoi})
-    for couleur in ("trait", "bgColor"):
+    for couleur in ("trait", "bgColor", "couleurCoupsLibre"):
         espion[couleur] = "#00ff00"
     # « perso » est le seul cas ou la couleur libre du trait est lue
     espion["palette"] = "perso"
@@ -112,24 +124,13 @@ def main():
     gronder("curseurs sans phrase d'aide", curseurs - set(AIDE))
     gronder("frequences annoncees pour un reglage inexistant", set(COMPTE) - tous)
 
-    # 5. la v2 propose exactement les memes reglages que la v1
-    import studio_v2 as V2
-    v2 = V2.tous_les_ids(V2.donnees())
-    gronder("reglages de la v1 absents de la v2",
-            (curseurs | listes) - v2 - {"preset", "clipDur", "scrub"})
-    gronder("reglages inventes par la v2", v2 - tous)
-    sans_niveau = {c["id"] for o in V2.donnees() for b in o["blocs"]
-                   for c in b["controles"]
-                   if not 1 <= c["niveau"] <= 3}
-    gronder("reglages de la v2 sans profondeur", sans_niveau)
-
-    # 6. le rendu part des memes reglages que l'apercu, sans les recopier
+    # 5. le rendu part des memes reglages que l'apercu, sans les recopier
     corps = S.PAGE.split("$('#go').onclick", 1)[1][:900]
     if "Object.fromEntries(params())" not in corps:
         soucis.append("le rendu ne repart pas de params() : deux listes de "
                       "reglages a tenir a jour, donc une qui prendra du retard")
 
-    # 7. les prereglages posent des valeurs sur des curseurs qui existent
+    # 6. les prereglages posent des valeurs sur des curseurs qui existent
     gronder("prereglages : noms inconnus du moteur",
             {n for v in PRESETS.values() for n in v} - set(CHAMPS))
     gronder("prereglages : curseurs inconnus de la page",

@@ -111,10 +111,12 @@ Ce dernier point a été corrigé dans le moteur et pas dans la géométrie : la
 exactement comme avant ; en dessous, « BOMBE ATOMIQUE N2 REMIX » passe de cinq
 lettres à dix sur la SP-404, et s'affiche en entier sur la MPC.
 
-## Les styles, après le rendu
+## Les styles : un onglet
 
-Quand un rendu se termine, une fenêtre propose **six styles** — des allures
-poussées, chacune avec sa vignette calculée sur ton propre morceau :
+L'onglet **Styles**, en haut de la page à côté de *Studio*, propose **six
+styles** — des allures poussées, chacune avec sa vignette calculée sur ton
+propre morceau. Il ne s'ouvre plus tout seul à la fin d'un rendu : on y va
+quand on veut, et *Retour au studio* (ou Échap) ramène aux réglages.
 
 | style | ce qu'il fait |
 | --- | --- |
@@ -126,7 +128,7 @@ poussées, chacune avec sa vignette calculée sur ton propre morceau :
 | épure | rien que le trait, sans lignes, halo ni avarie |
 
 *Appliquer* pose le style ; *Rendre avec* le pose et relance le rendu. Le bouton
-**Essayer un autre style** rouvre la fenêtre à tout moment.
+**Essayer un autre style**, sous le rendu, mène au même onglet.
 
 **Un style n'est pas un préréglage.** Un préréglage décrit un genre — ce qui
 réagit à quoi — et repart de l'usine. Un style ne touche qu'à l'allure : il se
@@ -503,7 +505,7 @@ git clone https://github.com/Guizmoh/Omnipotard-HARDWARE-VISUEL.git
 cd Omnipotard-HARDWARE-VISUEL
 pip install numpy pillow          # ffmpeg : voir « Rendu » plus haut
 python3 tools/studio.py
-# le navigateur s'ouvre sur http://127.0.0.1:8765 — la v2
+# le navigateur s'ouvre sur http://127.0.0.1:8765
 ```
 
 **Après un `git pull`, il faut relancer le studio.** Python lit les modules au
@@ -535,11 +537,11 @@ Le rendu se lance depuis la même page, en 1080p, 4K, 720p, carré ou vertical,
 avec une barre de progression et un bouton de téléchargement. Tout ce que le studio fabrique (morceaux déposés et
 vidéos) reste dans `out/studio/`.
 
-La page est **orange** — curseurs, valeurs, boutons, onglets. C'est la
-couleur de l'outil, pas celle des vidéos : le trait de la machine se règle à
-part, dans l'onglet *Couleurs* (vert par défaut, orange, bleu ou une couleur
-libre). L'orange de la page est celui de la palette *orange* du moteur ; il se
-change en tête du style de `tools/studio_v2.py`, en deux lignes.
+La page est **orange** — curseurs, valeurs, boutons. C'est la couleur de
+l'outil, pas celle des vidéos : le trait de la machine se règle à part, dans la
+carte *Couleur du trait* (vert par défaut, orange, bleu ou une couleur libre).
+L'orange de la page est celui de la palette *orange* du moteur ; il se change
+en tête du style de `tools/studio.py` (`--acc`), en deux lignes.
 
 Rien ne sort de la machine : le serveur n'écoute que sur `127.0.0.1`, il n'y a
 ni bibliothèque web ni CDN — la page est servie telle quelle, et les seules
@@ -1582,8 +1584,16 @@ C'est un vrai rendu, dans le même moteur et avec les mêmes réglages que le
 fichier final — pas un diaporama d'images fixes : chacune coûte plus d'un
 dixième de seconde, on n'en verrait jamais plus de huit par seconde. Le clip
 est en 960×540 à 15 images par seconde, ce qui le rend à peu près en temps
-réel : **2,6 s pour deux secondes, 4,1 s pour quatre, 7,7 s pour huit**,
-mesuré. Le rendu final, lui, en fera 30 ou 60.
+réel : **2,6 s pour deux secondes, 4,1 s pour quatre, 7,7 s pour huit,
+13 s pour seize** (la plus longue), mesuré. Le rendu final, lui, en fera 30
+ou 60.
+
+**Arrêter.** Pendant le calcul d'un aperçu, le bouton *Arrêter* l'abandonne ;
+pendant un rendu, *Arrêter le rendu* fait de même. Le moteur regarde la
+demande entre deux paquets d'images — une ou deux secondes de calcul au plus,
+mesuré à 2,7 s sur un rendu 1080p —, termine ses tâches, coupe ffmpeg et
+**efface le fichier commencé** : il ne reste pas de vidéo tronquée dans
+`out/studio/`. Un rendu qui attendait son tour s'arrête sans avoir commencé.
 
 Il sort en **VP8/WebM** et non en MP4, pour une raison qui s'est vue à
 l'essai : certains navigateurs sont construits sans H.264 — le Chromium qui
@@ -1655,7 +1665,7 @@ relire), puis corrigé de trois façons :
   phrase claire — « fermez la fenêtre noire du studio et relancez-le » — plutôt
   qu'avec un message d'erreur Python ;
 - les scripts de mise à jour recopient maintenant **tous** les fichiers de la
-  racine et non une liste tenue à la main (le lanceur de la v2 n'arrivait
+  racine et non une liste tenue à la main (un nouveau lanceur n'arrivait
   jamais), et ils commencent par rappeler qu'il faut fermer le studio d'abord.
 
 Le studio affiche aussi sa version au démarrage, dans la fenêtre noire : de quoi
@@ -1735,25 +1745,17 @@ cela ne coûtait rien), et construire l'agrandissement du grain par diffusion
 plutôt que par deux `repeat` (plus lent, le remodelage d'une vue diffusée
 repasse par un chemin générique). Elles ne sont pas dans le code.
 
-## STUDIO v2 — la même machine, une page plus claire
+## Une seule page
 
-**La v2 est le studio.** C'est elle qui s'ouvre, quel que soit le lanceur :
+Il y a eu deux pages du studio : la page de base et une « v2 » rangée en
+onglets. **Il n'en reste qu'une, la page de base** — `Lancer-le-studio.bat`,
+`Lancer-le-studio.command` ou `python3 tools/studio.py`, à l'adresse
+`http://127.0.0.1:8765`. Les anciens lanceurs v2 ont disparu ; un ancien favori
+vers `/v1` ou `/v2` ramène à la page.
 
-```
-double-cliquer   Lancer-le-studio.bat  ou  Lancer-le-studio-v2.bat   (Windows)
-                 Lancer-le-studio.command  ou  ...-v2.command        (macOS, Linux)
-en ligne         python3 tools/studio.py
-l'adresse        http://127.0.0.1:8765        (la page classique est sur /v1)
-```
+Ce que seule la v2 avait est passé dans la page de base :
 
-La page classique reste servie sur `/v1` pour une raison précise : la v2 ne
-recopie pas la liste des réglages, elle **la lit dans la page classique**.
-Celle-ci doit donc rester juste — c'est ce que vérifie
-`tools/verifier_studio.py` —, mais il n'y a plus de raison de s'en servir. Tout
-ce qui a été ajouté depuis se trouve dans la v2 : le calage de la mélodie au
-millième, la mesure de la dérive, la fenêtre des styles à la fin du rendu.
-
-### Caler la mélodie sur ce qu'on voit
+### Caler la mélodie au millième
 
 Le curseur **avance / retard** s'affiche en **secondes et millisecondes** —
 « +85 ms », « −1 s 250 ms » — et une phrase dit le sens : *les touches
@@ -1762,100 +1764,24 @@ allume plus tôt, un négatif plus tard.
 
 Sous le curseur :
 
-- **décalage exact**, un champ en millisecondes : on y tape l'écart constaté,
-  les flèches du clavier le règlent à la milliseconde ;
+- **décalage exact**, un champ en millisecondes : on y tape l'écart constaté ;
 - **±1 image** et **±10 ms**, pour les petits écarts ;
 - **±1/4, ±1 temps, ±1 mesure**, pour un fichier décalé d'un nombre entier de
-  temps — le cas d'un export de projet, dont la phase est déjà bonne ;
-- où tombe la **première note** dans la vidéo, au millième ;
+  temps — le temps exact de la grille du morceau, plus celui du BPM affiché ;
+- où tombe la **première note** dans la vidéo, au millième, **telle qu'elle
+  sera jouée** une fois la mélodie posée sur la grille ;
 - et ce que vaut **une image** : 33 ms dans une vidéo à 30 images par seconde,
   67 ms dans l'aperçu animé, qui tourne à 15. Un écart plus petit qu'une image
-  ne se voit pas — le chercher fait tourner en rond. Pour juger un calage à
-  quelques dizaines de millisecondes près, il faut une vidéo à 30 ou 60 images
-  par seconde, pas l'aperçu.
+  ne se voit pas — le chercher fait tourner en rond.
 
-La v1 pose ses quatre-vingt-dix réglages les uns sous les autres. Tout y est,
-mais il faut déjà savoir ce qu'on cherche. La v2 **ne retire rien — elle
-range**.
+Sous le **BPM du morceau**, proposé dès le dépôt, une phrase dit ce que la
+grille a fait des notes (« le fichier annonce 120 BPM, le morceau en fait 85 :
+ses notes sont relues au tempo du morceau… »).
 
-**Trois profondeurs**, dans l'en-tête. `simple` montre **21** réglages, `réglé`
-**68**, `tout` les **92**. Rien n'est supprimé : ce qui est caché est à un clic.
-Et un réglage ajouté plus tard n'a pas besoin qu'on pense à lui : il apparaît
-au niveau `tout` tant qu'on ne lui a pas donné de place plus haut.
-
-**Six onglets** — Machine, Couleurs, Réactions, Avaries, Matière, Rendu — au
-lieu d'une colonne de douze cartes à dérouler.
-
-**L'aperçu reste sous les yeux** pendant qu'on règle, collé en haut de sa
-colonne, avec le dépôt du fond, la lecture en mouvement et le rendu juste en
-dessous.
-
-Le reste est identique : mêmes réglages, mêmes phrases d'explication, mêmes
-fréquences annoncées, mêmes préréglages (les fournis et les vôtres), même
-moteur. Les deux pages parlent au même serveur et rendent le même fichier.
-
-### Ce que la page montre, et ce qu'elle garde pour plus tard
-
-Quatre-vingt-dix explications affichées en même temps, ce n'est pas de l'aide,
-c'est un mur. Chaque phrase **ne se montre qu'au survol** de son réglage — et
-le bouton `aide`, dans l'en-tête, les laisse toutes ouvertes pour qui découvre
-la page.
-
-Un réglage tient en trois lignes : son **nom et sa valeur sur la même ligne**
-(la valeur alignée à droite, en chiffres à chasse fixe), le **curseur**, puis —
-discrètement, en vert sombre — la **fréquence** à laquelle il partira.
-
-Et les listes « sur quoi ça part » sont **rangées dans l'effet qu'elles
-déclenchent**. Dans la page classique elles suivent leur curseur sans
-étiquette : l'œil fait le lien. Recopiées telles quelles, elles se retrouvaient
-seules, nommées par leur identifiant — `punchOn`, `shakeOn`, `partsOn`. Chaque
-effet est maintenant un seul bloc : le curseur, ce qui le déclenche, sa
-fréquence, son explication. La colonne compte **72 blocs pour 92 réglages**.
-
-Le reste est du soin : curseurs dessinés (piste fine, part remplie en vert,
-pastille qui s'allume au survol), libellés en bas de casse plutôt qu'en
-capitales, cartes en léger dégradé, en-tête collante, et l'aperçu qui reste en
-place pendant qu'on règle.
-
-### Deux polices, deux usages
-
-Tout était en chasse fixe. C'est joli pour une console, fatigant pour lire
-quatre-vingt-dix libellés et autant d'explications. Le **texte** passe donc en
-caractères proportionnels — Segoe UI sous Windows, San Francisco sous macOS, ce
-que le système propose ailleurs — et les **nombres** gardent la chasse fixe :
-une valeur qui passe de `1` à `0.85` ne doit pas faire sauter toute la ligne.
-
-Restent en chasse fixe : les valeurs des curseurs, les chiffres du morceau
-(durée, tempo, nombre de coups), le numéro de version, les noms de fichiers et
-l'avancement du rendu. Le titre de la page aussi, parce que c'est une enseigne.
-
-Aucune police n'est téléchargée. Le studio tourne en local, souvent sans
-réseau : une police distante ferait attendre la page pour rien, et la ferait
-apparaître nue si elle n'arrivait pas.
-
-Les deux pages ont reçu le même traitement.
-
-### Pourquoi les deux pages ne peuvent pas diverger
-
-La v2 **ne recopie pas** la liste des réglages : elle la **lit dans la page de
-la v1** au démarrage — l'identifiant, le libellé, les bornes, le pas, la valeur
-d'usine, les choix des listes, et jusqu'au déclencheur choisi par défaut pour
-chaque effet. Ajouter un curseur à la v1 le fait apparaître dans la v2 sans y
-toucher.
-
-`tools/verifier_studio.py` le vérifie : tout réglage de la v1 doit se retrouver
-dans la v2, la v2 ne doit rien inventer, et chaque réglage doit avoir une
-profondeur.
-
-Deux défauts que cette lecture a fait apparaître tout de suite, et qui
-n'existaient que dans la v2 :
-
-- la liste des **images par seconde** s'écrit `<option>30</option>` dans la v1,
-  sans attribut `value`. L'extraction ne la voyait pas et la v2 lançait le
-  rendu **sans cadence** — le serveur s'arrêtait sur `int() argument must be…`
-  au milieu du travail. La valeur est maintenant le texte lui-même à défaut
-  d'attribut, et le serveur retombe sur trente images par seconde plutôt que
-  d'échouer.
+Un défaut trouvé en ramenant tout dans la page de base : elle n'envoyait **ni
+le BPM du morceau ni la case « tel quel »** au moteur — la v2 seule le
+faisait. `tools/verifier_studio.py` ne contrôlait que les curseurs et les
+listes ; il contrôle maintenant aussi les cases, les nombres et les couleurs.
 
 ## STUDIO WEB — une page HTML, rien a installer
 

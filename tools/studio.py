@@ -38,7 +38,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mpc_performance import (  # noqa: E402
     analyze, frame_performance, probe_duration, render_video, _renderer,
-    compute_spectro, preparer_midi, grille_du_morceau,
+    compute_spectro, preparer_midi, grille_du_morceau, RenduArrete,
 )
 import midi                                                   # noqa: E402
 from omnipotard_intro import (  # noqa: E402
@@ -695,15 +695,30 @@ class Studio:
                               os.path.splitext(tr["name"])[0][:60], jid, ext))
         job = {"id": jid, "state": "attente", "done": 0, "total": 0, "eta": 0.0,
                "out": out, "name": os.path.basename(out), "error": None,
-               "apercu": apercu}
+               "apercu": apercu, "_arret": threading.Event()}
         with self.lock:
             self.jobs[jid] = job
         threading.Thread(target=self._run, args=(job, tr, q, start, dur),
                          daemon=True).start()
         return job
 
+    def arreter(self, jid):
+        """Demande l'arret d'un rendu : il s'arrete au prochain paquet
+        d'images, ou avant meme de commencer s'il attendait son tour."""
+        with self.lock:
+            job = self.jobs.get(jid)
+        if job is None:
+            raise ValueError("rendu inconnu")
+        if job["state"] not in ("fini", "erreur", "arrete"):
+            job["_arret"].set()
+            job["state"] = "arret"
+        return job
+
     def _run(self, job, tr, q, start, dur):
         with self.render_lock:       # le moteur utilise des globales : un a la fois
+            if job["_arret"].is_set():
+                job["state"] = "arrete"
+                return
             try:
                 # Un moteur d'apercu pese quelques centaines de megaoctets ;
                 # les garder pendant le rendu, c'est autant de place en moins
@@ -742,9 +757,12 @@ class Studio:
                                       _dans(q.get("quality"), QUALITES,
                                             "compatible")),
                              curve=_coche(q.get("curve"), True),
-                             palette=palette, progress=prog, **kw)
+                             palette=palette, progress=prog,
+                             arret=job["_arret"].is_set, **kw)
                 job["size"] = os.path.getsize(job["out"])
                 job["state"] = "fini"
+            except RenduArrete:
+                job["state"] = "arrete"
             except Exception as e:                       # noqa: BLE001
                 # nos propres messages se suffisent ; les autres ont besoin
                 # de leur nom pour etre rapportables
@@ -970,18 +988,15 @@ class Handler(BaseHTTPRequestHandler):
                 # page ouverte laissait une erreur 404 dans la console — sans
                 # consequence, mais elle noyait les vraies.
                 return self._send(204, "image/x-icon", b"")
-            if u.path in ("/", "/index.html", "/v2"):
-                # La v2 est le studio : c'est elle qu'on ouvre. Importee ici
-                # et non en tete, parce qu'elle lit ses controles dans la page
-                # classique — les deux modules se tiennent par la main.
-                from studio_v2 import page as page_v2
-                return self._send(200, "text/html; charset=utf-8",
-                                  page_v2().encode("utf-8"))
-            if u.path == "/v1":
-                # La page classique reste servie : la v2 ne recopie pas la
-                # liste des reglages, elle la lit dans celle-ci, qui doit donc
-                # rester juste — et se consulter.
+            if u.path in ("/", "/index.html"):
                 return self._send(200, "text/html; charset=utf-8", PAGE.encode("utf-8"))
+            if u.path in ("/v1", "/v2"):
+                # Il y a eu deux pages ; il n'y en a plus qu'une. Un ancien
+                # favori ou un ancien lanceur y menent encore.
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
             if u.path == "/config":
                 return self._json({
                     "version": version(),
@@ -1104,9 +1119,13 @@ class Handler(BaseHTTPRequestHandler):
 
             if u.path == "/job":
                 with STUDIO.lock:
-                    job = dict(STUDIO.jobs.get(q.get("id"), {}))
+                    job = {k: v for k, v in STUDIO.jobs.get(q.get("id"), {}).items()
+                           if not k.startswith("_")}
                 job.pop("out", None)
                 return self._json(job or {"error": "rendu inconnu"})
+            if u.path == "/stop":
+                job = STUDIO.arreter(q.get("id"))
+                return self._json({"id": job["id"], "state": job["state"]})
             if u.path == "/download":
                 with STUDIO.lock:
                     job = STUDIO.jobs.get(q.get("id"))
@@ -1225,7 +1244,9 @@ class Handler(BaseHTTPRequestHandler):
                 corps = self._corps()
                 if corps is None:
                     return self._fail("reglages illisibles", 413)
-                return self._json(STUDIO.start_job(json.loads(corps or b"{}")))
+                job = STUDIO.start_job(json.loads(corps or b"{}"))
+                return self._json({k: v for k, v in job.items()
+                                   if not k.startswith("_") and k != "out"})
 
             self._fail("page inconnue", 404)
         except Exception as e:                            # noqa: BLE001
@@ -1336,10 +1357,9 @@ function seqPose(txt) {
   seqEcrire(); seqDessine();
 }
 
-/* Le branchement, appele par chaque page quand ses elements existent : la v1
-   les a dans sa page, la v2 les fabrique. Le poser au fil du texte marchait
-   pour l'une et pas pour l'autre, et l'erreur — une propriete posee sur rien —
-   coupait la fin du script sans le moindre message. */
+/* Le branchement, appele une fois les elements de la page en place. Une
+   propriete posee sur un element absent coupait la fin du script sans le
+   moindre message : d'ou la verification en tete. */
 function seqBrancher() {
   const plus = $('#seqPlus'), mdrop = $('#midiDrop'), mfile = $('#midifile');
   if (!plus || !mdrop || !mfile) return;
@@ -1378,8 +1398,7 @@ function seqBrancher() {
 }
 
 /* L'instant de la premiere note du fichier MIDI, dans le temps du morceau.
-   null tant qu'aucun fichier n'est charge. Declare ici parce que les deux
-   studios partagent ce bloc. */
+   null tant qu'aucun fichier n'est charge. */
 let MIDI_DEBUT = null;
 
 /* Un instant, ecrit au millieme : c'est ce qui permet de comparer la premiere
@@ -1420,11 +1439,9 @@ async function sendMidi(f) {
         + ' (canal 10) et les autres notes s\'allument ensemble. Pour un rendu'
         + ' net, exportez la melodie seule.';
     }
-    // la v2 partage ce code mais n'a pas le rappel de calage : on ne l'appelle
-    // que si la page en question le porte
     MIDI_DEBUT = +j.debut || 0;
     if (typeof majOffset === 'function') majOffset();
-    // la v2 pose la melodie sur la grille du morceau, et dit ce qu'elle a fait
+    // la melodie se pose sur la grille du morceau : la page dit ce qu'elle a fait
     if (typeof majCalage === 'function') majCalage();
     $('#midimeta').hidden = false;
     $('#midiReglages').hidden = false;
@@ -1447,7 +1464,7 @@ PAGE = r"""<!doctype html>
   :root{
     --bg:#07090b; --panel:#0e1216; --line:#1d262e; --ink:#e5ded7;
     --dim:#948880; --bad:#ff5470;
-    /* l'accent orange de la v2, et ce qui va avec : voir tools/studio_v2.py */
+    /* l'accent orange, et ce qui va avec */
     --acc:#ff7a1f; --sur-acc:#170900;
     /* Le texte se lit en caracteres proportionnels, les nombres gardent la
        chasse fixe. Rien n'est telecharge : le studio tourne sans reseau. */
@@ -1461,7 +1478,8 @@ PAGE = r"""<!doctype html>
   body{margin:0;background:var(--bg);color:var(--ink);font-size:13.5px;
     line-height:1.58;-webkit-font-smoothing:antialiased}
   h1,#ver,.meta b,.aide b.freq,#donepath,#ptext{font-family:var(--mono)}
-  label span{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  label span{font-family:var(--mono);font-variant-numeric:tabular-nums;
+    text-transform:none}
   header{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;
     align-items:baseline;gap:12px;flex-wrap:wrap}
   h1{margin:0;font-size:15px;letter-spacing:.16em;text-transform:uppercase;
@@ -1486,6 +1504,10 @@ PAGE = r"""<!doctype html>
   button.ghost{background:#141a20;color:var(--ink);font-weight:400;
     border:1px solid var(--line);letter-spacing:0;text-transform:none}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  #midiFin,#midiPas{margin-top:8px}
+  .exact{display:grid;grid-template-columns:1fr 110px;gap:8px;align-items:center;
+    margin-top:6px}
+  .exact label{margin:0}
   .drop{border:1px dashed #2c3a44;border-radius:8px;padding:22px 12px;
     text-align:center;color:var(--dim);cursor:pointer;transition:.15s}
   .drop:hover,.drop.over{border-color:var(--acc);color:var(--ink)}
@@ -1532,10 +1554,15 @@ PAGE = r"""<!doctype html>
   a.dl{display:block;text-align:center;background:var(--acc);color:var(--sur-acc);
     padding:10px;border-radius:5px;text-decoration:none;font-weight:700;
     letter-spacing:.1em;text-transform:uppercase}
-  /* la fenetre des styles, ouverte a la fin d'un rendu */
-  #styles{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:50;
-    display:flex;align-items:flex-start;justify-content:center;
-    overflow-y:auto;padding:32px 16px}
+  /* les onglets de l'en-tete : le studio, et les styles a essayer */
+  #vues{display:flex;gap:4px}
+  #vues button{background:none;color:var(--dim);border:1px solid var(--line);
+    border-radius:6px;padding:6px 14px;font-weight:600;letter-spacing:.08em}
+  #vues button:hover{color:var(--ink);border-color:#3a4650}
+  #vues button.on{background:var(--acc);color:var(--sur-acc);border-color:var(--acc)}
+  main[hidden]{display:none}
+  /* l'onglet des styles : il prend la place des reglages */
+  #styles{display:flex;justify-content:center;padding:20px}
   #styles[hidden]{display:none}
   #styles .fen{background:var(--panel);border:1px solid var(--line);
     border-radius:10px;max-width:1080px;width:100%;padding:20px 22px}
@@ -1564,6 +1591,10 @@ PAGE = r"""<!doctype html>
 
 <header>
   <h1>Studio Omnipotard</h1>
+  <nav id="vues">
+    <button class="on" data-vue="studio">Studio</button>
+    <button data-vue="styles">Styles</button>
+  </nav>
   <span id="ver" style="color:#5a6b64;font-size:11px"></span>
   <span id="status">deposez un morceau pour commencer</span>
 </header>
@@ -1673,12 +1704,24 @@ PAGE = r"""<!doctype html>
       </select>
       <label for="midiBpm">BPM du morceau</label>
       <input type="number" id="midiBpm" min="20" max="300" step="0.01" value="">
+      <p class="hint" id="midiGrille">&nbsp;</p>
       <label for="midiForce">eclat des touches jouees &mdash;
         <span id="v-mif">1.00</span></label>
       <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1">
       <label for="midiOffset">avance / retard &mdash;
         <span id="v-mio">0.00 s</span></label>
       <input type="range" id="midiOffset" min="-60" max="60" step="0.001" value="0">
+      <p class="hint" id="midiSens">&nbsp;</p>
+      <div class="exact">
+        <label for="midiMs">decalage exact, en ms</label>
+        <input type="number" id="midiMs" step="1" value="0">
+      </div>
+      <div class="row" id="midiFin">
+        <button class="ghost" data-img="-1">&minus;1 image</button>
+        <button class="ghost" data-img="1">+1 image</button>
+        <button class="ghost" data-ms="-10">&minus;10 ms</button>
+        <button class="ghost" data-ms="10">+10 ms</button>
+      </div>
       <div class="row" id="midiPas">
         <button class="ghost" data-pas="-4">&minus;1 mesure</button>
         <button class="ghost" data-pas="-1">&minus;1 temps</button>
@@ -1688,6 +1731,7 @@ PAGE = r"""<!doctype html>
         <button class="ghost" data-pas="4">+1 mesure</button>
       </div>
       <p class="hint" id="midiOu">&nbsp;</p>
+      <p class="hint" id="midiImage">&nbsp;</p>
       <label for="midiTempo">derive &mdash; <span id="v-mit">0.000 %</span></label>
       <input type="range" id="midiTempo" min="-1" max="1" step="0.005" value="0">
       <button class="ghost" id="midiMesure">Mesurer la derive</button>
@@ -2107,6 +2151,8 @@ PAGE = r"""<!doctype html>
     <div id="prog" hidden>
       <div class="bar"><i id="pbar"></i></div>
       <div class="hint" id="ptext"></div>
+      <button class="ghost" id="stop" style="margin-top:6px;width:100%">
+        Arreter le rendu</button>
     </div>
     <div id="done" hidden style="margin-top:10px">
       <a class="dl" id="dl">Telecharger</a>
@@ -2137,11 +2183,14 @@ PAGE = r"""<!doctype html>
           <option value="2">2 s</option>
           <option value="4" selected>4 s</option>
           <option value="8">8 s</option>
+          <option value="12">12 s</option>
+          <option value="16">16 s</option>
         </select></div>
     </div>
     <div id="clipprog" hidden>
       <div class="bar"><i id="cbar"></i></div>
       <div class="hint" id="ctext"></div>
+      <button class="ghost" id="clipStop" style="margin-top:6px">Arreter</button>
     </div>
     <p class="hint">L'apercu est une vraie image du rendu, calculee avec vos
       reglages : ce que vous voyez ici est ce que vous obtiendrez.<br>
@@ -2158,14 +2207,14 @@ PAGE = r"""<!doctype html>
   <div class="fen" role="dialog" aria-labelledby="stylesTitre">
     <div class="tete">
       <div>
-        <h2 id="stylesTitre">Et si on essayait autrement ?</h2>
+        <h2 id="stylesTitre">Styles</h2>
         <p class="hint" style="margin:6px 0 0">Chaque style se pose
           <b>par-dessus</b> tes reglages : il change la couleur, la lumiere et
           la matiere de la dalle, mais garde tes reactions, ta machine et ta
           melodie. Les vignettes sont prises sur un coup de grosse caisse, la
           ou les styles reactifs se montrent.</p>
       </div>
-      <button class="ferme" id="stylesFerme" aria-label="Fermer">Fermer</button>
+      <button class="ferme" id="stylesFerme">Retour au studio</button>
     </div>
     <div class="grille" id="stylesGrille"></div>
   </div>
@@ -2210,6 +2259,8 @@ async function upload(f) {
     $('#go').disabled = false;
     $('#lire').disabled = false;
     $('#stylesOuvre').disabled = false;
+    proposerBpm(j.bpm);
+    majCalage();
     majOffset();          // le tempo et la longueur viennent d'arriver
     setStatus(j.name + ' — ' + j.bpm.toFixed(1) + ' BPM, ' + drops.length +
       ' paroxysme(s) : les glitchs tomberont la.');
@@ -2230,6 +2281,8 @@ function params() {
     couleurCoupsLibre: $('#couleurCoupsLibre').value,
     textureTouches: $('#textureTouches').value,
     midiTempo: $('#midiTempo').value, midiType: $('#midiType').value,
+    midiBpm: $('#midiBpm').value,
+    midiTelQuel: $('#midiTelQuel').checked ? '1' : '0',
     vignettage: $('#vignettage').value, scanlines: $('#scanlines').value,
     aberration: $('#aberration').value,
     midiCale: $('#midiCale').checked ? '1' : '0',
@@ -2496,7 +2549,7 @@ function deposer(url, f, quoi) {
   });
 }
 
-/* la v1 nomme ainsi son apercu, son bandeau et la duree du morceau */
+/* le bloc commun nomme ainsi l'apercu, le bandeau et la duree du morceau */
 const _redessine = () => shot();
 const _etat = (m, e) => setStatus(m, e);
 const _duree = () => duration;
@@ -2523,12 +2576,37 @@ for (const [id, sp] of [['vignettage','v-vig'], ['scanlines','v-scl'],
    instant-la et on regarde si la touche s'allume avec le son. Le moteur
    calcule mt = t + depart + decalage, donc la note ecrite a `debut` dans le
    fichier tombe a `debut - depart - decalage` dans la video. */
+function enSecMs(x, signe) {
+  const neg = x < 0;
+  let ms = Math.round(Math.abs(x) * 1000);
+  const sec = Math.floor(ms / 1000);
+  ms -= sec * 1000;
+  const corps = !sec ? ms + ' ms' : (ms ? sec + ' s ' + ms + ' ms' : sec + ' s');
+  if (!signe || (!sec && !ms)) return corps;
+  return (neg ? '\u2212' : '+') + corps;
+}
+// la cadence de l'apercu anime : elle fixe la plus petite erreur de calage
+// qu'on puisse y voir
+const FPS_APERCU = 15;
+/* Le decalage se lit en secondes et millisecondes : c'est dans cette unite
+   qu'on constate un ecart — « la touche s'allume un poil apres le son ». Au
+   centieme, 85 ms s'affichaient « 0.09 », et 5 ms de plus ne changeaient rien
+   au chiffre. Le moteur calcule mt = t + decalage : un decalage positif
+   allume donc les touches plus TOT, et la phrase le dit. */
 function majOffset() {
   const d = +$('#midiOffset').value || 0;
-  $('#v-mio').textContent = d.toFixed(2) + ' s';
+  $('#v-mio').textContent = enSecMs(d, true);
+  const sens = $('#midiSens');
+  if (sens) sens.innerHTML = !Math.round(d * 1000)
+    ? "les touches s'allument a l'heure du fichier"
+    : "les touches s'allument <b>" + enSecMs(Math.abs(d)) + '</b> plus '
+      + (d > 0 ? 'tot' : 'tard') + ' que ne le dit le fichier';
+  const ms = $('#midiMs');
+  if (ms && document.activeElement !== ms) ms.value = Math.round(d * 1000);
+  majImage();
   const ou = $('#midiOu');
   if (!ou) return;
-  if (MIDI_DEBUT === null) { ou.innerHTML = '&nbsp;'; return; }
+  if (MIDI_DEBUT === null) { ou.innerHTML = '&nbsp;'; majDerive(); return; }
   const depart = +$('#start').value || 0;
   const t = MIDI_DEBUT - depart - d;
   // la longueur rendue, pas celle du morceau : le champ est vide quand on
@@ -2547,6 +2625,87 @@ function majOffset() {
   majDerive();
 }
 $('#midiOffset').oninput = () => { majOffset(); shot(); };
+/* Un ecart plus petit qu'une image ne se voit pas, et le chercher fait
+   tourner en rond. L'apercu anime tourne a quinze images par seconde, la ou
+   la video finale en a souvent trente. */
+function majImage() {
+  const z = $('#midiImage');
+  if (!z) return;
+  const fps = +$('#fps').value || 30;
+  z.innerHTML = '1 image = <b>' + Math.round(1000 / fps) + ' ms</b> dans la video ('
+    + fps + ' i/s) et <b>' + Math.round(1000 / FPS_APERCU)
+    + " ms</b> dans l'apercu anime (" + FPS_APERCU
+    + " i/s) : un ecart plus petit ne s'y voit pas";
+}
+function reglerDecalage(v) {
+  const el = $('#midiOffset');
+  v = Math.min(+el.max, Math.max(+el.min, v));
+  // au millieme : arrondir plus gros ferait deriver une suite de clics
+  el.value = (Math.round(v * 1000) / 1000).toFixed(3);
+  majOffset();
+  shot();
+}
+$('#midiMs').oninput = () => {
+  const ms = $('#midiMs');
+  if (ms.value === '' || ms.value === '-') return;      // en cours de frappe
+  const v = +ms.value;
+  if (Number.isFinite(v)) reglerDecalage(v / 1000);
+};
+// en quittant le champ, il reprend la valeur retenue, bornee et arrondie
+$('#midiMs').onchange = () => { $('#midiMs').blur(); majOffset(); };
+$('#fps').addEventListener('change', majImage);
+for (const b of document.querySelectorAll('#midiFin [data-ms]'))
+  b.onclick = () => reglerDecalage((+$('#midiOffset').value || 0) + (+b.dataset.ms) / 1000);
+for (const b of document.querySelectorAll('#midiFin [data-img]'))
+  b.onclick = () => reglerDecalage((+$('#midiOffset').value || 0)
+                                   + (+b.dataset.img) / (+$('#fps').value || 30));
+
+/* ---------- la grille du morceau ----------
+   La page demande au serveur ce que deviennent les notes du fichier sur ce
+   morceau, et le dit en une phrase. Elle en garde l'instant de la premiere
+   note, tel qu'il sera joue, et la duree exacte d'un temps, pour ses
+   boutons. */
+let TEMPS_MIDI = 0, BPM_PROPOSE = '', minuteurCalage = null;
+function majCalage() {
+  clearTimeout(minuteurCalage);
+  minuteurCalage = setTimeout(async () => {
+    const z = $('#midiGrille');
+    if (!track || !$('#midi').value) {
+      z.innerHTML = track ? '&nbsp;' : 'deposez le morceau : la melodie se pose sur sa grille';
+      TEMPS_MIDI = 0;
+      return;
+    }
+    const q = new URLSearchParams({
+      track, midi: $('#midi').value, bpm: $('#midiBpm').value,
+      telQuel: $('#midiTelQuel').checked ? '1' : '0'});
+    try {
+      const j = await (await fetch('/calage?' + q)).json();
+      if (j.error) { z.textContent = j.error; return; }
+      z.textContent = j.raison + '.';
+      TEMPS_MIDI = +j.temps || 0;
+      MIDI_DEBUT = +j.debut;
+      // la premiere note la ou elle sera jouee, et non la ou le fichier
+      // l'ecrit : relu a un autre tempo, le fichier la mettait ailleurs
+      $('#mi-c').textContent = instant(MIDI_DEBUT);
+      majOffset();
+    } catch (e) { z.innerHTML = '&nbsp;'; }
+  }, 250);
+}
+/* Le tempo propose a l'arrivee d'un morceau : celui de sa grille. Il ne
+   remplace pas un tempo tape a la main — seulement celui qu'on avait propose
+   pour le morceau d'avant. */
+function proposerBpm(bpm) {
+  const b = $('#midiBpm');
+  if (!(bpm > 0)) return;
+  if (!b.value || b.value === BPM_PROPOSE) {
+    b.value = (+bpm).toFixed(2);
+    BPM_PROPOSE = b.value;
+  }
+}
+for (const id of ['#midiBpm', '#midiTelQuel']) {
+  $(id).addEventListener('change', () => { majCalage(); shot(); });
+}
+$('#midiBpm').addEventListener('input', majCalage);
 /* La derive, dite en secondes plutot qu'en pourcent : c'est sous cette forme
    qu'on la constate — la melodie est calee au debut du plan et fausse a la
    fin. Le pourcent reste affiche parce que lui ne change pas quand on change
@@ -2613,7 +2772,9 @@ $('#dur').oninput = () => { majOffset(); majDerive(); };
    grille, ce qu'un curseur au centieme de seconde ne sait pas faire. */
 for (const b of document.querySelectorAll('#midiPas button')) {
   b.onclick = () => {
-    const temps = 60 / Math.max(1, (FRAPPES && FRAPPES.bpm) || 120);
+    // le temps exact du morceau, tel que la grille l'a mesure
+    const bpm = +$('#midiBpm').value || (FRAPPES && FRAPPES.bpm) || 120;
+    const temps = TEMPS_MIDI || 60 / Math.max(1, bpm);
     const el = $('#midiOffset');
     const v = (+el.value || 0) + (+b.dataset.pas) * temps;
     // pas d'arrondi ici : le curseur va au millieme, et arrondir au centieme
@@ -2701,6 +2862,8 @@ $('#lire').onclick = async () => {
                                       body: JSON.stringify(reglagesDuClip())});
     const j = await r.json();
     if (j.error) throw new Error(j.error);
+    clipId = j.id;
+    $('#clipStop').disabled = false;
     suivreClip(j.id);
   } catch (e) {
     setStatus('lecture impossible : ' + e.message, true);
@@ -2708,6 +2871,12 @@ $('#lire').onclick = async () => {
   }
 };
 
+let clipId = null;
+$('#clipStop').onclick = async () => {
+  if (!clipId) return;
+  $('#clipStop').disabled = true;
+  try { await fetch('/stop?id=' + clipId); } catch (e) {}
+};
 function suivreClip(id) {
   clipTimer = setTimeout(async () => {
     let j;
@@ -2716,6 +2885,11 @@ function suivreClip(id) {
     } catch (e) { return suivreClip(id); }
     if (j.state === 'erreur') {
       setStatus('lecture impossible : ' + j.error, true);
+      $('#lire').disabled = false; $('#clipprog').hidden = true;
+      return;
+    }
+    if (j.state === 'arrete') {
+      setStatus('apercu arrete');
       $('#lire').disabled = false; $('#clipprog').hidden = true;
       return;
     }
@@ -2766,7 +2940,19 @@ $('#go').onclick = async () => {
   const r = await fetch('/render', {method:'POST', body: JSON.stringify(body)});
   const j = await r.json();
   if (j.error) { setStatus('echec : ' + j.error, true); $('#go').disabled = false; return; }
+  renduId = j.id;
+  $('#stop').disabled = false;
   watch(j.id);
+};
+/* Arreter : le moteur s'arrete au prochain paquet d'images, une ou deux
+   secondes au plus, et efface le fichier commence. */
+let renduId = null;
+$('#stop').onclick = async () => {
+  if (!renduId) return;
+  $('#stop').disabled = true;
+  $('#ptext').textContent = 'arret en cours\u2026';
+  try { await fetch('/stop?id=' + renduId); }
+  catch (e) { $('#stop').disabled = false; }
 };
 
 function watch(id) {
@@ -2787,15 +2973,19 @@ function watch(id) {
       $('#donepath').textContent = 'ecrit dans out/studio/' + j.name +
         ' (' + (j.size / 1048576).toFixed(1) + ' Mo)';
       $('#done').hidden = false; $('#go').disabled = false;
-      setStatus('rendu termine');
-      ouvrirStyles();
+      setStatus('rendu termine — d\'autres allures a essayer dans l\'onglet Styles');
+      return;
+    }
+    if (j.state === 'arrete') {
+      clearInterval(jobTimer); $('#prog').hidden = true; $('#go').disabled = false;
+      setStatus('rendu arrete : le fichier commence a ete efface');
       return;
     }
     const pc = j.total ? j.done / j.total * 100 : 0;
     $('#pbar').style.width = pc.toFixed(1) + '%';
     $('#ptext').textContent = j.state === 'rendu'
       ? j.done + '/' + j.total + ' images — encore ' + fmt(j.eta)
-      : j.state + '…';
+      : j.state === 'arret' ? 'arret en cours\u2026' : j.state + '…';
   }, 700);
 }
 
@@ -2871,7 +3061,10 @@ fetch('/config').then(r => r.json())
       // deux selecteurs ne portent pas le nom de leur curseur suivi de « On »
       const AUTRE = {gridPulse: 'gridOn', bgFlash: 'flashOn'};
       const inst = $('#' + (AUTRE[id] || id + 'On'));
-      const apres = (inst && el.nextElementSibling === inst) ? inst : el;
+      // une case a cocher est dans son libelle : l'explication se pose apres
+      // lui, sans quoi elle en prenait les capitales et cassait la ligne
+      const apres = (inst && el.nextElementSibling === inst) ? inst
+                  : (el.type === 'checkbox' && el.closest('label')) || el;
       const d = document.createElement('div');
       d.className = 'aide';
       d.innerHTML = phrase + '<b class="freq" id="f-' + id + '"></b>';
@@ -2984,13 +3177,25 @@ async function instantDesVignettes() {
 }
 
 let stylesGen = 0;
+function montrerVue(v) {
+  for (const b of document.querySelectorAll('#vues button'))
+    b.classList.toggle('on', b.dataset.vue === v);
+  document.querySelector('main').hidden = v !== 'studio';
+  $('#styles').hidden = v !== 'styles';
+  window.scrollTo(0, 0);
+}
 async function ouvrirStyles() {
-  if (!track || !Object.keys(STYLES).length) return;
+  montrerVue('styles');
   const gen = ++stylesGen;
   const g = $('#stylesGrille');
   for (const im of g.querySelectorAll('img'))
     if (im.dataset.blob) URL.revokeObjectURL(im.dataset.blob);
   g.innerHTML = '';
+  if (!track || !Object.keys(STYLES).length) {
+    g.innerHTML = '<p class="hint">Deposez d\'abord un morceau dans l\'onglet '
+      + 'Studio : les vignettes des styles sont prises sur lui.</p>';
+    return;
+  }
   const cartes = {};
   for (const [nom, st] of Object.entries(STYLES)) {
     const c = document.createElement('div');
@@ -3007,7 +3212,6 @@ async function ouvrirStyles() {
     g.appendChild(c);
     cartes[nom] = c;
   }
-  $('#styles').hidden = false;
   const t = await instantDesVignettes();
   // une par une : le moteur dessine une image a la fois, et les lancer
   // ensemble ne ferait que les mettre en file
@@ -3030,10 +3234,11 @@ async function ouvrirStyles() {
     }
   }
 }
-function fermerStyles() { $('#styles').hidden = true; stylesGen++; }
+function fermerStyles() { montrerVue('studio'); stylesGen++; }
 $('#stylesOuvre').onclick = ouvrirStyles;
 $('#stylesFerme').onclick = fermerStyles;
-$('#styles').onclick = e => { if (e.target.id === 'styles') fermerStyles(); };
+for (const b of document.querySelectorAll('#vues button'))
+  b.onclick = () => b.dataset.vue === 'styles' ? ouvrirStyles() : fermerStyles();
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#styles').hidden) fermerStyles();
 });
@@ -3130,8 +3335,8 @@ def main():
     ap.add_argument("--host", default="127.0.0.1",
                     help="127.0.0.1 par defaut : rien n'est expose au reseau")
     ap.add_argument("--no-browser", action="store_true")
-    # la v2 est desormais la page par defaut ; l'option reste acceptee pour
-    # que les anciens lanceurs et raccourcis continuent de marcher
+    # il n'y a plus qu'une page ; l'option reste acceptee pour que les
+    # anciens lanceurs et raccourcis continuent de marcher
     ap.add_argument("--v2", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("track", nargs="?", help="morceau a charger au demarrage")
     args = ap.parse_args()
@@ -3145,7 +3350,7 @@ def main():
               % (args.track, info["bpm"], len(info["drops"])))
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    url = "http://%s:%d%s" % (args.host, args.port, "/v2" if args.v2 else "")
+    url = "http://%s:%d" % (args.host, args.port)
     print("Studio Omnipotard %s" % version())
     print("  ->  %s" % url)
     print("Ctrl-C pour arreter. Les videos sont ecrites dans out/studio/.")
