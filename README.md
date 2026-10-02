@@ -1308,6 +1308,41 @@ lignes — et soixante colonnes par seconde gardées en octets : un morceau de
 quatre minutes tient dans un demi-mégaoctet, ce qui se transmet sans peine aux
 tâches de rendu. Baisser l'amplitude de la courbe sonore pour bien le voir.
 
+### Un exemple sous chaque effet
+
+Sous l'explication de chaque effet, une **image du moteur** montre ce qu'il
+fait ; elle **s'anime au survol** (au toucher sur un téléphone). Pour une
+liste — machine, palette, fond, couleur des coups, texture des touches, sens
+du travelling —, l'exemple suit le choix fait. 60 réglages et 28 choix ont le
+leur.
+
+Chaque exemple est un vrai rendu : une mesure (2,4 s) d'un morceau de
+démonstration, l'effet seul poussé fort, tout le reste au repos (pas de
+glitch, de dédoublement, de zoom ni d'éclair jaune, MPC verte sur fond noir).
+L'image fixe est celle de la mesure qui **s'écarte le plus** de la même
+mesure sans l'effet : c'est là qu'il se voit. L'animation fait 29 images à
+12 par seconde, en 384×216.
+
+Rien n'est livré avec le code : le morceau est synthétisé sur place (celui
+du vérificateur de batterie — grosse caisse, caisse claire, clap, charleys,
+crash, basse, accords, percussions, une montée), et l'image de fond des
+exemples qui en demandent une est dessinée. Les exemples suivent le moteur :
+**le studio les refait tout seul à la première ouverture d'une nouvelle
+version**, en tâche de fond et à basse priorité — deux minutes et demie sur
+quatre cœurs, pendant lesquelles la page les pose au fur et à mesure. Ils
+vivent dans `out/studio/exemples/<version>/` (34 Mo).
+
+```bash
+python3 tools/exemples.py              # tous ceux qui manquent
+python3 tools/exemples.py split ring   # quelques-uns
+```
+
+Un piège trouvé en chemin : le morceau de démonstration était d'abord écrit
+en nombres à virgule là où le fichier WAV attend des entiers ; le son était
+un bruit, la reconnaissance n'y trouvait ni grosse caisse ni caisse claire,
+et la moitié des effets — ceux qui partent sur un coup — ne se déclenchaient
+jamais dans leur exemple.
+
 ### Ce que fait chaque réglage, et à quelle fréquence
 
 Sous chaque curseur du studio, deux lignes : une phrase disant **ce que le

@@ -776,6 +776,51 @@ STUDIO = Studio()
 
 
 # --------------------------------------------------------------------------
+#  Exemples : sous chaque effet, ce qu'il fait (voir tools/exemples.py)
+# --------------------------------------------------------------------------
+
+EXEMPLES = {"proc": None}
+
+
+def dossier_exemples():
+    return os.path.join(WORKDIR, "exemples", VERSION)
+
+
+def lancer_exemples():
+    """Fabrique les exemples de cette version s'ils manquent, a cote.
+
+    Dans un processus a part, de priorite basse : quelques minutes de calcul
+    la premiere fois, qui ne doivent ni bloquer la page ni ralentir les
+    apercus. Les exemples deja faits restent : seuls les manquants sont
+    calcules.
+    """
+    if os.path.exists(os.path.join(dossier_exemples(), "index.json")):
+        return
+    if EXEMPLES["proc"] is not None and EXEMPLES["proc"].poll() is None:
+        return
+    try:
+        EXEMPLES["proc"] = subprocess.Popen(
+            [sys.executable, os.path.join(ROOT, "tools", "exemples.py")],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT)
+    except OSError:
+        EXEMPLES["proc"] = None
+
+
+def exemples_prets():
+    """Les exemples deja faits, et si la fabrication continue."""
+    d = dossier_exemples()
+    try:
+        noms = os.listdir(d)
+    except OSError:
+        noms = []
+    prets = sorted(n[:-4].replace("--", "=") for n in noms
+                   if n.endswith(".jpg") and n[:-4] + ".webp" in noms)
+    p = EXEMPLES["proc"]
+    return {"prets": prets,
+            "en_cours": bool(p is not None and p.poll() is None)}
+
+
+# --------------------------------------------------------------------------
 #  Serveur
 # --------------------------------------------------------------------------
 
@@ -886,7 +931,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            if "Cache-Control" not in (extra or {}):
+                self.send_header("Cache-Control", "no-store")
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()
@@ -1126,6 +1172,21 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/stop":
                 job = STUDIO.arreter(q.get("id"))
                 return self._json({"id": job["id"], "state": job["state"]})
+            if u.path == "/exemples":
+                return self._json(exemples_prets())
+            if u.path == "/exemple":
+                cle = str(q.get("cle", ""))
+                if not re.fullmatch(r"[A-Za-z0-9_.=-]{1,60}", cle):
+                    return self._fail("exemple inconnu", 404)
+                ext = ".webp" if q.get("anim") == "1" else ".jpg"
+                f = os.path.join(dossier_exemples(), cle.replace("=", "--") + ext)
+                if not os.path.exists(f):
+                    return self._fail("exemple pas encore fait", 404)
+                with open(f, "rb") as fh:
+                    corps = fh.read()
+                # un exemple ne change pas tant que la version ne change pas
+                return self._send(200, "image/webp" if ext == ".webp" else "image/jpeg",
+                                  corps, {"Cache-Control": "max-age=86400"})
             if u.path == "/download":
                 with STUDIO.lock:
                     job = STUDIO.jobs.get(q.get("id"))
@@ -1564,6 +1625,15 @@ PAGE = r"""<!doctype html>
   /* l'onglet des styles : il prend la place des reglages */
   #styles{display:flex;justify-content:center;padding:20px}
   #styles[hidden]{display:none}
+  /* les exemples : une image du moteur sous chaque effet, animee au survol */
+  figure.ex{margin:8px 0 4px;position:relative;border-radius:6px;overflow:hidden;
+    border:1px solid var(--line);background:#000;aspect-ratio:16/9;cursor:pointer}
+  figure.ex[hidden]{display:none}
+  figure.ex img{display:block;width:100%;height:100%;object-fit:cover}
+  figure.ex figcaption{position:absolute;left:6px;bottom:5px;font-size:10px;
+    color:#fff;background:rgba(0,0,0,.6);padding:1px 6px;border-radius:3px;
+    letter-spacing:.04em;pointer-events:none;transition:opacity .2s}
+  figure.ex.joue figcaption{opacity:0}
   #styles .fen{background:var(--panel);border:1px solid var(--line);
     border-radius:10px;max-width:1080px;width:100%;padding:20px 22px}
   #styles .tete{display:flex;justify-content:space-between;
@@ -2398,6 +2468,7 @@ function parMinute(n, duree) {
   return ', soit ' + (n / (duree / 60)).toFixed(0) + ' par minute';
 }
 function shot() {
+  if (LISTES_EX && EXEMPLES.size) for (const id of LISTES_EX) majExemple(id);
   // la couleur au choix ne sert qu'a « une couleur au choix »
   if ($('#libreBloc')) $('#libreBloc').hidden = $('#couleurCoups').value !== 'libre';
   if (!track) return;
@@ -2920,6 +2991,76 @@ function rendreLImage() {
   $('#shot').hidden = false;
 }
 
+/* ---------- exemples ----------
+   Sous chaque effet, une image du moteur, prise la ou l'effet se voit le
+   plus ; elle s'anime au survol (au toucher sur un telephone). Pour une
+   liste — palette, fond, machine, couleur des coups, texture —, l'exemple
+   suit le choix. Les exemples sont fabriques en tache de fond la premiere
+   fois qu'une version demarre : la page les pose au fur et a mesure. */
+// « var » : l'apercu peut etre demande avant que ces lignes ne soient lues
+var EXEMPLES = new Set(), minuteurEx = null;
+var LISTES_EX = ['machine', 'palette', 'bg', 'couleurCoups',
+                 'textureTouches', 'travelMode'];
+function cleExemple(id) {
+  return LISTES_EX.includes(id) ? id + '=' + $('#' + id).value : id;
+}
+function figureExemple(id) {
+  let f = document.querySelector('figure.ex[data-id="' + id + '"]');
+  if (f) return f;
+  const el = $('#' + id);
+  if (!el) return null;
+  // sous l'explication du reglage, apres la liste « sur quoi » s'il en a une
+  let a = el;
+  if (a.nextElementSibling && a.nextElementSibling.matches('select.inst'))
+    a = a.nextElementSibling;
+  if (a.nextElementSibling && a.nextElementSibling.classList.contains('aide'))
+    a = a.nextElementSibling;
+  f = document.createElement('figure');
+  f.className = 'ex';
+  f.dataset.id = id;
+  f.hidden = true;
+  f.innerHTML = '<img alt="exemple" loading="lazy">'
+    + '<figcaption>survoler pour voir bouger</figcaption>';
+  a.insertAdjacentElement('afterend', f);
+  const img = f.querySelector('img');
+  const jouer = oui => {
+    f.classList.toggle('joue', oui);
+    img.src = '/exemple?' + (oui ? 'anim=1&' : '') + 'cle='
+      + encodeURIComponent(f.dataset.cle);
+  };
+  f.onmouseenter = () => jouer(true);
+  f.onmouseleave = () => jouer(false);
+  f.onclick = () => jouer(!f.classList.contains('joue'));
+  return f;
+}
+function majExemple(id) {
+  const cle = cleExemple(id);
+  const f = figureExemple(id);
+  if (!f || f.dataset.cle === cle) return;
+  f.dataset.cle = cle;
+  f.classList.remove('joue');
+  f.hidden = !EXEMPLES.has(cle);
+  if (!f.hidden) f.querySelector('img').src = '/exemple?cle=' + encodeURIComponent(cle);
+}
+async function majExemples() {
+  try {
+    const j = await (await fetch('/exemples')).json();
+    EXEMPLES = new Set(j.prets);
+    const ids = new Set(j.prets.map(c => c.split('=')[0]));
+    for (const id of ids) {
+      const f = figureExemple(id);
+      if (f) f.dataset.cle = '';      // a reposer : il vient peut-etre d'arriver
+      majExemple(id);
+    }
+    clearTimeout(minuteurEx);
+    if (j.en_cours) minuteurEx = setTimeout(majExemples, 6000);
+  } catch (e) {}
+}
+for (const id of LISTES_EX) {
+  const el = $('#' + id);
+  if (el) el.addEventListener('change', () => majExemple(id));
+}
+
 /* ---------- rendu ---------- */
 $('#go').onclick = async () => {
   const [w, h] = $('#size').value.split('x').map(Number);
@@ -3071,6 +3212,7 @@ fetch('/config').then(r => r.json())
       apres.parentNode.insertBefore(d, apres.nextSibling);
     }
     majFrequences();
+    majExemples();
 
     /* ---- prereglages : ils reposent tous les curseurs d'un coup ---- */
     PRESETS = c.presets || {};
@@ -3342,6 +3484,7 @@ def main():
     args = ap.parse_args()
 
     check_deps()
+    lancer_exemples()
     os.makedirs(UPLOADS, exist_ok=True)
     if args.track:
         tid, info = STUDIO.add_track(os.path.abspath(args.track),
