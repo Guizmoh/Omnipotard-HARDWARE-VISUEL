@@ -1024,6 +1024,47 @@ choisit une teinte, et le moteur en dérive les trois couleurs dont il a besoin
 — le cœur du trait, son halo, et sa version sur-exposée. C'est ce triplet qui
 donne au trait son allure de phosphore plutôt que de ligne peinte.
 
+### Fonds clairs : trait à l'encre, mode auto, détourage, négatif
+
+Le trait est une **lumière** : il s'*ajoute* au fond. Parfait sur le sombre,
+il se perd sur un ciel blanc — un vert vif ajouté à du blanc donne du blanc.
+Pour des vidéos de ciel et de nuages en time-lapse, la carte *Couleur du
+trait* propose maintenant :
+
+| réglage | ce qu'il fait |
+| --- | --- |
+| nature du trait : **néon** | comme avant (par défaut) |
+| nature du trait : **encre** | le trait est **peint** par-dessus le fond, dans une couleur foncée (réglable). Son cœur couvre, son halo n'est qu'un voile plafonné à 45 % ; les coups en couleur s'y posent comme une peinture |
+| nature du trait : **auto** | chaque point choisit selon le fond qui est derrière lui — néon sur le sombre, encre sur le clair, en fondu. Pour un ciel qui change, un nuage blanc sur un ciel bleu, le jour qui tombe |
+| **détourage** | un liseré autour du trait qui le détache du fond : sombre en néon, clair en encre |
+| **inverser les couleurs** | le négatif de toute l'image : sur un fond noir, un dessin magenta sur papier blanc |
+
+En encre, le **creux** derrière la machine et la dalle de l'écran
+s'**éclaircissent** au lieu de s'assombrir : un trait foncé dans une ombre ne
+se verrait plus. En auto, ils restent sombres, et c'est voulu : l'écran de la
+machine garde un néon, le ciel autour passe à l'encre.
+
+Les réglages du fond sont faits pour le néon et assombrissent la photo : pour
+un ciel lumineux, montez l'intensité du fond et baissez le creux.
+
+**Rien ne change en néon** : sans détourage, la mise en couleur passe par le
+même chemin qu'avant, image identique au pixel près sur les 24 images de
+référence. L'encre coûte le même temps que le néon (282 ms par image 1080p
+contre 285), l'auto un peu plus (365 ms). Un premier jet en coûtait le double
+— les masques d'une couche multipliés sur trois couleurs ; tout se fait
+maintenant couleur par couleur, et le fond qui ne bouge pas est gardé.
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --backdrop ciel.mp4 \
+    --mode-trait auto --detourage 0.6
+python3 tools/mpc_performance.py morceau.mp3 --mode-trait encre --encre "#1a1030"
+python3 tools/mpc_performance.py morceau.mp3 --inverser
+```
+
+`tools/verifier_lumiere.py` le contrôle : l'encre fonce le tracé sur un fond
+clair, le détourage assombrit autour du néon, le négatif éclaircit un fond
+noir, et une grosse caisse frappée en encre reste rouge.
+
 ### Fond
 
 Le faisceau est **additif** : un fond clair mange le contraste du trait. Les

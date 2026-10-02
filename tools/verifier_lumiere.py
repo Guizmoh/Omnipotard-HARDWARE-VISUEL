@@ -216,6 +216,49 @@ def couleurs():
     return fautes
 
 
+def trait():
+    """La nature du trait : l'encre fonce sur un fond clair, le detourage
+    detache le neon d'un fond clair, l'inversion fait le negatif, et le neon
+    sans detourage reste exactement celui d'avant."""
+    fautes = []
+    clair = dict(bg="uni", bg_color=(0.92, 0.93, 0.95), bg_clear=0.0)
+    _r, noir, _f, _a = _rendu("mpc", [], t=0.5)
+    _r, neon, _f, _a = _rendu("mpc", [], t=0.5, **clair)
+    _r, encre, _f, _a = _rendu("mpc", [], t=0.5, mode_trait="encre", **clair)
+    # les points du trace : la ou le neon allume le plus, sur fond noir
+    lum = noir.astype(np.float64).mean(axis=2)
+    trace = lum > np.percentile(lum, 97)
+    fond = encre.astype(np.float64).mean(axis=2)[~trace].mean()
+    sur = encre.astype(np.float64).mean(axis=2)[trace].mean()
+    if not sur < fond - 60:
+        fautes.append("encre : le trace (%.0f) ne fonce pas sur le fond clair "
+                      "(%.0f)" % (sur, fond))
+    # le detourage : autour du trace, le fond clair s'assombrit
+    _r, det, _f, _a = _rendu("mpc", [], t=0.5, detourage=1.5, **clair)
+    pres = (~trace) & (lum > np.percentile(lum, 80))
+    a = neon.astype(np.float64).mean(axis=2)[pres].mean()
+    b = det.astype(np.float64).mean(axis=2)[pres].mean()
+    if not b < a - 15:
+        fautes.append("detourage : le fond autour du trait ne s'assombrit pas "
+                      "(%.0f -> %.0f)" % (a, b))
+    # le negatif : un fond noir devient clair
+    _r, inv, _f, _a = _rendu("mpc", [], t=0.5, inverser=True)
+    if not inv.astype(np.float64).mean() > 170:
+        fautes.append("inverser : l'image reste sombre (moyenne %.0f)"
+                      % inv.astype(np.float64).mean())
+    # en encre, les coups gardent leur couleur
+    r, img, _f, _a = _rendu("mpc", [(COUP, 0, 1.0, 6.0)], mode_trait="encre",
+                            couleur_coups="instrument", **clair)
+    x0, y0, x1, y1 = O.MACHINES["mpc"]["pads"][0]
+    cx, cy, dx, dy = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 4, (y1 - y0) / 4
+    z = _zone(r, (cx - dx, cy - dy, cx + dx, cy + dy))
+    rvb = img[z].reshape(-1, 3).astype(np.float64).mean(axis=0)
+    if not (rvb[0] > 150 and rvb[0] > 1.8 * rvb[1]):
+        fautes.append("encre : la grosse caisse n'est pas peinte en rouge : %s"
+                      % np.round(rvb))
+    return fautes
+
+
 def main():
     fautes = textures()
     print("textures : %d genres sur 4 machines" % len(O.TEXTURES_TOUCHES))
@@ -224,6 +267,7 @@ def main():
     for l in lignes:
         print(l)
     fautes += couleurs()
+    fautes += trait()
     if fautes:
         print("\n%d defaut(s) :" % len(fautes))
         for x in fautes:

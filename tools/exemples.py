@@ -41,10 +41,12 @@ DEBUT = 19.2                     # la neuvieme mesure : tout y joue — grosse
 SANS = {"splitPx", "splitCount", "partsN", "partsSpeed", "partsLife",
         "stutLoop", "scrLen", "echoN", "echoDelay", "waveSmooth", "midiForce",
         "midiOffset", "midiTempo", "scrub", "couleurCoupsLibre", "trait",
-        "bgColor", "title"}
+        "bgColor", "title", "encre"}
 # Les listes dont chaque choix a son exemple
 OPTIONS = ("machine", "palette", "bg", "couleurCoups", "textureTouches",
-           "travelMode")
+           "travelMode", "modeTrait")
+# Les cases a cocher qui ont leur exemple : cochees
+COCHES = ("inverser",)
 # Le repos : ce qui a deja un effet par defaut est coupe, pour que chaque
 # exemple ne montre que le sien
 REPOS = {"glitch": "0", "split": "0", "punch": "0", "snare": "0",
@@ -61,6 +63,9 @@ AVEC = {
     "passage": {"plan": True}, "passageTurb": {"plan": True, "passage": "1.9"},
     "splitOn": {}, "split": {"splitOn": "tout"},
     "spectro": {"wave": "0.5"},
+    # la nature du trait se juge sur un fond clair : un ciel
+    "modeTrait": {"fond": "ciel", "bdStrength": "1"},
+    "detourage": {"fond": "ciel", "bdStrength": "1"},
 }
 # Des valeurs choisies a la main plutot qu'aux 85 % de la course
 FORT = {"taille": "0.55", "nettete": "0.4", "reflet": "1", "split": "2.2",
@@ -115,6 +120,8 @@ def liste():
             lo, hi = float(c["min"]), float(c["max"])
             fort = FORT.get(ident, "%.3f" % (lo + 0.85 * (hi - lo)))
             out.append((ident, dict(AVEC.get(ident, {}), **{ident: fort})))
+        elif c["genre"] == "checkbox" and ident in COCHES:
+            out.append((ident, dict(AVEC.get(ident, {}), **{ident: "1"})))
         elif ident in OPTIONS:
             for v in remplies.get(ident) or c.get("options") or []:
                 out.append(("%s=%s" % (ident, v),
@@ -164,6 +171,25 @@ def fond_demo(chemin):
     im.save(chemin)
 
 
+def ciel_demo(chemin):
+    """Un ciel clair et ses nuages : le fond des exemples du trait."""
+    from PIL import Image, ImageFilter
+    w, h = 1280, 720
+    rng = np.random.default_rng(3)
+    y = np.linspace(0, 1, h)[:, None, None]
+    ciel = (np.concatenate([0.45 + 0.35 * y, 0.65 + 0.25 * y, 0.95 + 0.0 * y],
+                           axis=2) * np.ones((1, w, 1)))
+
+    def bruit(pas):
+        n = rng.random((h // pas, w // pas))
+        return np.asarray(Image.fromarray((n * 255).astype(np.uint8))
+                          .resize((w, h), Image.BICUBIC)) / 255.0
+    nuage = np.clip((0.65 * bruit(40) + 0.35 * bruit(12) - 0.45) * 3.0, 0, 1)
+    img = ciel * (1 - nuage[..., None]) + 0.97 * nuage[..., None]
+    (Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8))
+     .filter(ImageFilter.GaussianBlur(2)).save(chemin))
+
+
 def _images(info, palette, kw, debut):
     import mpc_performance as MP
     r = MP._renderer(info, W, H, FPS, 7, True, palette, dict(kw))
@@ -184,6 +210,9 @@ def generer(sortie=None, seulement=None, journal=print):
     fond = os.path.join(sortie, "fond.png")
     if not os.path.exists(fond):
         fond_demo(fond)
+    ciel = os.path.join(sortie, "ciel.png")
+    if not os.path.exists(ciel):
+        ciel_demo(ciel)
     info = MP.analyze(wav, 0.0, None)
     # les paroxysmes de la demo : un au debut de la mesure montree, pour que
     # le glitch, qui ne part que sur eux, ait de quoi partir
@@ -212,7 +241,7 @@ def generer(sortie=None, seulement=None, journal=print):
         palette, kw = S.look_from(q)
         kw["midi"] = ""
         if avec_fond:
-            kw["backdrop"] = fond
+            kw["backdrop"] = ciel if avec_fond == "ciel" else fond
         if ident == "split":
             r0 = MP._renderer(info, W, H, FPS, 7, True, palette, dict(kw))
             st = r0.split_times()
@@ -230,7 +259,7 @@ def generer(sortie=None, seulement=None, journal=print):
                 p0, kw0 = S.look_from(q0)
                 kw0["midi"] = ""
                 if avec_fond:
-                    kw0["backdrop"] = fond
+                    kw0["backdrop"] = ciel if avec_fond == "ciel" else fond
                 neutres[cle0] = _images(info, p0, kw0, debut)[0]
             ecarts = [float(np.abs(a.astype(np.int16) - b.astype(np.int16)).mean())
                       for a, b in zip(imgs, neutres[cle0])]
@@ -243,9 +272,14 @@ def generer(sortie=None, seulement=None, journal=print):
         faits += 1
         journal("exemple %d/%d : %s (%.0f s)" % (k + 1, len(a_faire), cle,
                                                 time.time() - t0))
-    with open(os.path.join(sortie, "index.json"), "w") as f:
-        json.dump(sorted(c for c, _p in liste()
-                         if os.path.exists(os.path.join(sortie, _nom(c) + ".jpg"))), f)
+    # l'index ne s'ecrit qu'une fois tout fait : c'est lui qui dit au studio
+    # qu'il n'a plus rien a lancer, et une commande qui n'en a fait que
+    # quelques-uns ne doit pas l'en convaincre
+    prets = [c for c, _p in liste()
+             if os.path.exists(os.path.join(sortie, _nom(c) + ".jpg"))]
+    if len(prets) == len(liste()):
+        with open(os.path.join(sortie, "index.json"), "w") as f:
+            json.dump(sorted(prets), f)
     return faits
 
 

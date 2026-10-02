@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.6"
+VERSION = "2026-10-02.7"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -308,6 +308,21 @@ AIDE = {
                     "charley en cyan, et sur le clavier une teinte par note "
                     "de la gamme ; « au hasard » en tire une nouvelle a "
                     "chaque coup.",
+    "modeTrait": "Ce qu'est le trait. « neon » : une lumiere, qui s'ajoute "
+                 "au fond — parfaite sur le sombre, perdue sur un ciel "
+                 "blanc. « encre » : un trait fonce peint par-dessus le "
+                 "fond, pour les fonds clairs ; les coups y gardent leur "
+                 "couleur. « auto » : chaque point choisit selon ce qui est "
+                 "derriere lui, neon sur le sombre, encre sur le clair — le "
+                 "mode d'une video de ciel ou de nuages.",
+    "encre": "La couleur du trait en mode encre ou auto. Fonce par defaut ; "
+             "un bleu nuit ou un brun sepia changent tout le dessin.",
+    "detourage": "Un liseré autour du trait qui le detache du fond : sombre "
+                 "en neon (le ciel s'assombrit autour de la machine), clair "
+                 "en encre. A zero, rien ne change.",
+    "inverser": "Le negatif de toute l'image : le noir devient blanc, le "
+                "vert devient magenta. Avec un fond sombre, cela donne un "
+                "dessin sur papier ; avec une video, un ciel en negatif.",
     "couleurCoupsLibre": "La couleur des coups quand « une couleur au "
                          "choix » est retenue.",
     "textureTouches": "Ce qui remplit une touche ou un pad allume : la nappe "
@@ -504,7 +519,8 @@ CHAMPS = {
     "passage": "passage", "passage_turb": "passageTurb",
     "midi_force": "midiForce", "midi_offset": "midiOffset",
     "eclat_pads": "eclatPads", "couleur_coups": "couleurCoups",
-    "texture_touches": "textureTouches",
+    "texture_touches": "textureTouches", "mode_trait": "modeTrait",
+    "detourage": "detourage", "inverser": "inverser",
     "midi_tempo": "midiTempo", "midi_type": "midiType",
     "vignettage": "vignettage", "scanlines": "scanlines",
     "aberration": "aberration",
@@ -657,6 +673,16 @@ class StillBackdrop:
         cadre = travel_crop(self.img, t / self.dur, self.travel, self.mode,
                             self.w, self.h)
         return np.ascontiguousarray(cadre * self.mask, dtype=np.float32)
+
+    def clair(self, t):
+        """Le fond pour un trait a l'encre : le creux et la dalle y sont un
+        papier clair plutot qu'une ombre (voir Renderer.fond_texture_clair)."""
+        if self.travel <= 1e-4 or self.mode == "aucun":
+            if getattr(self, "_clair", None) is None:
+                self._clair = _eclaircir(self.img[:self.h, :self.w], self.mask)
+            return self._clair
+        return _eclaircir(travel_crop(self.img, t / self.dur, self.travel,
+                                      self.mode, self.w, self.h), self.mask)
 
 
 def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
@@ -834,11 +860,33 @@ class VideoBackdrop:
         if im.size != (cible, cibleh):
             im = im.resize((cible, cibleh), Image.BILINEAR)
         img = np.asarray(im, dtype=np.float32) / 255.0
-        img = travel_crop(img, t / self.dur, self.travel, self.mode,
-                          self.w, self.h) * self.mask
-        img = np.ascontiguousarray(img, dtype=np.float32)
+        brut = travel_crop(img, t / self.dur, self.travel, self.mode,
+                           self.w, self.h)
+        self._brut = brut
+        img = np.ascontiguousarray(brut * self.mask, dtype=np.float32)
         self._cache = (i, img)
         return img
+
+    def clair(self, t):
+        """Le fond pour un trait a l'encre (voir StillBackdrop.clair)."""
+        self.at(t)
+        return _eclaircir(self._brut, self.mask)
+
+
+# Le papier : le clair que prend le creux derriere la machine quand le trait
+# est a l'encre.
+PAPIER = 0.92
+
+
+def _eclaircir(brut, mask):
+    """Un fond dont le creux et la dalle sont eclaircis au lieu d'assombris.
+
+    Le masque vaut le dosage du fond partout, moins dans le creux et sur la
+    dalle : ce qu'il y retire de l'image, on le rend en papier clair.
+    """
+    plein = float(mask.max())
+    return np.ascontiguousarray(brut * mask + PAPIER * (plein - mask),
+                                dtype=np.float32)
 
 
 def make_backdrop(path, w, h, fps=30, duration=0.0, sharp=0.37, **kw):
@@ -2012,6 +2060,11 @@ TEXTURES_TOUCHES = ("nappe", "lignes", "hachures", "quadrillage", "points",
 # choisie, celle de l'instrument (et, sur le clavier, de la note), ou une
 # nouvelle a chaque coup.
 COULEURS_COUPS = ("trait", "libre", "instrument", "arc-en-ciel")
+
+# Ce qu'est le trait : une lumiere (neon), une encre foncee peinte par-dessus
+# le fond — pour les fonds clairs —, ou l'un ou l'autre selon le fond qui est
+# derriere chaque point (voir Renderer._sur_le_fond).
+MODES_TRAIT = ("neon", "encre", "auto")
 
 # La part de la lumiere de reference que garde chaque texture. Une texture
 # faite de traits fins concentre sa lumiere, que le halo fait paraitre plus
@@ -4100,6 +4153,10 @@ class Renderer:
     # La lumiere des coups : son eclat sur les pads, sa couleur, la texture
     # des touches allumees (voir FaisceauCouleur et texture_touche).
     eclat_pads = 1.0
+    mode_trait = "neon"
+    encre = (0.04, 0.07, 0.06)
+    detourage = 0.0
+    inverser = False
     couleur_coups = "trait"
     couleur_coups_libre = (1.0, 0.48, 0.12)
     texture_touches = "nappe"
@@ -5312,6 +5369,10 @@ class Renderer:
         else:
             self.c_bg = pat if creux is None else pat * creux[..., None]
             self.c_bg_pat = self.c_bg_creux = None
+        # le creux seul, pour le trait a l'encre : il y eclaircit le fond au
+        # lieu de l'assombrir (voir fond_texture)
+        self._creux_fond = creux
+        self._fond_clair = None
 
     def fond_texture(self, t):
         """La texture du fond a l'instant t.
@@ -5325,6 +5386,23 @@ class Renderer:
         """
         if self.c_bg is not None:
             return self.c_bg
+        return self._fond_anime(t)
+
+    def fond_texture_clair(self, t):
+        """La texture du fond pour un trait a l'encre : le creux derriere la
+        machine y est un papier clair au lieu d'une ombre. Un trait fonce dans
+        une ombre ne se verrait plus ; c'est le meme creux, a l'envers."""
+        creux = getattr(self, "_creux_fond", None)
+        if creux is None:
+            return self.fond_texture(t)
+        if self.c_bg is not None:
+            if self._fond_clair is None:
+                self._fond_clair = (self.c_bg + (PAPIER * (1.0 - creux))[..., None]
+                                    ).astype(np.float32)
+            return self._fond_clair
+        return self._fond_anime(t) + (PAPIER * (1.0 - creux))[..., None]
+
+    def _fond_anime(self, t):
         pat = self.c_bg_pat
         h, w = pat.shape[0], pat.shape[1]
         if self.bg_kind == "bruit":
@@ -5698,6 +5776,133 @@ class Renderer:
         zone *= (1.0 - OCCULTE * np.minimum(fort, 1.0))[..., None]
         zone += tot.transpose(1, 2, 0)
 
+    def _fond_de(self, t, clair):
+        """Le fond complet a l'instant t : texture de dalle, puis image ou
+        video. `clair` : son creux eclairci, pour un trait a l'encre.
+
+        A lire seulement : quand rien n'y bouge — texture figee, photo sans
+        travelling, pas d'eclat du fond —, c'est le meme tableau d'une image
+        a l'autre."""
+        bd = self.backdrop
+        fige = (self.c_bg is not None and self.bg_flash <= 0.01
+                and (bd is None or (isinstance(bd, StillBackdrop)
+                                    and (bd.travel <= 1e-4 or bd.mode == "aucun"))))
+        cache = self.__dict__.setdefault("_fonds_figes", {})
+        if fige and clair in cache:
+            return cache[clair]
+        tex = self.fond_texture_clair(t) if clair else self.fond_texture(t)
+        if bd is not None:
+            b = bd.clair(t) if clair and hasattr(bd, "clair") else bd.at(t)
+            if self.bg_flash > 0.01:
+                b = b * (1.0 + 1.8 * self.bg_flash
+                         * self.hit_env(t, self.flash_on, fall=13.0))
+            fond = np.add(b, tex, dtype=np.float32)
+        else:
+            fond = tex
+        if fond.shape != (self.H, self.W, 3):
+            # un fond uni n'est qu'une couleur, de forme (1, 1, 3)
+            fond = np.broadcast_to(fond, (self.H, self.W, 3))
+        fond = np.ascontiguousarray(fond, dtype=np.float32)
+        if fige:
+            cache[clair] = fond
+        return fond
+
+    def _sur_le_fond(self, trait, t, gc, coups, fluo, k_teinte, inten):
+        """Pose le trait sur le fond, selon le mode choisi.
+
+        - **neon** : le trait est une lumiere, il s'ajoute au fond. Sur un
+          fond clair il s'y perd : un vert vif ajoute a un ciel blanc donne du
+          blanc.
+        - **encre** : le trait est peint par-dessus, dans une couleur foncee.
+          Son intensite sert d'opacite — le coeur couvre, le halo voile —, et
+          la lumiere des coups se pose comme une peinture de couleur. Le creux
+          derriere la machine devient un papier clair.
+        - **auto** : chaque point choisit selon le fond qui est derriere lui —
+          neon ou le fond est sombre, encre ou il est clair, et un fondu entre
+          les deux. C'est le mode d'un ciel qui passe du jour a la nuit, ou
+          d'un nuage blanc sur un ciel bleu.
+
+        Le **detourage** fait ressortir la machine : en neon il assombrit le
+        fond autour du trait, en encre il l'eclaircit.
+
+        Tout se fait couleur par couleur, sur des plans de la taille de
+        l'image : un masque d'une couche diffuse sur trois couleurs coutait
+        cinq fois plus (600 ms par image en 1080p contre 300 pour le neon).
+        Le resultat s'ecrit dans le tableau du trait.
+        """
+        mode = self.mode_trait
+        det = float(getattr(self, "detourage", 0.0))
+        # l'aura du detourage : le halo du trait, borne
+        aura = (np.clip(gc * np.float32(0.9 * det), 0.0, 0.92)
+                if det > 0.001 else None)
+        if mode == "neon":
+            fond = self._fond_de(t, False)
+            for c in range(3):
+                f = fond[:, :, c]
+                trait[:, :, c] += f * (1.0 - aura) if aura is not None else f
+            return trait
+        # L'opacite de l'encre : le coeur du trait couvre, son halo ne fait
+        # qu'un voile — plafonne a 45 %. Pris tel quel, le halo d'un coup fort
+        # devenait une tache sombre et floue de la taille de trois pads.
+        alpha = np.clip(inten, 0.0, 1.0)
+        voile = np.clip(gc * np.float32(0.30), 0.0, 0.45)
+        alpha += voile * (1.0 - alpha)
+        sp = self.split * self.sub_hit(t)
+        if sp > 0.01:
+            # le dedoublement : ses copies decalees vivent dans le trait seul
+            dbl = np.maximum(np.maximum(trait[:, :, 0], trait[:, :, 2]), 0.0)
+            np.maximum(alpha, np.clip(dbl, 0.0, 1.0) * 0.8, out=alpha)
+        a_coups = None
+        if coups is not None:
+            a_coups = np.maximum(np.maximum(coups[:, :, 0], coups[:, :, 1]),
+                                 coups[:, :, 2])
+            np.clip(a_coups, 0.0, 1.0, out=a_coups)
+            a_coups = 1.0 - a_coups
+        # l'encre prend un peu de la teinte du coup (caisse claire, couleurs
+        # par instrument) : l'eclair jaune reste visible
+        encre = np.array(self.encre, dtype=np.float32)
+        if k_teinte > 0.01:
+            encre = encre * (1.0 - k_teinte) + np.array(fluo, np.float32) * (0.7 * k_teinte)
+
+        def peindre(f, c):
+            """Un plan du fond, peint a l'encre (nouveau tableau)."""
+            if aura is not None:
+                f = f + (PAPIER - f) * aura          # l'aura claire
+            else:
+                f = f.copy()
+            f += (encre[c] - f) * alpha
+            if coups is not None:
+                f *= a_coups
+                f += coups[:, :, c]
+            return f
+
+        if mode == "encre":
+            fond = self._fond_de(t, True)
+            for c in range(3):
+                trait[:, :, c] = peindre(fond[:, :, c], c)
+            return trait
+        # auto : le meme fond pour les deux, et chaque point choisit selon sa
+        # clarte — mesuree floue, pour qu'un trait ne change pas de nature
+        # d'un pixel a l'autre
+        fond = self._fond_de(t, False)
+        H, W = self.H, self.W
+        lum = fond[:, :, 0] * 0.30 + fond[:, :, 1] * 0.55 + fond[:, :, 2] * 0.15
+        lum = upsample(gauss(downsample(lum, 8), 2.0), 8, (H, W))
+        beta = np.clip((lum - 0.28) / 0.30, 0.0, 1.0)
+        beta *= beta * (3.0 - 2.0 * beta)
+        for c in range(3):
+            f = fond[:, :, c]
+            neon = f * (1.0 - aura) if aura is not None else f.copy()
+            neon += trait[:, :, c]
+            if coups is not None:
+                neon += coups[:, :, c]
+            peint = peindre(f, c)
+            peint -= neon
+            peint *= beta
+            neon += peint
+            trait[:, :, c] = neon
+        return trait
+
     def colorize(self, field, t, collapse, shake, rng, accent=None):
         W, H = self.W, self.H
         core = gauss(field, self.sigma)
@@ -5736,8 +5941,10 @@ class Renderer:
         fluo, halo = self.c_fluo, self.c_halo
         sn = self.snare * self.snare_hit(t)
         gmul = 0.55
+        k_teinte = 0.0               # de combien le trait a change de teinte
         if sn > 0.01:
             k = min(0.78, sn * 0.82)
+            k_teinte = k
             fluo = tuple(f * (1.0 - k) + y * k for f, y in zip(fluo, SNARE_RGB))
             halo = tuple(h * (1.0 - k) + y * k for h, y in zip(halo, SNARE_HALO))
             gmul = 0.55 * (1.0 + 1.25 * sn)
@@ -5757,6 +5964,7 @@ class Renderer:
                     meilleur, teinte = e, col
             if teinte is not None:
                 k = min(0.92, self.couleurs * meilleur)
+                k_teinte = max(k_teinte, k)
                 fluo = tuple(f * (1.0 - k) + c * k for f, c in zip(fluo, teinte))
                 halo = tuple(h * (1.0 - k) + c * k for h, c in zip(halo, teinte))
         gc = np.clip(glow, 0, 3.0)
@@ -5776,9 +5984,17 @@ class Renderer:
         # contre 3, pour le meme resultat au bit pres
         for c in range(3):
             img[:, :, c] += hot * self.c_hot[c]
-        # la lumiere des coups, quand elle n'a pas la couleur du trait
+        # la lumiere des coups, quand elle n'a pas la couleur du trait. Hors du
+        # neon, elle se pose comme une peinture et non comme une lumiere :
+        # on la garde a part
+        mode = getattr(self, "mode_trait", "neon")
+        coups = None
         if accent is not None:
-            self._lumiere_coups(img, accent, ecart, pres, loin, gmul)
+            if mode == "neon":
+                self._lumiere_coups(img, accent, ecart, pres, loin, gmul)
+            else:
+                coups = np.zeros_like(img)
+                self._lumiere_coups(coups, accent, ecart, pres, loin, gmul)
         if luisant is not None:
             img += np.clip(luisant, 0.0, 1.4)[..., None]
         sp = self.split * self.sub_hit(t)
@@ -5786,14 +6002,17 @@ class Renderer:
             img = self._split(img, sp)
         # le fond passe sous les textures : scanlines, vignettage et grain
         # le travaillent comme le reste de la dalle.
-        img += self.fond_texture(t)
-        if self.backdrop is not None:
-            fond = self.backdrop.at(t)
-            if self.bg_flash > 0.01:
-                # le fond est eclaire par le coup, comme par un flash de studio
-                fond = fond * (1.0 + 1.8 * self.bg_flash
-                               * self.hit_env(t, self.flash_on, fall=13.0))
-            img += fond
+        if mode == "neon" and getattr(self, "detourage", 0.0) <= 0.001:
+            img += self.fond_texture(t)
+            if self.backdrop is not None:
+                fond = self.backdrop.at(t)
+                if self.bg_flash > 0.01:
+                    # le fond est eclaire par le coup, comme par un flash
+                    fond = fond * (1.0 + 1.8 * self.bg_flash
+                                   * self.hit_env(t, self.flash_on, fall=13.0))
+                img += fond
+        else:
+            img = self._sur_le_fond(img, t, gc, coups, fluo, k_teinte, inten)
 
         # Scanlines, ondulation lente et vignettage : trois multiplications de
         # la taille de l'image, ramenees a une seule. Le peigne et le
@@ -5835,6 +6054,12 @@ class Renderer:
             sh = max(1, int(14 * gl))
             img[:, :, 0] = np.roll(img[:, :, 0], sh, axis=1)
             img[:, :, 2] = np.roll(img[:, :, 2], -sh, axis=1)
+
+        if getattr(self, "inverser", False):
+            # le negatif : le noir devient blanc, le vert devient magenta. Avant
+            # la deformation du tube, pour que ses coins restent noirs
+            np.clip(img, 0.0, 1.0, out=img)
+            np.subtract(np.float32(1.0), img, out=img)
 
         if self.curve:
             img = self._warp(img)

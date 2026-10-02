@@ -38,6 +38,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, FaisceauCouleur, _decode,
+    MODES_TRAIT,
     _lowpass, detect_beat,
     detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, PADS_REELS,
     pool_context,
@@ -176,6 +177,8 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               eclat_pads=1.0, couleur_coups="trait",
                               couleur_coups_libre=(1.0, 0.48, 0.12),
                               texture_touches="nappe",
+                              mode_trait="neon", encre=(0.04, 0.07, 0.06),
+                              detourage=0.0, inverser=False,
                               **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
@@ -193,6 +196,9 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.couleur_coups_libre = tuple(float(c) for c in couleur_coups_libre)
     r.texture_touches = (texture_touches if texture_touches in TEXTURES_TOUCHES
                          else "nappe")
+    r.mode_trait = mode_trait if mode_trait in MODES_TRAIT else "neon"
+    r.encre = tuple(float(c) for c in encre)
+    r.detourage, r.inverser = float(detourage), bool(inverser)
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
     r.glitch = float(glitch)
@@ -801,6 +807,18 @@ def add_look_args(ap):
     ap.add_argument("--texture-touches", choices=TEXTURES_TOUCHES,
                     default="nappe",
                     help="ce qui remplit une touche ou un pad allume")
+    ap.add_argument("--mode-trait", choices=MODES_TRAIT, default="neon",
+                    help="neon : une lumiere (fonds sombres) ; encre : un "
+                         "trait fonce peint sur le fond (fonds clairs) ; "
+                         "auto : l'un ou l'autre selon le fond derriere "
+                         "chaque point")
+    ap.add_argument("--encre", default="#0a1210", metavar="#RRGGBB",
+                    help="la couleur du trait en mode encre ou auto")
+    ap.add_argument("--detourage", type=float, default=0.0, metavar="X",
+                    help="liseré autour du trait qui le detache du fond : "
+                         "sombre en neon, clair en encre (0 = aucun)")
+    ap.add_argument("--inverser", action="store_true",
+                    help="le negatif de toute l'image")
     ap.add_argument("--vignettage", type=float, default=1.0, metavar="X",
                     help="coins assombris : 1 = comme avant, 0 = dalle plate, "
                          "2 = deux fois plus creuse")
@@ -993,6 +1011,10 @@ def look_kwargs(args):
             "couleur_coups": args.couleur_coups,
             "couleur_coups_libre": hex_to_rgb(args.couleur_coups_libre),
             "texture_touches": args.texture_touches,
+            "mode_trait": args.mode_trait,
+            "encre": hex_to_rgb(args.encre),
+            "detourage": args.detourage,
+            "inverser": bool(args.inverser),
             "vignettage": args.vignettage, "scanlines": args.scanlines,
             "aberration": args.aberration,
             "passage": args.passage,

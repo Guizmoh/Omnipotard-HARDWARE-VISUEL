@@ -44,7 +44,7 @@ import midi                                                   # noqa: E402
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
     VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs, MACHINES,
-    NOMS_MACHINES, COULEURS_COUPS, TEXTURES_TOUCHES,
+    NOMS_MACHINES, COULEURS_COUPS, TEXTURES_TOUCHES, MODES_TRAIT,
     compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
     lire_plan_machines,
     backdrop_quality, PRESETS, STYLES, CHAMPS, AIDE, COMPTE, QUALITES, pick_split_times,
@@ -208,6 +208,11 @@ def look_from(q):
         "couleur_coups_libre": _couleur(q.get("couleurCoupsLibre"), "#ff7a1f"),
         "texture_touches": _dans(q.get("textureTouches"), TEXTURES_TOUCHES,
                                  "nappe"),
+        # ---- la nature du trait : neon, encre (fonds clairs) ou selon le fond
+        "mode_trait": _dans(q.get("modeTrait"), MODES_TRAIT, "neon"),
+        "encre": _couleur(q.get("encre"), "#0a1210"),
+        "detourage": float(q.get("detourage", 0.0)),
+        "inverser": _coche(q.get("inverser")),
         "vignettage": float(q.get("vignettage", 1.0)),
         "scanlines": float(q.get("scanlines", 1.0)),
         "aberration": float(q.get("aberration", 0.0)),
@@ -584,7 +589,8 @@ class Studio:
                 "passage", "passage_turb", "midi_force",
                 "vignettage", "scanlines", "aberration",
                 "eclat_pads", "couleur_coups", "couleur_coups_libre",
-                "texture_touches")
+                "texture_touches", "mode_trait", "encre", "detourage",
+                "inverser")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
                         "backdrop_sharp", "spectro", "nettete", "taille",
@@ -1883,6 +1889,32 @@ PAGE = r"""<!doctype html>
       <label for="trait">teinte</label>
       <input type="color" id="trait" value="#3dff72">
     </div>
+    <label for="modeTrait">nature du trait</label>
+    <select id="modeTrait">
+      <option value="neon" selected>neon : une lumiere (fonds sombres)</option>
+      <option value="encre">encre : un trait fonce (fonds clairs)</option>
+      <option value="auto">auto : selon le fond derriere chaque trait</option>
+    </select>
+    <div id="encreBloc" hidden>
+      <label for="encre">couleur de l'encre</label>
+      <input type="color" id="encre" value="#0a1210">
+    </div>
+    <label for="detourage">detourage &mdash; <span id="v-det">0.00</span></label>
+    <input type="range" id="detourage" min="0" max="2" step="0.05" value="0">
+    <label class="coche"><input type="checkbox" id="inverser">
+      inverser les couleurs (negatif)</label>
+    <p class="hint">Sur un <b>fond clair</b> &mdash; un ciel, une video de
+      nuages &mdash; un neon s'y perd : sa lumiere s'ajoute au blanc. Trois
+      reponses : <b>encre</b> peint la machine en trait fonce par-dessus le
+      fond (les coups gardent leur couleur) ; <b>auto</b> choisit point par
+      point, neon sur le sombre et encre sur le clair, ce qui suit un ciel
+      qui change ; le <b>detourage</b> pose un liseré autour du trait, sombre
+      en neon, clair en encre. Le creux derriere la machine s'eclaircit en
+      encre au lieu de s'assombrir.<br>
+      Les reglages du fond sont faits pour le neon : ils assombrissent la
+      photo. Pour un ciel lumineux, montez l'<b>intensite</b> du fond et
+      baissez le <b>creux</b> &mdash; en auto, ce qui reste sombre (l'ecran de
+      la machine, le creux) garde le neon, le reste passe a l'encre.</p>
   </div>
 
   <div class="card">
@@ -2350,6 +2382,9 @@ function params() {
     eclatPads: $('#eclatPads').value, couleurCoups: $('#couleurCoups').value,
     couleurCoupsLibre: $('#couleurCoupsLibre').value,
     textureTouches: $('#textureTouches').value,
+    modeTrait: $('#modeTrait').value, encre: $('#encre').value,
+    detourage: $('#detourage').value,
+    inverser: $('#inverser').checked ? '1' : '0',
     midiTempo: $('#midiTempo').value, midiType: $('#midiType').value,
     midiBpm: $('#midiBpm').value,
     midiTelQuel: $('#midiTelQuel').checked ? '1' : '0',
@@ -2471,6 +2506,8 @@ function shot() {
   if (LISTES_EX && EXEMPLES.size) for (const id of LISTES_EX) majExemple(id);
   // la couleur au choix ne sert qu'a « une couleur au choix »
   if ($('#libreBloc')) $('#libreBloc').hidden = $('#couleurCoups').value !== 'libre';
+  // la couleur de l'encre ne sert qu'hors du neon
+  if ($('#encreBloc')) $('#encreBloc').hidden = $('#modeTrait').value === 'neon';
   if (!track) return;
   rendreLImage();
   clearTimeout(pending);
@@ -2550,7 +2587,7 @@ bind('#haloDoux','#v-hd',2); bind('#poussiere','#v-po',2);
 bind('#flottement','#v-fl',2);
 bind('#echo','#v-ec',2); bind('#echoN','#v-ecn',0);
 bind('#echoDelay','#v-ecd',3); bind('#couleurs','#v-cl',2);
-bind('#eclatPads','#v-ep',2);
+bind('#eclatPads','#v-ep',2); bind('#detourage','#v-det',2);
 bind('#spectro','#v-sp',2);
 $('#cadence').oninput = e => {
   const n = +e.target.value;
@@ -2571,6 +2608,10 @@ $('#quality').onchange = majFrequences;
 $('#couleurCoups').onchange = () => shot();
 $('#textureTouches').onchange = () => shot();
 $('#couleurCoupsLibre').oninput = () => shot();
+// la nature du trait
+$('#modeTrait').onchange = () => shot();
+$('#encre').oninput = () => shot();
+$('#inverser').onchange = () => shot();
 
 /* ---- fond : image ou video ---- */
 let backdrop = '';
@@ -3000,7 +3041,7 @@ function rendreLImage() {
 // « var » : l'apercu peut etre demande avant que ces lignes ne soient lues
 var EXEMPLES = new Set(), minuteurEx = null;
 var LISTES_EX = ['machine', 'palette', 'bg', 'couleurCoups',
-                 'textureTouches', 'travelMode'];
+                 'textureTouches', 'travelMode', 'modeTrait'];
 function cleExemple(id) {
   return LISTES_EX.includes(id) ? id + '=' + $('#' + id).value : id;
 }
@@ -3010,7 +3051,8 @@ function figureExemple(id) {
   const el = $('#' + id);
   if (!el) return null;
   // sous l'explication du reglage, apres la liste « sur quoi » s'il en a une
-  let a = el;
+  // (une case a cocher est dans son libelle : on part du libelle)
+  let a = el.type === 'checkbox' ? (el.closest('label') || el) : el;
   if (a.nextElementSibling && a.nextElementSibling.matches('select.inst'))
     a = a.nextElementSibling;
   if (a.nextElementSibling && a.nextElementSibling.classList.contains('aide'))
