@@ -260,8 +260,25 @@ def tempo_fichier(chemin):
             "smpte": bool(division & 0x8000)}
 
 
-# General MIDI : le canal 10 est toujours celui de la batterie
+# General MIDI : le canal 10 est celui de la batterie
 CANAL_BATTERIE = 10
+
+
+def _batterie(hauteurs):
+    """Des notes qui ressemblent a une batterie : presque toutes dans la plage
+    du kit General MIDI — grosse caisse 35, caisse claire 38, charleys 42 a 46,
+    toms, cymbales jusqu'a 59 — et sur une poignee de hauteurs.
+
+    Le canal seul ne suffit pas : une MPC range volontiers une partie de piano
+    sur le canal 10 — mesure sur un fichier reel, 950 notes d'arpeges de piano
+    sur 1 350, de mi1 a sol5, sur 25 hauteurs dont 39 % seulement dans la
+    plage du kit. Le nombre de hauteurs ne suffit pas non plus : un kit complet,
+    toms et cymbales compris, en joue une quinzaine.
+    """
+    if not hauteurs:
+        return False
+    dans_le_kit = sum(1 for h in hauteurs if 35 <= h <= 59) / float(len(hauteurs))
+    return dans_le_kit >= 0.8 and len(set(hauteurs)) <= 18
 
 
 def inventaire(chemin):
@@ -273,23 +290,28 @@ def inventaire(chemin):
     pourquoi : cet inventaire le dit.
 
     Rend une entree par piste qui porte des notes : {"piste", "nom",
-    "canaux": {canal: attaques}, "notes"}. Pistes et canaux sont numerotes
-    comme les logiciels les affichent, a partir de 1.
+    "canaux": {canal: attaques}, "notes", "batterie": [canaux]}. Pistes et
+    canaux sont numerotes comme les logiciels les affichent, a partir de 1 ;
+    `batterie` liste ceux dont les notes ressemblent a une batterie.
     """
     with open(chemin, "rb") as f:
         data = f.read()
     _fmt, _div, blocs = _pistes(data)
     out = []
     for k, bloc in enumerate(blocs):
-        nom, canaux = "", {}
+        nom, canaux, hauteurs = "", {}, {}
         for _tic, genre, a, _b, canal in _evenements(bloc):
             if genre == "nom" and not nom:
                 nom = a
             elif genre == "on":
                 canaux[canal + 1] = canaux.get(canal + 1, 0) + 1
+                hauteurs.setdefault(canal + 1, []).append(a)
         if canaux:
-            out.append({"piste": k + 1, "nom": nom, "canaux": canaux,
-                        "notes": sum(canaux.values())})
+            out.append({"piste": k + 1, "nom": nom.strip("\x00 "),
+                        "canaux": canaux, "notes": sum(canaux.values()),
+                        "batterie": sorted(c for c in canaux
+                                           if c == CANAL_BATTERIE
+                                           and _batterie(hauteurs[c]))})
     return out
 
 
@@ -298,20 +320,22 @@ def decrire(inv):
     parts = []
     for p in inv:
         canaux = ", ".join(
-            "canal %d%s" % (c, " (batterie)" if c == CANAL_BATTERIE else "")
+            "canal %d%s" % (c, " (batterie)" if c in p.get("batterie", ())
+                            else "")
             for c in sorted(p["canaux"]))
-        nom = " « %s »" % p["nom"] if p["nom"] else ""
+        nom = " \u00ab %s \u00bb" % p["nom"] if p["nom"] else ""
         parts.append("piste %d%s : %d notes, %s"
                      % (p["piste"], nom, p["notes"], canaux))
-    return " · ".join(parts)
+    return " \u00b7 ".join(parts)
 
 
 def melange(inv):
-    """La batterie et autre chose dans le meme fichier : tout s'allumera."""
-    canaux = set()
+    """Une batterie et autre chose dans le meme fichier : tout s'allumera."""
+    canaux, batterie = set(), set()
     for p in inv:
         canaux |= set(p["canaux"])
-    return CANAL_BATTERIE in canaux and len(canaux) > 1
+        batterie |= set(p.get("batterie", ()))
+    return bool(batterie) and bool(canaux - batterie)
 
 
 def resume(notes):

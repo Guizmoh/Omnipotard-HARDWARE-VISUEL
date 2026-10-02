@@ -163,6 +163,12 @@ def verifier():
        "la touche s'allume plus d'une demi-image avant sa note")
     ok(_allumees(m, 2.0 - DEMI + 0.001) == {k},
        "la touche ne s'allume pas sur l'image la plus proche de sa note")
+    # ... mais pas pour une note doublee a quelques millisecondes : c'est la
+    # meme attaque, sur deux canaux
+    m = _Moteur([(1.0, 1.3, 60, 0.8), (1.004, 1.3, 60, 0.8)])
+    ok(_eclat(m, 1.0 - DEMI + 0.001, k) > 0.5 * _eclat(
+        _Moteur([(1.0, 1.3, 60, 0.8)]), 1.0 - DEMI + 0.001, k),
+       "une note doublee a 4 ms s'eteint a sa propre attaque")
     # ... et seulement la meme hauteur : une autre note n'eteint rien
     m = _Moteur([(1.0, 1.5, 60, 0.8), (1.2, 1.5, 64, 0.8)])
     seule = _Moteur([(1.0, 1.5, 60, 0.8)])
@@ -181,6 +187,10 @@ def verifier():
 
     # 15. le calage par le tempo du morceau
     fautes += _calage_tempo()
+
+    # 16. le canal 10 n'est une batterie que si ses notes en ont l'air : une
+    # MPC y range volontiers une partie de piano
+    fautes += _canal_10()
 
     return fautes
 
@@ -372,6 +382,36 @@ def _calage_tempo():
     return fautes
 
 
+def _canal_10():
+    """Un piano sur le canal 10 n'est pas une batterie ; une batterie, si."""
+    import tempfile
+    fautes = []
+    d = tempfile.mkdtemp()
+    try:
+        cas = (("des arpeges de piano", [40, 43, 47, 52, 55, 59, 64, 67, 71,
+                                         45, 48, 52, 57, 60, 64, 69, 72, 76],
+                False),
+               ("une batterie", [36, 42, 38, 42, 36, 36, 42, 38, 46, 49], True))
+        for nom, hauteurs, attendu in cas:
+            ch = os.path.join(d, "c.mid")
+            ev, t = [], 0.0
+            for h in hauteurs * 4:
+                ev.append((t, bytes([0x99, h, 100])))
+                ev.append((t + 0.1, bytes([0x89, h, 0])))
+                t += 0.25
+            ev.sort(key=lambda e: e[0])
+            _ecrire(ch, ev)
+            inv = M.inventaire(ch)
+            vu = bool(inv and 10 in inv[0].get("batterie", ()))
+            if vu != attendu:
+                fautes.append("canal 10 : %s %s annonce comme une batterie"
+                              % (nom, "est" if vu else "n'est pas"))
+            os.remove(ch)
+    finally:
+        os.rmdir(d)
+    return fautes
+
+
 def verifier_image():
     """A l'image : ce que le fichier MIDI decide, le son ne le rallume pas.
 
@@ -467,7 +507,10 @@ def fichier(chemin):
         mh = par_hauteur[h]
         avant = _eclat(mh, d - DEMI - 0.002, k)
         apres = _eclat(mh, d - DEMI + 0.002, k)
-        if avant > 0.25 * apres:
+        # une note doublee a quelques millisecondes n'est qu'une attaque
+        double = any(0.0 <= d - n[0] < 1.1 / _Moteur.fps
+                     for n in notes if n[2] == h and n[0] < d) if avant else False
+        if avant > 0.25 * apres and not double:
             fautes.append("%s a %.3f s ne se detache pas de la note d'avant"
                           % (M.nom_note(h), d))
         vues += 1

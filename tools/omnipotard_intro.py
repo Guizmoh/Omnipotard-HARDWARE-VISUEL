@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-01.1"
+VERSION = "2026-10-02.1"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -3318,7 +3318,10 @@ class Renderer:
         # periode presque entiere. Il ne touche que la meme hauteur : une
         # autre note qui commence ailleurs ne doit rien eteindre.
         for h, d in a_venir.items():
-            m = (haut == h) & (deb < d)
+            # une note doublee — deux attaques a quelques millisecondes, sur
+            # deux canaux — n'est pas une note rejouee : l'oeil n'en voit
+            # qu'une, et le creux eteindrait la premiere sans raison
+            m = (haut == h) & (deb < d - plein)
             if np.any(m):
                 u = np.clip((d - mt - plein) / (0.7 * plein), 0.0, 1.0)
                 v[m] *= CREUX_FOND + (1.0 - CREUX_FOND) * u

@@ -582,9 +582,15 @@ et elle seule — les coups de batterie cessent alors d'allumer les touches.
 mais *toutes* celles du fichier : toutes ses pistes et tous ses canaux. Un
 export qui a emporté la batterie avec la mélodie allume donc aussi des touches
 sur chaque coup. La carte dit ce que contient le fichier, piste par piste
-(« piste 2 « Lead » : 170 notes, canal 1 »), et prévient quand la batterie
-(canal 10) y est mêlée à d'autres notes : mieux vaut alors exporter la mélodie
-seule.
+(« piste 2 « Lead » : 170 notes, canal 1 »), et prévient quand une batterie y
+est mêlée à d'autres notes : mieux vaut alors exporter la mélodie seule.
+
+Le canal 10 n'est appelé batterie que si ses notes en ont l'air — une douzaine
+de hauteurs au plus, dans la plage des fûts et des cymbales. Une MPC y range
+volontiers une partie de piano : sur un fichier réel, 950 notes d'arpèges sur
+1 350, de mi1 à sol5. N'importe quel lecteur MIDI les joue alors avec des sons
+de batterie, puisque c'est la règle du General MIDI ; le studio, lui, les met
+sur les touches comme les autres.
 
 La MPC, le SP-404 et le Digitakt n'ont pas de clavier : en mode mélodie, le
 fichier n'y change rien. Plaquer une mélodie sur seize pads de batterie ne
@@ -832,7 +838,10 @@ et la lumière relevée sur chaque touche, image par image.
   attaques : à l'œil, une note tenue. La touche s'éteint maintenant le temps
   d'une image avant chaque note rejouée, comme une vraie touche qui remonte
   avant d'être enfoncée de nouveau (`CREUX_FOND`). Le creux couvre toujours
-  une image entière, où qu'elle tombe — à cadence réduite aussi.
+  une image entière, où qu'elle tombe — à cadence réduite aussi. Une note
+  **doublée** — la même, deux fois à quelques millisecondes, comme la MPC en
+  écrit sur deux canaux — n'est qu'une attaque pour l'œil : elle n'a pas de
+  creux.
 - **Les notes douces disparaissaient.** L'éclat suivait la vélocité en
   proportion directe : une note à 20 sur 127 n'allumait sa touche qu'au
   cinquième. La nuance reste, avec un plancher (`VELOCITE_PLANCHER`, 0,45).
