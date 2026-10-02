@@ -629,11 +629,19 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
             "-crf", str(int(crf) if crf is not None else q["crf"]),
             "-pix_fmt", q["pix"], "-profile:v", q["profil"],
             "-movflags", "+faststart",
-            # aq-mode 3 donne du debit aux zones sombres — ici tout le fond —
-            # et un deblocage negatif evite que le filtre anti-blocs ne lisse
-            # les traits fins en croyant corriger un artefact.
-            "-x264-params", "keyint=%d:aq-mode=3:aq-strength=0.9:"
-                            "psy-rd=1.2,0.2:deblock=-2,-2" % (fps * 2),
+            # aq-mode 2 repartit le debit selon le detail de chaque zone, sans
+            # privilegier le sombre ; le filtre anti-blocs reste a sa force
+            # normale. Avant : aq-mode 3, qui favorise les zones sombres, et un
+            # deblocage negatif (-2) pour menager les traits fins. Mesure sur
+            # 45 images 1080p comparees aux images brutes, ce reglage laissait
+            # une grille de blocs de 8 pixels — les marches y etaient de 18 a
+            # 36 % plus fortes qu'ailleurs, sur fond noir comme sur un ciel
+            # clair —, et ne gagnait rien sur le trait. Celui-ci : plus de
+            # grille, PSNR 40,45 dB contre 40,29 sur fond noir, 40,63 contre
+            # 40,47 a l'encre sur un ciel, erreur sur le trait 5,17 contre
+            # 5,27, et un fichier 3 a 8 % plus leger.
+            "-x264-params", "keyint=%d:aq-mode=2:aq-strength=0.9:"
+                            "psy-rd=1.2,0.2:deblock=0,0" % (fps * 2),
             "-colorspace", "bt709", "-color_primaries", "bt709",
             "-color_trc", "bt709",
             "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-shortest", out]

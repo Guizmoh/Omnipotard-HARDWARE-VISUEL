@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.8"
+VERSION = "2026-10-02.9"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -986,7 +986,11 @@ def make_background(w, h, kind="noir", color=(0.0, 0.0, 0.0), strength=1.0,
         # d'une image a l'autre, sinon il rivaliserait avec le grain anime)
         rng = np.random.default_rng(seed)
         n = rng.standard_normal((max(2, h // 3), max(2, w // 3))).astype(np.float32)
-        n = upsample(gauss(n, 0.8), 3, (h, w))
+        n = gauss(n, 0.8)
+        # l'interpolation adoucit le grain : on lui rend son ecart-type
+        e0 = float(n.std())
+        n = agrandir(n, (h, w))
+        n *= np.float32(e0 / max(float(n.std()), 1e-6))
         pat = np.clip(0.55 + 0.75 * n, 0.0, 2.0)
     else:
         raise ValueError("fond inconnu : %s" % kind)
@@ -1082,6 +1086,76 @@ def upsample(a, f, shape):
     if ww < shape[1]:
         out[:, ww:] = out[:, ww - 1:ww]
     return out
+
+
+_AXES = {}
+
+
+def _axe(n_out, n_in):
+    """Indices et poids d'une interpolation lineaire de n_in points a n_out,
+    centres de pixels alignes — exactement le BILINEAR de Pillow, a 1e-8
+    pres. Gardes d'une image a l'autre : la definition ne change pas pendant
+    un rendu. La lumiere des coups, elle, travaille sur des decoupes de
+    taille variable : le carnet est vide quand il deborde, plutot que de
+    grossir tout le long d'un morceau (les refaire coute quelques
+    microsecondes)."""
+    cle = (n_out, n_in)
+    tab = _AXES.get(cle)
+    if tab is None:
+        if len(_AXES) >= 64:
+            _AXES.clear()
+        s = (np.arange(n_out, dtype=np.float64) + 0.5) * (n_in / n_out) - 0.5
+        np.clip(s, 0.0, n_in - 1, out=s)
+        i0 = np.floor(s).astype(np.intp)
+        i1 = np.minimum(i0 + 1, n_in - 1)
+        tab = _AXES[cle] = (i0, i1, (s - i0).astype(np.float32))
+    return tab
+
+
+def agrandir(a, shape):
+    """Agrandit une image reduite sans marches : interpolation lineaire.
+
+    upsample() recopie chaque pixel reduit en un bloc de 4 x 4 ou 8 x 8. Sur
+    un flou, l'ecart d'un bloc a l'autre est faible, mais il se voyait en
+    1080p : des carres dans le halo du neon, dans la lumiere des coups, le
+    halo laiteux et le grain, nets surtout sur un fond clair et en qualite
+    « net », qui garde tout. Ici chaque pixel est la moyenne ponderee de ses
+    quatre voisins reduits : le degrade est continu.
+
+    Les colonnes d'abord, tant que l'image est basse, puis les lignes, qui se
+    recopient d'un bloc : 5,4 ms pour un agrandissement par 4 en 1080p.
+    """
+    h, w = shape
+    j0, j1, u = _axe(w, a.shape[1])
+    c0 = np.take(a, j0, axis=1)
+    c1 = np.take(a, j1, axis=1)
+    c1 -= c0
+    c1 *= u
+    c0 += c1
+    i0, i1, t = _axe(h, a.shape[0])
+    r0 = np.take(c0, i0, axis=0)
+    r1 = np.take(c0, i1, axis=0)
+    r1 -= r0
+    r1 *= t[:, None]
+    r0 += r1
+    return r0
+
+
+def halo_reduit(k, ecart, pres, loin, shape):
+    """Le halo d'un trace : deux flous larges, en quart et en huitieme de
+    definition, melanges en quart puis agrandis d'une seule passe lisse.
+
+    Les deux flous etaient agrandis chacun par blocs puis additionnes en
+    pleine definition : deux fois plus de travail, et des carres de 4 et
+    8 pixels dans la lueur.
+    """
+    g4 = gauss(downsample(k, 4), 2.6 * ecart)
+    g8 = gauss(downsample(k, 8), 4.5 * ecart)
+    g4 *= np.float32(2.6 * pres)
+    g8 = agrandir(g8, g4.shape)
+    g8 *= np.float32(3.4 * loin)
+    g4 += g8
+    return agrandir(g4, shape)
 
 
 class Beam:
@@ -5632,7 +5706,7 @@ class Renderer:
             # image 1080p a lui seul.
             petit = downsample(img[:, :, 0] + img[:, :, 1] + img[:, :, 2], 4)
             petit *= np.float32(1.0 / 3.0)
-            flou = upsample(gauss(petit, max(1.5, H / 600.0)), 4, (H, W))
+            flou = agrandir(gauss(petit, max(1.5, H / 600.0)), (H, W))
             img *= (1.0 - 0.10 * k)
             img += flou[..., None] * (0.42 * k)
             img += 0.035 * k                    # les noirs ne sont plus noirs
@@ -5743,10 +5817,7 @@ class Renderer:
             if not a.any():
                 continue
             k = gauss(a, self.sigma)
-            g4 = gauss(downsample(k, 4), 2.6 * ecart)
-            g8 = gauss(downsample(k, 8), 4.5 * ecart)
-            hc = (upsample(g4, 4, (h, w)) * (2.6 * pres)
-                  + upsample(g8, 8, (h, w)) * (3.4 * loin))
+            hc = halo_reduit(k, ecart, pres, loin, (h, w))
             np.clip(hc, 0, 3.0, out=hc)
             hc *= g
             halo[c] = hc
@@ -5887,7 +5958,7 @@ class Renderer:
         fond = self._fond_de(t, False)
         H, W = self.H, self.W
         lum = fond[:, :, 0] * 0.30 + fond[:, :, 1] * 0.55 + fond[:, :, 2] * 0.15
-        lum = upsample(gauss(downsample(lum, 8), 2.0), 8, (H, W))
+        lum = agrandir(gauss(downsample(lum, 8), 2.0), (H, W))
         beta = np.clip((lum - 0.28) / 0.30, 0.0, 1.0)
         beta *= beta * (3.0 - 2.0 * beta)
         for c in range(3):
@@ -5915,10 +5986,7 @@ class Renderer:
         k = float(np.clip(self.reflet, 0.0, 1.0))
         ecart = 1.45 - 0.9 * k
         pres, loin = 1.0 + 1.2 * (k - 0.5), 1.0 - 1.2 * (k - 0.5)
-        g4 = gauss(downsample(core, 4), 2.6 * ecart)
-        g8 = gauss(downsample(core, 8), 4.5 * ecart)
-        glow = (upsample(g4, 4, (H, W)) * 2.6 * pres
-                + upsample(g8, 8, (H, W)) * 3.4 * loin)
+        glow = halo_reduit(core, ecart, pres, loin, (H, W))
 
         inten = core * 1.15
         hot = np.clip(inten - 0.72, 0, None)
@@ -6025,8 +6093,12 @@ class Renderer:
         img *= ((scan * roll).astype(np.float32) * vign)[..., None]
         self._aberration(img)
 
-        img += upsample(rng.standard_normal((H // 4, W // 4)).astype(np.float32),
-                        4, (H, W))[..., None] * 0.011
+        # Le grain : un tirage au quart de la definition, agrandi en douceur.
+        # Recopie en blocs, il faisait une mosaique de carres de 4 pixels sur
+        # les aplats clairs. L'interpolation en reduit l'ecart-type aux deux
+        # tiers : 0,0167 au lieu de 0,011 lui rend sa force.
+        img += agrandir(rng.standard_normal((H // 4, W // 4)).astype(np.float32),
+                        (H, W))[..., None] * np.float32(0.0167)
 
         self._reactions_glitch(img, t, rng)
 

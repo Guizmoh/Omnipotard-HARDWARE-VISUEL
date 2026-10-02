@@ -1748,10 +1748,12 @@ python3 tools/mpc_performance.py morceau.mp3 --quality master
 | `net` | 4:4:4, CRF 16 | VLC, mpv, un logiciel de montage |
 | `master` | 4:4:4, CRF 10 | remonter la vidéo ensuite ; fichier lourd |
 
-Les trois partagent les mêmes réglages fins de `x264`, choisis pour ce genre
-d'image : du débit donné aux zones sombres — ici tout le fond —, et un
-déblocage négatif pour que le filtre anti-blocs cesse de lisser les traits fins
-en croyant corriger un artefact.
+Les trois partagent les mêmes réglages fins de `x264` : le débit réparti selon
+le détail de chaque zone (`aq-mode 2`), et le filtre anti-blocs à sa force
+normale. L'ancien réglage — débit donné en priorité aux zones sombres et
+anti-blocs affaibli, pour ménager les traits fins — laissait une grille de
+blocs de 8 pixels sans rien gagner sur le trait : voir *Plus de carrés dans la
+lumière*, plus bas.
 
 ### Vitesse du séquenceur
 
@@ -2030,6 +2032,62 @@ curseur d'instant passent **en bulle, au survol**, pour laisser la place à
 l'image ; la qualité garde une ligne, qui dit ce que donne celle qui est
 choisie. Un rendu terminé ne laisse plus traîner le bouton *Arrêter* à côté
 de *Télécharger*.
+
+## Plus de carrés dans la lumière
+
+En 1080p, même en qualité *net*, le néon et la lumière des coups se couvraient
+de petits carrés, nets surtout à l'encre sur un ciel clair. Deux causes, qui
+s'additionnaient.
+
+**Le moteur.** Les flous larges — le halo du trait, celui des coups, le halo
+laiteux, la clarté qui choisit entre encre et néon en mode auto — se calculent
+en quart ou en huitième de définition : un flou large n'a pas de détail à
+perdre, et c'est ce qui les rend abordables. Mais ils étaient ensuite
+**recopiés par blocs** : chaque pixel réduit devenait un carré de 4 × 4 ou
+8 × 8 pixels identiques. Le grain de l'image, tiré au quart, l'était aussi, et
+le fond « bruit » par carrés de 3. D'un carré au suivant l'écart est faible,
+mais c'est une marche franche : sur une image 1080p, les petites marches
+étaient en moyenne **quatre à neuf fois plus fortes** sur la grille de
+4 pixels qu'ailleurs.
+
+Ils sont désormais **agrandis par interpolation** : chaque pixel est la
+moyenne pondérée de ses quatre voisins réduits, le dégradé est continu. Sur les
+mêmes images, l'excès de marches sur la grille tombe de +300 à +840 % à +8 à
++15 % — la trace normale de l'interpolation, sans marche. Les deux flous du
+halo sont maintenant mêlés en quart de définition puis agrandis d'une seule
+passe, au lieu d'être agrandis chacun puis additionnés en pleine définition :
+l'image coûte le même temps de calcul qu'avant. La luminosité moyenne ne bouge
+pas (à 0,04 niveau près sur 255), le grain garde sa force — l'interpolation
+l'adoucit d'un tiers, son écart-type est compensé — et le hasard est tiré
+exactement comme avant : les glitchs tombent aux mêmes instants, aux mêmes
+endroits.
+
+**L'encodage.** `x264` était réglé pour des traits fins sur du noir : débit
+donné en priorité aux zones sombres (`aq-mode 3`) et filtre anti-blocs
+affaibli (`deblock -2`), pour qu'il ne lisse pas les traits. Mesuré sur
+45 images 1080p, chaque fichier décodé et comparé aux images brutes :
+
+| | ancien réglage | nouveau |
+| --- | --- | --- |
+| `x264` | aq-mode 3, deblock −2 | **aq-mode 2, deblock 0** |
+| grille de blocs de 8 px ajoutée | +18 à +36 % | **aucune** |
+| fidélité, néon sur noir, *net* | 40,29 dB | **40,45 dB** |
+| fidélité, encre sur un ciel, *net* | 40,47 dB | **40,63 dB** |
+| fidélité, néon sur noir, *compatible* | 34,94 dB | **34,97 dB** |
+| erreur sur le trait, néon sur noir | 5,27 | **5,17** |
+| poids d'une seconde, néon sur noir | 2,72 Mo | **2,50 Mo** |
+
+L'anti-blocs affaibli ne protégeait donc rien : il laissait passer les bords
+de blocs de l'encodeur, sur fond noir comme sur un ciel. Un anti-blocs à −1
+garde une grille plus faible (+10 %) pour un trait à peine meilleur (5,14) ;
+on a préféré n'en garder aucune.
+
+**Le fond vidéo**, lui, reste doux par choix : au réglage par défaut de
+*netteté du fond*, il est lu au tiers de la définition et flouté — le faisceau
+étant additif, un fond net et clair lui mangerait son contraste. Pour un ciel
+qui doit rester précis, feuilles et contours de nuages compris, montez la
+**netteté du fond** : à partir de 0,75 la vidéo est lue en pleine définition,
+et à 1 elle n'est plus floutée du tout.
 
 ## STUDIO WEB — une page HTML, rien a installer
 
