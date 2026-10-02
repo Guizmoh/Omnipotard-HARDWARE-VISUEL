@@ -3513,6 +3513,47 @@ def check_deps():
              "morceaux et encoder les videos.\n  A installer avec :  %s" % aide)
 
 
+# Ce que les versions passees ont laisse et qui n'existe plus. La mise a jour
+# remplace et ajoute des fichiers, elle n'en retire aucun — et elle ne se
+# remplace pas elle-meme : c'est donc le studio qui fait le menage.
+OBSOLETES = ("tools/studio_v2.py",)
+LANCEURS_OBSOLETES = ("Lancer-le-studio-v2.bat", "Lancer-le-studio-v2.command")
+
+
+def retirer_obsoletes(par_v2=False):
+    """Retire les fichiers des versions passees qui n'ont plus d'usage.
+
+    Un lanceur ne s'efface pas pendant qu'il tourne : Windows et bash lisent
+    leur script au fur et a mesure, et le retirer sous leurs pieds finirait
+    sur une erreur. Lance par l'un d'eux, le studio le garde pour la fois
+    suivante et dit lequel ouvrir.
+    """
+    partis = []
+    for rel in OBSOLETES + (() if par_v2 else LANCEURS_OBSOLETES):
+        p = os.path.join(ROOT, *rel.split("/"))
+        if os.path.isfile(p):
+            try:
+                os.remove(p)
+                partis.append(rel)
+            except OSError:
+                pass
+    cache = os.path.join(ROOT, "tools", "__pycache__")
+    if os.path.isdir(cache):
+        for n in os.listdir(cache):
+            if n.startswith("studio_v2."):
+                try:
+                    os.remove(os.path.join(cache, n))
+                except OSError:
+                    pass
+    if partis:
+        print("anciens fichiers retires (la v2 n'existe plus) : %s"
+              % ", ".join(partis))
+    if par_v2:
+        print("Ce lanceur « v2 » n'est plus utile : la prochaine fois, ouvrez "
+              "Lancer-le-studio. Il sera retire a ce moment-la.")
+    return partis
+
+
 def main():
     ap = argparse.ArgumentParser(description="Studio local Omnipotard")
     ap.add_argument("--port", type=int, default=8765)
@@ -3526,6 +3567,7 @@ def main():
     args = ap.parse_args()
 
     check_deps()
+    retirer_obsoletes(par_v2=args.v2)
     lancer_exemples()
     os.makedirs(UPLOADS, exist_ok=True)
     if args.track:

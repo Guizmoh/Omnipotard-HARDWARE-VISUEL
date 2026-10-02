@@ -1940,6 +1940,13 @@ onglets. **Il n'en reste qu'une, la page de base** — `Lancer-le-studio.bat`,
 `http://127.0.0.1:8765`. Les anciens lanceurs v2 ont disparu ; un ancien favori
 vers `/v1` ou `/v2` ramène à la page.
 
+La mise à jour remplace et ajoute des fichiers mais n'en retire aucun, et elle
+ne se remplace pas elle-même. C'est donc **le studio qui fait le ménage** à son
+démarrage : il retire `tools/studio_v2.py` et les deux lanceurs v2. Ouvert par
+l'un de ces lanceurs, il le garde pour cette fois — on n'efface pas un script
+en cours d'exécution, Windows et bash le lisent au fur et à mesure — et dit
+d'ouvrir `Lancer-le-studio` la fois suivante.
+
 Ce que seule la v2 avait est passé dans la page de base :
 
 ### Caler la mélodie au millième
