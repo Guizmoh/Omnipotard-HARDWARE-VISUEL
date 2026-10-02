@@ -613,8 +613,13 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
         cmd = entree + APERCU["video"] + APERCU["audio"] + ["-shortest", out]
     else:
         q = QUALITES.get(quality, QUALITES["compatible"])
+        # « medium » plutot que « slow » : mesure contre les images brutes du
+        # moteur, 33,27 dB contre 33,30 et un fichier 1 % plus petit — rien
+        # qui se voie —, pour un encodage 32 % plus court. Et l'encodeur se
+        # partage les coeurs avec le calcul des images : chaque seconde qu'il
+        # rend leur revient.
         cmd = entree + [
-            "-c:v", "libx264", "-preset", "slow",
+            "-c:v", "libx264", "-preset", "medium",
             "-crf", str(int(crf) if crf is not None else q["crf"]),
             "-pix_fmt", q["pix"], "-profile:v", q["profil"],
             "-movflags", "+faststart",

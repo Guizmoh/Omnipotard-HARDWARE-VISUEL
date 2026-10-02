@@ -275,6 +275,28 @@ Il n'y a donc pas de gain facile à prendre. Les vrais leviers existent déjà :
 le rendu parallèle, et le préréglage **320p / 12 ips** pour les essais, quinze
 fois plus rapide.
 
+**Revu depuis, et trois gains trouvés** — tous au bit près, vérifiés sur
+24 images de référence (une seule valeur sur 1,6 million diffère d'un
+niveau, dans le halo laiteux) :
+
+| où | avant | après |
+| --- | --- | --- |
+| le cœur blanc, ajouté couleur par couleur au lieu d'une image temporaire | 23 ms | 3 ms |
+| le dédoublement du trait (quand il est actif) : deux maximums au lieu d'une réduction sur trois couleurs, et pas d'image empilée | 111 ms | 40 ms |
+| la courbe gamma finale, calculée sur place | 26 ms | 18 ms |
+
+Une image 1080p moyenne passe de **486 à 386 ms** (−21 %). Et l'encodeur
+passe du préréglage x264 *slow* à *medium* : mesuré contre les images brutes
+du moteur, 33,27 dB contre 33,30 et un fichier 1 % plus petit, rien qui se
+voie, pour un encodage 32 % plus court. Comme il partage les cœurs avec le
+calcul des images, tout ce qu'il rend leur revient : **un rendu 1080p complet
+passe de 62,6 à 48,3 s** pour dix secondes de vidéo sur quatre cœurs (−23 %).
+
+Essayé et écarté : une table pour la courbe gamma (6 ms de mieux, mais 0,08 %
+des pixels changent d'un niveau), et l'envoi des images aux tâches en flux
+continu plutôt que par paquets de 24 (10,2 contre 10,1 images par seconde :
+rien).
+
 ## La machine
 
 Quatre machines sont dessinées : la **MPC Live III**, le **MiniFreak** (clavier
