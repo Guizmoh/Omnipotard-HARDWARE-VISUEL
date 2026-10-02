@@ -1369,6 +1369,49 @@ maintenant des fonctions nommées, et le moteur ne garde que le **nom** de sa
 machine — le plan, lui, vit dans le registre. Vérifié : les trois machines
 rendent les mêmes images en fork, en spawn et sur un seul processus.
 
+### La lumière des coups : éclat, couleur, texture des touches
+
+Sur la MPC, la SP-404 et le Digitakt, la batterie ne se voyait presque pas :
+un pad frappé recevait cinq à vingt fois moins de lumière qu'une touche du
+MiniFreak (cinq lignes de points là où une touche a une nappe pleine), et la
+moitié des coups étant faibles, ils disparaissaient. Un pad reçoit maintenant
+**autant de lumière qu'une touche de clavier de même surface** — mesuré : 1,3
+à 1,5 fois, son bord compris. Le carton « Lumière des coups » du studio (juste
+sous la machine) le règle :
+
+| réglage | ce qu'il fait |
+|---|---|
+| éclat des pads frappés | 0 à 3 ; 1 = une touche de clavier jouée. Ne touche à rien d'autre du tracé |
+| couleur de la lumière | celle du trait ; une couleur au choix ; une par instrument (grosse caisse rouge, caisse claire jaune, charley cyan… et sur le clavier une teinte par note de la gamme) ; au hasard à chaque coup |
+| texture des touches allumées | nappe pleine, lignes, hachures, quadrillage, points, cadres emboîtés, éclat au centre, contour épais |
+
+Chaque texture porte, à éclat égal, la même lumière qu'une nappe de même
+surface : changer de texture change le dessin, pas la force. Un coup qui
+retombe s'éteint en fondu : il était coupé net sous 0,05, et le pad
+disparaissait d'une image à l'autre alors qu'il gardait encore un quart de son
+éclat.
+
+**Pourquoi la couleur ne blanchit pas.** Le trait blanchit quand il est fort :
+chaque canal sature à son tour, puis un cœur blanc s'y ajoute. Une couleur
+choisie n'y survivait pas — un orange frappé à fond sortait en (1 ; 0,75 ;
+0,25), un jaune, et rouge, cyan ou violet finissaient du même blanc. La
+lumière des coups a donc ses propres faisceaux, un par couleur primaire, mis
+en couleur à part : chaque point est ramené à ce que son canal le plus fort
+tienne dans l'écran (la teinte reste), le halo reste plus bas que le cœur
+(sinon une rangée de touches allumées ne faisait qu'une bande), seul le cœur
+des coups les plus forts pâlit un peu, et le trait s'efface sous la lumière.
+Le même orange sort maintenant en (1 ; 0,56 ; 0,15). Ce calcul ne se fait que
+dans le cadre des pads allumés : il ajoute 30 % au temps d'une image en
+couleur, rien en « celle du trait ».
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --machine mpc --eclat-pads 1.5 \
+    --couleur-coups instrument --texture-touches hachures
+python3 tools/mpc_performance.py morceau.mp3 --couleur-coups libre \
+    --couleur-coups-libre "#ff7a1f"
+python3 tools/verifier_lumiere.py      # éclat, couleurs, textures, mesurés
+```
+
 ### Le néon : éclairage, surface qui le reflète, tube de verre
 
 Ce qu'on voit autour du trait n'est pas le trait : c'est sa lumière renvoyée

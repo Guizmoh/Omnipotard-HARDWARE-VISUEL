@@ -443,9 +443,9 @@ def verifier_image():
         champ = {}
         couleur = r.colorize
 
-        def garder(f, t, *a):
+        def garder(f, t, *a, **k):
             champ["f"] = f
-            return couleur(f, t, *a)
+            return couleur(f, t, *a, **k)
         r.colorize = garder
         mach_ = O.MACHINES[mach]
         zones = [O.MF_CLAV] if genre == "piano" else list(mach_["pads"])

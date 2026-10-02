@@ -36,7 +36,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.1"
+VERSION = "2026-10-02.2"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -296,6 +296,26 @@ AIDE = {
                  "melodie ne se joue que sur le MiniFreak : la MPC et le "
                  "Digitakt n'ont pas de clavier, leurs pads restent a la "
                  "batterie.",
+    "eclatPads": "La lumiere des pads frappes — et des touches du MiniFreak "
+                 "quand les coups les allument. A 1 un pad recoit autant de "
+                 "lumiere qu'une touche de clavier jouee ; montez-le si la "
+                 "batterie se voit mal, baissez-le si elle eblouit. Le reste "
+                 "du trace ne bouge pas.",
+    "couleurCoups": "La couleur de ce qui s'allume a chaque coup. « celle du "
+                    "trait » garde la palette ; « une couleur au choix » "
+                    "prend celle du nuancier ; « une par instrument » met la "
+                    "grosse caisse en rouge, la caisse claire en jaune, le "
+                    "charley en cyan, et sur le clavier une teinte par note "
+                    "de la gamme ; « au hasard » en tire une nouvelle a "
+                    "chaque coup.",
+    "couleurCoupsLibre": "La couleur des coups quand « une couleur au "
+                         "choix » est retenue.",
+    "textureTouches": "Ce qui remplit une touche ou un pad allume : la nappe "
+                      "pleine du clavier, des lignes, des hachures, un "
+                      "quadrillage, des points, des cadres emboites, un "
+                      "eclat qui brille au centre, ou un contour epais. A "
+                      "eclat egal, toutes portent a peu pres la meme "
+                      "lumiere.",
     "midiOffset": "Avance ou retarde le fichier MIDI, en secondes, par "
                   "rapport au calage trouve tout seul. A utiliser si les "
                   "touches s'allument un peu avant ou un peu apres la "
@@ -482,6 +502,8 @@ CHAMPS = {
     "neon": "neon", "reflet": "reflet", "tube": "tube", "bg_anim": "bgAnim",
     "passage": "passage", "passage_turb": "passageTurb",
     "midi_force": "midiForce", "midi_offset": "midiOffset",
+    "eclat_pads": "eclatPads", "couleur_coups": "couleurCoups",
+    "texture_touches": "textureTouches",
     "midi_tempo": "midiTempo", "midi_type": "midiType",
     "vignettage": "vignettage", "scanlines": "scanlines",
     "aberration": "aberration",
@@ -1055,6 +1077,80 @@ class Beam:
                           weights=np.concatenate(self.wts),
                           minlength=self.h * self.w)
         return buf.reshape(self.h, self.w).astype(np.float32)
+
+
+# La lumiere des coups en couleur : le plus haut que monte son halo (le coeur
+# monte a 1) ; le blanc qui gagne le coeur des coups forts — au-dela de quel
+# eclat, a quel rythme, jusqu'a combien ; et la part du trait qui s'efface
+# sous elle. Mesure sur un orange (1 ; 0,48 ; 0,12) frappe a fond : avec
+# 0,4 de blanc et un trait efface aux deux tiers, il sortait a (1 ; 0,75 ;
+# 0,25), un jaune. Il sort maintenant a (1 ; 0,56 ; 0,15).
+HALO_COUPS = 0.6
+BLANC_COUPS = (1.2, 0.25, 0.15)
+OCCULTE = 0.9
+
+
+class FaisceauCouleur:
+    """La lumiere des coups quand elle n'a pas la couleur du trait.
+
+    Le trait est un seul faisceau, mis en couleur d'un bloc par la palette.
+    Une lumiere d'une autre couleur — rouge sur la grosse caisse, cyan sur le
+    charley — ne peut pas s'y melanger : elle a ses trois faisceaux a elle,
+    un par couleur primaire, que la mise en couleur traite comme le trait —
+    coeur, halo, blanc au plus fort — mais dans leur teinte. Trois et non un
+    par couleur : le cout ne depend pas du nombre de teintes a l'image.
+    """
+
+    def __init__(self, h, w, gain=1.0):
+        self.h, self.w = h, w
+        self.canaux = [Beam(h, w, gain) for _ in range(3)]
+        self.vide = True
+
+    def add(self, px, py, weight, rgb, mul=1.0):
+        for c, b in zip(rgb, self.canaux):
+            if c > 0.004:
+                b.mul = mul
+                b.add(px, py, weight * c)
+                self.vide = False
+
+    def render(self, marge=None):
+        """Les trois canaux, dans le cadre des points allumes elargi de
+        `marge` pixels — par defaut la portee du halo : (y0, x0, tableau
+        3 x h x w), ou None si rien ne s'est allume.
+
+        Le cadre seulement : les pads frappes tiennent dans un coin de
+        l'image, et trois canaux pleine image coutaient autant que le trait.
+        """
+        if self.vide:
+            return None
+        H, W = self.h, self.w
+        marge = int(0.16 * H) + 8 if marge is None else int(marge)
+        tous = np.concatenate([i for b in self.canaux for i in b.idx])
+        ys, xs = tous // W, tous % W
+        y0 = max(0, int(ys.min()) - marge) // 8 * 8
+        y1 = min(H, ((int(ys.max()) + marge) // 8 + 1) * 8)
+        x0 = max(0, int(xs.min()) - marge) // 8 * 8
+        x1 = min(W, ((int(xs.max()) + marge) // 8 + 1) * 8)
+        h, w = y1 - y0, x1 - x0
+        out = np.zeros((3, h, w), dtype=np.float32)
+        for c, b in enumerate(self.canaux):
+            if not b.idx:
+                continue
+            i = np.concatenate(b.idx)
+            j = (i // W - y0) * w + (i % W - x0)
+            out[c] = np.bincount(j, weights=np.concatenate(b.wts),
+                                 minlength=h * w).reshape(h, w)
+        return y0, x0, out
+
+
+def teinte(h, s=0.85, v=1.0):
+    """Une couleur du cercle chromatique, h de 0 a 1 : (r, g, b) de 0 a 1."""
+    h = (h % 1.0) * 6.0
+    i = int(h)
+    f = h - i
+    p, q, u = v * (1 - s), v * (1 - s * f), v * (1 - s * (1 - f))
+    return ((v, u, p), (q, v, p), (p, v, u), (p, q, v), (u, p, v),
+            (v, p, q))[i % 6]
 
 
 # ==========================================================================
@@ -1899,6 +1995,194 @@ def _remplir_sp(k):
 
 
 # ==========================================================================
+#  La lumiere d'une touche frappee : sa texture
+#
+#  Une touche allumee est une surface de points, et la forme de cette surface
+#  est un choix : une nappe pleine, des lignes, une matrice de LED... Toutes
+#  portent la meme lumiere par unite de surface — celle d'une touche du
+#  MiniFreak allumee, la reference — pour que changer de texture ne change
+#  pas la force du coup.
+# ==========================================================================
+
+TEXTURES_TOUCHES = ("nappe", "lignes", "hachures", "quadrillage", "points",
+                    "cadres", "eclat", "contour")
+
+# La couleur de la lumiere a chaque coup : celle du trait, une couleur
+# choisie, celle de l'instrument (et, sur le clavier, de la note), ou une
+# nouvelle a chaque coup.
+COULEURS_COUPS = ("trait", "libre", "instrument", "arc-en-ciel")
+
+# La part de la lumiere de reference que garde chaque texture. Une texture
+# faite de traits fins concentre sa lumiere, que le halo fait paraitre plus
+# vive : a lumiere egale, elle eblouit. Reglees a l'oeil sur une planche des
+# huit, sur les quatre machines.
+GAIN_TEXTURE = {"nappe": 1.0, "lignes": 1.0, "hachures": 1.0,
+                "quadrillage": 1.0, "points": 1.0, "cadres": 0.9,
+                "eclat": 0.8, "contour": 0.85}
+
+
+def _aire(poly):
+    """L'aire d'un polygone (formule du lacet)."""
+    x, y = poly[:, 0], poly[:, 1]
+    return 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+
+
+def _dans(P, poly):
+    """Les points de P qui tombent dans le polygone : on lance un rayon vers la
+    droite et l'on compte les bords qu'il traverse."""
+    x, y = P[:, 0], P[:, 1]
+    dedans = np.zeros(len(P), dtype=bool)
+    xs, ys = poly[:, 0], poly[:, 1]
+    for x1, y1, x2, y2 in zip(xs, ys, np.roll(xs, 1), np.roll(ys, 1)):
+        if y1 == y2:
+            continue
+        dedans ^= (((y1 > y) != (y2 > y))
+                   & (x < (x2 - x1) * (y - y1) / (y2 - y1) + x1))
+    return dedans
+
+
+_REFERENCE = []
+
+
+def lumiere_surface():
+    """La lumiere par unite de surface d'une touche du MiniFreak frappee a 1 :
+    sa nappe et ses traits, rapportes a sa surface."""
+    if not _REFERENCE:
+        _r, c, f, tr = MF_CLAVIER[0]
+        _REFERENCE.append((len(f) * ECLAT_TOUCHE + len(tr) * ECLAT_TRAIT)
+                          / _aire(np.asarray(c, dtype=np.float64)))
+    return _REFERENCE[0]
+
+
+def _ligne(a, b, pas=STEP):
+    a, b = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
+    n = max(2, int(np.hypot(*(b - a)) / pas) + 1)
+    return a + (b - a) * np.linspace(0.0, 1.0, n)[:, None]
+
+
+def _anneau(poly, pas=STEP):
+    """Un contour ferme, echantillonne au pas du faisceau."""
+    return resample(poly, pas, closed=True)[0]
+
+
+def _motif(genre, x0, y0, x1, y1, poly=None):
+    """Les points d'une texture dans un rectangle, et le poids relatif de
+    chacun. `poly`, s'il est donne, est la forme exacte de la touche : les
+    textures qui en suivent le bord (cadres, contour) s'en servent."""
+    w, h = x1 - x0, y1 - y0
+    cx, cy = (x0 + x1) * 0.5, (y0 + y1) * 0.5
+    if genre in ("nappe", "eclat"):
+        P = _grille((x0, y0, x1, y1), 0.0)
+        if genre == "eclat":
+            # le coeur brille, les bords s'eteignent
+            d = np.hypot((P[:, 0] - cx) / (w * 0.5), (P[:, 1] - cy) / (h * 0.5))
+            return P, np.exp(-(d / 0.62) ** 2)
+        # la nappe du MiniFreak : une surface, et des traits qui la rayent
+        R = [_ligne((x0, y), (x1, y))
+             for y in np.arange(y0 + TRAIT_SERRE * 0.5, y1, TRAIT_SERRE)]
+        if not R:
+            return P, np.ones(len(P))
+        R = np.vstack(R)
+        part = 0.14                     # la part des traits, comme sur le clavier
+        return (np.vstack([P, R]),
+                np.concatenate([np.full(len(P), (1 - part) / len(P)),
+                                np.full(len(R), part / len(R))]))
+    if genre == "lignes":
+        P = [_ligne((x0, y), (x1, y)) for y in np.arange(y0 + 0.009, y1, 0.018)]
+    elif genre == "hachures":
+        e = 0.020 * math.sqrt(2.0)
+        P = []
+        for c in np.arange(x0 - y1 + e * 0.5, x1 - y0, e):
+            ya, yb = max(y0, x0 - c), min(y1, x1 - c)
+            if yb - ya > 0.004:
+                P.append(_ligne((ya + c, ya), (yb + c, yb)))
+    elif genre == "quadrillage":
+        P = ([_ligne((x0, y), (x1, y)) for y in np.arange(y0 + 0.012, y1, 0.024)]
+             + [_ligne((x, y0), (x, y1)) for x in np.arange(x0 + 0.012, x1, 0.024)])
+    elif genre == "points":
+        a = np.linspace(0.0, 2.0 * math.pi, 8, endpoint=False)
+        tache = np.vstack([[0.0, 0.0], np.stack([0.0026 * np.cos(a),
+                                                 0.0026 * np.sin(a)], axis=1)])
+        P = [tache + (x, y) for x in np.arange(x0 + 0.011, x1, 0.022)
+             for y in np.arange(y0 + 0.011, y1, 0.022)]
+    elif genre in ("cadres", "contour"):
+        # des contours emboites : la forme de la touche, retrecie vers son
+        # centre — des cadres espaces, ou trois serres en un bord epais
+        forme = (poly if poly is not None
+                 else rrect_pts(x0, y0, x1, y1, min(w, h) * 0.16))
+        centre = forme.mean(axis=0)
+        if genre == "cadres":
+            n = max(1, int(min(w, h) * 0.5 / 0.016))
+            echelles = [1.0 - k / float(n + 1) for k in range(n)]
+        else:
+            echelles = [1.0, 1.0 - 0.010 / max(min(w, h), 1e-6),
+                        1.0 - 0.020 / max(min(w, h), 1e-6)]
+        P = [_anneau(centre + (forme - centre) * e) for e in echelles if e > 0.05]
+    else:
+        raise ValueError(genre)
+    P = np.vstack(P) if len(P) else np.zeros((0, 2))
+    return P, np.ones(len(P))
+
+
+_BORDS = {}
+
+
+def bord_pad(r, rayon):
+    """Le bord arrondi d'un pad, au pas du faisceau : un trait plein."""
+    cle = (tuple(round(float(v), 4) for v in r), round(float(rayon), 4))
+    b = _BORDS.get(cle)
+    if b is None:
+        if len(_BORDS) > 4000:
+            _BORDS.clear()
+        b = _BORDS[cle] = _anneau(rrect_pts(*r, r=rayon))
+    return b
+
+
+_TEXTURES = {}
+
+
+def texture_touche(rect, genre, poly=None, marge=0.008):
+    """Les points d'une touche allumee dans la texture choisie, et leur poids.
+
+    Les poids sont regles pour que la touche porte, a l'eclat 1, la lumiere
+    d'une touche du MiniFreak de meme surface (fois GAIN_TEXTURE). `poly` est
+    la forme exacte de la touche quand ce n'est pas un rectangle — une
+    blanche echancree : les points qui en sortent sont oubliees.
+    """
+    genre = genre if genre in TEXTURES_TOUCHES else "nappe"
+    sig = (None if poly is None else
+           (len(poly), round(float(np.sum(poly[:, 0])), 4),
+            round(float(np.sum(poly[:, 1])), 4)))
+    cle = (genre, tuple(round(float(v), 4) for v in rect), sig)
+    deja = _TEXTURES.get(cle)
+    if deja is not None:
+        return deja
+    x0, y0, x1, y1 = rect
+    x0, y0, x1, y1 = x0 + marge, y0 + marge, x1 - marge, y1 - marge
+    if x1 - x0 < 0.01 or y1 - y0 < 0.01:
+        out = (np.zeros((0, 2)), np.zeros(0))
+    else:
+        P, w = _motif(genre, x0, y0, x1, y1, poly)
+        sonde = _grille((x0, y0, x1, y1), 0.0)
+        if poly is not None:
+            garde = _dans(P, poly)
+            P, w = P[garde], w[garde]
+            aire = float(_dans(sonde, poly).sum()) * TOUCHE_SERRE ** 2
+        else:
+            aire = (x1 - x0) * (y1 - y0)
+        total = float(w.sum())
+        if total <= 0 or not len(P):
+            out = (np.zeros((0, 2)), np.zeros(0))
+        else:
+            w = w * (lumiere_surface() * aire * GAIN_TEXTURE[genre] / total)
+            out = (P, w)
+    if len(_TEXTURES) > 4000:
+        _TEXTURES.clear()
+    _TEXTURES[cle] = out
+    return out
+
+
+# ==========================================================================
 #  SP-404 MKII
 #
 #  La seule des quatre qui soit **plus haute que large** : 178 mm sur 213 mm,
@@ -2047,6 +2331,7 @@ MACHINES = {
         "build": build_mpc,
         "ecran": SCREEN,
         "pads": [pad_rect(k // 4, k % 4) for k in range(16)],
+        "pads_rayon": 0.030, "pads_biseau": (0.022, 0.020),
         "remplir": pad_fill,
         "pas": [step_rect(k) for k in range(16)],
         "potards": [(cx, cy, QLINK_R) for cx, cy in QLINK],
@@ -2105,6 +2390,7 @@ MACHINES = {
         # les seize pads font aussi les pas : la machine a bien un sequenceur
         # de motifs, et il se relit sur cette grille-la
         "pads": [sp_pad(k) for k in range(16)],
+        "pads_rayon": 0.020, "pads_biseau": (0.016, 0.014),
         "remplir": _remplir_sp,
         "pas": [sp_pad(k) for k in range(16)],
         "potards": [(cx, cy, SP_KNOB_R) for cx, cy in SP_KNOBS],
@@ -2119,6 +2405,7 @@ MACHINES = {
         "ecran": DK_ECRAN,
         # les seize declencheurs servent de pads et de pas, comme sur la vraie
         "pads": [dk_trig(k) for k in range(16)],
+        "pads_rayon": 0.022, "pads_biseau": (0.016, 0.015),
         "remplir": _remplir_dk,
         "pas": [dk_trig(k) for k in range(16)],
         "potards": [(cx, cy, DK_ENC_R) for cx, cy in DK_ENC],
@@ -2517,6 +2804,24 @@ FAMILLES = {
     "tout": tuple(range(PADS_REELS)),
 }
 INSTRUMENTS = tuple(FAMILLES)
+
+# Le pad d'un coup releve dans le son -> sa famille, pour lui donner sa
+# couleur. Les pads que l'analyse n'emploie pas tombent dans les percussions.
+PAD_FAMILLE = {pad: fam for fam, pads in FAMILLES.items() if fam != "tout"
+               for pad in pads}
+
+
+def famille_gm(hauteur):
+    """La famille d'une note de batterie General MIDI : 36 la grosse caisse,
+    38 la caisse claire, 42 le charley ferme..."""
+    h = int(hauteur)
+    if h in (35, 36):
+        return "grosse caisse"
+    if h in (37, 38, 39, 40):
+        return "caisse claire"
+    if h in (42, 44, 46, 49, 51, 52, 53, 55, 57, 59):
+        return "charley"          # charleys et cymbales : le metal
+    return "percussions"          # toms, cloches, tout le reste
 
 
 # ==========================================================================
@@ -3237,19 +3542,20 @@ class Renderer:
         i0 = np.clip(i0, 0, self.nw - 2)
         return amp * (self.wave[i0] * (1.0 - f) + self.wave[i0 + 1] * f)
 
-    def pad_flashes(self, t):
+    def pad_flashes(self, t, detail=False):
         dt = t - self.ev_t
         m = (dt >= 0.0) & (dt < 1.6) & self.ev_reel
-        out = {}
+        out, quand = {}, {}
         if not np.any(m):
-            return out
+            return (out, quand) if detail else out
         v = self.ev_f[m] * np.exp(-self.ev_d[m] * dt[m])
-        for pad, val in zip(self.ev_pad[m], v):
-            if val > 0.02:
-                out[int(pad)] = max(out.get(int(pad), 0.0), float(val))
-        return out
+        for pad, val, t0 in zip(self.ev_pad[m], v, self.ev_t[m]):
+            if val > 0.02 and float(val) > out.get(int(pad), 0.0):
+                out[int(pad)] = float(val)
+                quand[int(pad)] = float(t0)
+        return (out, quand) if detail else out
 
-    def _notes_actives(self, t):
+    def _notes_actives(self, t, avec_debut=False):
         """Les notes qui sonnent a l'instant t : leur hauteur et leur eclat.
 
         Commun aux deux lectures du fichier — melodie sur un clavier, batterie
@@ -3326,9 +3632,11 @@ class Renderer:
                 u = np.clip((d - mt - plein) / (0.7 * plein), 0.0, 1.0)
                 v[m] *= CREUX_FOND + (1.0 - CREUX_FOND) * u
         v *= self.midi_force
+        if avec_debut:
+            return haut, v, deb
         return haut, v
 
-    def notes_midi(self, t, touches, note0):
+    def notes_midi(self, t, touches, note0, detail=False):
         """Lecture melodique : chaque note allume la touche de sa hauteur.
 
         Une hauteur qui tombe hors du clavier y est ramenee par octaves : le
@@ -3336,10 +3644,10 @@ class Renderer:
         permet a un clavier de trois octaves de rendre une melodie ecrite sur
         cinq.
         """
-        actives = self._notes_actives(t)
+        actives = self._notes_actives(t, avec_debut=True)
         if actives is None:
-            return {}
-        haut, v = actives
+            return ({}, {}) if detail else {}
+        haut, v, deb = actives
         n = len(touches)
         k = haut.astype(np.int64) + self.midi_transpose - int(note0)
         bas = k < 0
@@ -3349,13 +3657,15 @@ class Renderer:
         if np.any(trop):
             k = np.where(trop, k - 12 * ((k - n) // 12 + 1), k)
         garde = (k >= 0) & (k < n) & (v > 0.02)
-        out = {}
-        for kk, vv in zip(k[garde], v[garde]):
+        out, quoi = {}, {}
+        for kk, vv, hh, dd in zip(k[garde], v[garde], haut[garde], deb[garde]):
             kk = int(kk)
-            out[kk] = max(out.get(kk, 0.0), float(vv))
-        return out
+            if float(vv) > out.get(kk, 0.0):
+                out[kk] = float(vv)
+                quoi[kk] = (int(hh), float(dd))
+        return (out, quoi) if detail else out
 
-    def notes_batterie(self, t, n):
+    def notes_batterie(self, t, n, detail=False):
         """Lecture batterie : chaque instrument du fichier prend un pad.
 
         Dans un fichier de batterie, la hauteur ne dit pas une note mais un
@@ -3374,18 +3684,20 @@ class Renderer:
         premier. La transposition n'entre pas en jeu : transposer une batterie
         changerait d'instrument, pas de hauteur.
         """
-        actives = self._notes_actives(t)
+        actives = self._notes_actives(t, avec_debut=True)
         if actives is None or n <= 0:
-            return {}
-        haut, v = actives
+            return ({}, {}) if detail else {}
+        haut, v, deb = actives
         table = np.unique(self.midi[:, 2])
         k = np.searchsorted(table, haut) % n
-        out = {}
-        for kk, vv in zip(k, v):
+        out, quoi = {}, {}
+        for kk, vv, hh, dd in zip(k, v, haut, deb):
             if vv > 0.02:
                 kk = int(kk)
-                out[kk] = max(out.get(kk, 0.0), float(vv))
-        return out
+                if float(vv) > out.get(kk, 0.0):
+                    out[kk] = float(vv)
+                    quoi[kk] = (int(hh), float(dd))
+        return (out, quoi) if detail else out
 
     def stutter_time(self, t):
         """L'instant reellement dessine, quand le begaiement est actif.
@@ -3714,6 +4026,13 @@ class Renderer:
     # touches d'un clavier, ou une batterie, dont les instruments vont sur les
     # pads — de n'importe quelle machine, et plus seulement du clavier.
     midi_type = "piano"
+    # La lumiere des coups : son eclat sur les pads, sa couleur, la texture
+    # des touches allumees (voir FaisceauCouleur et texture_touche).
+    eclat_pads = 1.0
+    couleur_coups = "trait"
+    couleur_coups_libre = (1.0, 0.48, 0.12)
+    texture_touches = "nappe"
+    _accent = None
     # La matiere de la dalle. A 1 on retrouve exactement la dalle d'origine ;
     # a 0 elle est plate. L'aberration, elle, est nouvelle donc eteinte.
     vignettage = 1.0
@@ -4071,7 +4390,8 @@ class Renderer:
         px, py = self.to_px(P, collapse)
         beam.add(px, py, w)
 
-    def _touche(self, beam, r, remplissage, w, collapse, melt, t, contour=None, traits=None):
+    def _touche(self, beam, r, remplissage, w, collapse, melt, t, contour=None,
+                traits=None, couleur=None, texture=None):
         """Une touche enfoncee : son remplissage, et son contour epaissi.
 
         Le halo seul ne distingue pas une touche de sa voisine — sur trente-
@@ -4085,17 +4405,87 @@ class Renderer:
 
         `traits` repasse une seconde couche, plus espacee, par-dessus la
         nappe : la surface reste pleine, mais le trait s'y voit encore.
+
+        `texture`, quand une autre que la nappe est choisie, remplace la nappe
+        et ses traits : (points, poids) de texture_touche. `couleur` envoie la
+        touche dans la lumiere des coups (voir FaisceauCouleur).
         """
-        self._dyn(beam, remplissage, ECLAT_TOUCHE * w, collapse, melt, t)
-        if traits is not None:
-            self._dyn(beam, traits, ECLAT_TRAIT * w, collapse, melt, t)
+        if texture is not None:
+            P, poids = texture
+            if len(P):
+                self._lumiere(beam, P, poids * w, couleur, collapse, melt, t)
+        else:
+            self._lumiere(beam, remplissage, ECLAT_TOUCHE * w, couleur,
+                          collapse, melt, t)
+            if traits is not None:
+                self._lumiere(beam, traits, ECLAT_TRAIT * w, couleur,
+                              collapse, melt, t)
         cont = rrect_pts(*r, r=0.012) if contour is None else contour
-        self._dyn(beam, cont, 3.20 * w, collapse, melt, t)
+        self._lumiere(beam, cont, 3.20 * w, couleur, collapse, melt, t)
         # le contour repasse une seconde fois, legerement decale : c'est ce qui
         # donne au trait son epaisseur, la ou un simple gain ne fait qu'elargir
         # le halo
-        self._dyn(beam, cont + np.array([0.0, 0.004]), 1.90 * w,
-                  collapse, melt, t)
+        self._lumiere(beam, cont + np.array([0.0, 0.004]), 1.90 * w, couleur,
+                      collapse, melt, t)
+
+    def _lumiere(self, beam, P, w, couleur, collapse, melt, t):
+        """Comme _dyn, mais dans la couleur du coup quand elle n'est pas celle
+        du trait : la lumiere part alors dans le faisceau des couleurs."""
+        if couleur is None or self._accent is None:
+            return self._dyn(beam, P, w, collapse, melt, t)
+        if melt >= 0.99:
+            return
+        w = w * self._cam_z
+        if melt > 0:
+            P = self._melt(P, melt, t)
+            w = w * (1.0 - melt)
+        px, py = self.to_px(P, collapse)
+        self._accent.add(px, py, w, couleur, beam.mul)
+
+    def _couleur_coup(self, genre, valeur, instant):
+        """La couleur d'un coup, ou None pour celle du trait.
+
+        `genre` dit d'ou vient le coup : « pad » (releve dans le son ; valeur
+        = le pad), « batterie » (une note de batterie du fichier ; valeur = sa
+        hauteur General MIDI) ou « note » (une note de melodie ; valeur = sa
+        hauteur). `instant` est celui du coup : en arc-en-ciel, c'est lui qui
+        tire la teinte, si bien qu'un coup garde sa couleur tant qu'il brille.
+        """
+        mode = self.couleur_coups
+        if mode == "libre":
+            return tuple(self.couleur_coups_libre)
+        if mode == "arc-en-ciel":
+            # un tirage par coup, toujours le meme pour le meme coup ; le pad
+            # ou la note y entre aussi, sans quoi deux coups simultanes —
+            # grosse caisse et charley sur le meme temps — tiraient la meme
+            h = (math.sin(float(instant) * 12.9898 + float(valeur) * 78.233)
+                 * 43758.5453)
+            return teinte(h - math.floor(h), 0.85, 1.0)
+        if mode == "instrument":
+            if genre == "note":
+                # la gamme sur le cercle des couleurs : do rouge, sol cyan...
+                return teinte((int(valeur) % 12) / 12.0, 0.85, 1.0)
+            fam = (PAD_FAMILLE.get(int(valeur), "percussions") if genre == "pad"
+                   else famille_gm(valeur))
+            return TEINTES.get(fam, TEINTES["percussions"])
+        return None
+
+    def _allumer_pad(self, beam, mach, k, w, collapse, melt, t, couleur=None):
+        """Un pad frappe : la texture choisie dans son biseau, et son bord.
+
+        Il recoit la lumiere d'une touche du MiniFreak de meme surface. Il en
+        recevait cinq a vingt fois moins — cinq lignes de points — et, la
+        moitie des coups etant faibles, la batterie ne se voyait presque pas
+        sur la MPC, la SP-404 et le Digitakt.
+        """
+        r = mach["pads"][k]
+        bx, by = mach.get("pads_biseau", (0.016, 0.015))
+        P, poids = texture_touche((r[0] + bx, r[1] + by, r[2] - bx, r[3] - by),
+                                  self.texture_touches)
+        if len(P):
+            self._lumiere(beam, P, poids * w, couleur, collapse, melt, t)
+        self._lumiere(beam, bord_pad(r, mach.get("pads_rayon", 0.020)),
+                      0.60 * w, couleur, collapse, melt, t)
 
     def _melt(self, P, u, t):
         """La machine fond dans la forme d'onde du morceau."""
@@ -4290,15 +4680,25 @@ class Renderer:
         # clavier, et la note jouee se perdait au milieu.
         melodique = mach.get("touches") is not None
         batterie = self.midi is not None and self.midi_type == "batterie"
+        # la couleur de chaque coup, quand elle n'est pas celle du trait
+        colorer = self.couleur_coups != "trait" and self._accent is not None
+        teintes = {}
         if batterie:
             # Le fichier remplace les coups detectes dans le son, sur toutes
             # les machines : il dit exactement quel instrument joue, la ou
             # l'analyse du mixage ne fait que le deviner.
-            flashes = self.notes_batterie(t, len(mach["pads"]))
+            flashes, quoi = self.notes_batterie(t, len(mach["pads"]), detail=True)
+            if colorer:
+                teintes = {k: self._couleur_coup("batterie", *quoi[k])
+                           for k in flashes}
         elif melodique and self.midi is not None:
             flashes = {}
         else:
-            flashes = self.pad_flashes(t) if live else {}
+            flashes, quand = (self.pad_flashes(t, detail=True) if live
+                              else ({}, {}))
+            if colorer:
+                teintes = {k: self._couleur_coup("pad", k, quand[k])
+                           for k in flashes}
         e_low = self.env_at(self.e_low, t) if live else 0.0
         e_high = self.env_at(self.e_high, t) if live else 0.0
         e_full = self.env_at(self.e_full, t) if live else 0.0
@@ -4333,10 +4733,12 @@ class Renderer:
             w += 1.2 * np.exp(-((mo - 0.55) / 0.30) ** 2)            # front de mue
             tag = p.tag
             boost = 0.0
+            couleur_p = None
             if tag.startswith("pad"):
                 k = int(tag[3:])
                 if k in flashes:
-                    boost = 1.7 * flashes[k]
+                    boost = 1.7 * flashes[k] * self.eclat_pads
+                    couleur_p = teintes.get(k)
             elif tag.startswith("step"):
                 k = int(tag[4:])
                 if k == step:
@@ -4349,12 +4751,21 @@ class Renderer:
                 boost = 0.45 * e_low
             elif tag == "wheel":
                 boost = 0.30 * e_full
-            w = w + boost * mo
+            # le contour d'un pad frappe s'avive ; dans la couleur du coup
+            # quand elle n'est pas celle du trait, et alors a part du trait
+            extra = boost * mo if couleur_p is not None else None
+            if extra is None:
+                w = w + boost * mo
             if melt > 0:
                 w *= (1.0 - melt) ** 0.7
+                if extra is not None:
+                    extra = extra * (1.0 - melt) ** 0.7
                 P = self._melt(P, melt, t)
             px, py = self.to_px(P, collapse, (jx, 0.0))
             beam.add(px, py, w * (self._cam_z * p.alpha))
+            if extra is not None:
+                self._accent.add(px, py, extra * (self._cam_z * p.alpha),
+                                 couleur_p, beam.mul)
 
         # ---- organes animes
         if melt >= 0.99:
@@ -4365,7 +4776,13 @@ class Renderer:
             if k >= len(mach["pads"]):
                 continue
             mk = float(self.morph_at(mach["pads"][k][0], sweep_x))
-            if mk > 0.4 and v > 0.05:
+            if mk > 0.4 and v > 0.01:
+                couleur = teintes.get(k)
+                # La courbe redressee donne encore un quart d'eclat a un coup
+                # retombe a 0,05 : le couper la, comme avant, eteignait le pad
+                # d'une image a l'autre. Il s'eteint en fondu sous 0,08.
+                eclat = (1.05 * (v ** 0.45) * min(1.0, v / 0.08) * mk
+                         * self.eclat_pads)
                 if melodique:
                     # Sur un clavier, un coup se lit comme une touche
                     # enfoncee, faute de melodie pour le faire. Sans cela le
@@ -4382,13 +4799,21 @@ class Renderer:
                     # reste sous la saturation.
                     cont = mach.get("pads_contour")
                     pads_traits = mach.get("pads_traits")
+                    tex = None
+                    if self.texture_touches != "nappe":
+                        tex = texture_touche(
+                            mach["pads"][k], self.texture_touches,
+                            np.asarray(cont[k]) if cont else None)
                     self._touche(beam, mach["pads"][k], mach["remplir"](k),
-                                 1.05 * (v ** 0.45) * mk, collapse, melt, t,
+                                 eclat, collapse, melt, t,
                                  contour=cont[k] if cont else None,
-                                 traits=pads_traits[k] if pads_traits else None)
+                                 traits=pads_traits[k] if pads_traits else None,
+                                 couleur=couleur, texture=tex)
                 else:
-                    self._dyn(beam, mach["remplir"](k), 1.05 * v * mk,
-                              collapse, melt, t)
+                    # comme une touche du clavier : la courbe redressee pour
+                    # que les coups faibles se voient, et sa lumiere
+                    self._allumer_pad(beam, mach, k, eclat, collapse, melt, t,
+                                      couleur)
 
         # ---- les notes du fichier MIDI : la touche jouee s'allume, contour
         # compris. On la redessine plutot que de lui donner une etiquette a
@@ -4400,7 +4825,9 @@ class Renderer:
         # facade en train de se deformer.
         touches = mach.get("touches")
         if melodique and self.midi is not None and not batterie:
-            for k, v in self.notes_midi(t, touches, mach.get("note0", 36)).items():
+            jouees, quoi = self.notes_midi(t, touches, mach.get("note0", 36),
+                                           detail=True)
+            for k, v in jouees.items():
                 r = touches[k]
                 mk = float(self.morph_at(r[0], sweep_x))
                 if mk <= 0.4:
@@ -4420,9 +4847,16 @@ class Renderer:
                 else:
                     lignes = int(min(12, max(4, round((r[3] - r[1]) / 0.038))))
                     fond = _remplir(r, lignes, 0.010)
+                tex = None
+                if self.texture_touches != "nappe":
+                    tex = texture_touche(r, self.texture_touches,
+                                         np.asarray(cont[k]) if cont else None)
                 self._touche(beam, r, fond, v * mk, collapse, melt, t,
                              contour=cont[k] if cont else None,
-                             traits=traits[k] if traits else None)
+                             traits=traits[k] if traits else None,
+                             couleur=(self._couleur_coup("note", *quoi[k])
+                                      if colorer else None),
+                             texture=tex)
 
         # bande de pas : le pas courant s'allume
         if live and 0 <= step < len(mach["pas"]):
@@ -5123,7 +5557,70 @@ class Renderer:
         a = amount * 0.90
         return img * (1.0 - a) + trip * a
 
-    def colorize(self, field, t, collapse, shake, rng):
+    def _lumiere_coups(self, img, accent, ecart, pres, loin, gmul):
+        """La lumiere des coups, mise en couleur comme le trait : coeur et
+        halo, mais dans sa teinte a elle.
+
+        Elle ne couvre que les pads frappes : on ne la calcule que dans le
+        cadre qui les contient, elargi de ce que porte le halo. Sur toute
+        l'image, trois canaux de flou coutaient autant que le trait lui-meme.
+
+        Le trait, lui, blanchit quand il est fort : chaque canal sature a son
+        tour, et un coeur blanc s'y ajoute. Une couleur choisie n'y survit
+        pas — l'orange passait au jaune puis au blanc, et le rouge, le cyan ou
+        le violet finissaient tous du meme blanc. La lumiere des coups garde
+        donc sa teinte : on la ramene, point par point, a ce que son canal le
+        plus fort tienne dans l'ecran, et seul le coeur des coups les plus
+        forts palit, a peine. Sous elle, le trait s'efface en partie : sans
+        quoi le vert des contours s'ajoutait a l'orange et le jaunissait.
+        """
+        y0, x0, acc = accent
+        _n, h, w = acc.shape
+        g = np.float32(gmul * float(self.neon))
+        # trois plans plutot qu'une image a trois couches : le plus fort des
+        # trois canaux se prend alors en deux maximums, au lieu d'une
+        # reduction sur un axe de trois, cinq fois plus lente
+        coeur = np.zeros_like(acc)
+        halo = np.zeros_like(acc)
+        for c in range(3):
+            a = acc[c]
+            if not a.any():
+                continue
+            k = gauss(a, self.sigma)
+            g4 = gauss(downsample(k, 4), 2.6 * ecart)
+            g8 = gauss(downsample(k, 8), 4.5 * ecart)
+            hc = (upsample(g4, 4, (h, w)) * (2.6 * pres)
+                  + upsample(g8, 8, (h, w)) * (3.4 * loin))
+            np.clip(hc, 0, 3.0, out=hc)
+            hc *= g
+            halo[c] = hc
+            k *= np.float32(1.15)
+            coeur[c] = k
+
+        def haut(x):
+            return np.maximum(np.maximum(x[0], x[1]), x[2])
+        fort = haut(coeur)
+        # le coeur : son canal le plus fort tient dans l'ecran, la teinte reste
+        coeur *= 1.0 / np.maximum(fort, 1.0)
+        # le halo plus bas que le coeur : a egalite, l'espace entre deux
+        # touches allumees brillait autant qu'elles, et la rangee ne faisait
+        # plus qu'une bande de couleur
+        halo *= HALO_COUPS / np.maximum(haut(halo), HALO_COUPS)
+        tot = coeur
+        tot += halo
+        # coeur et halo ensemble : meme tenue, la teinte encore
+        tot *= 1.0 / np.maximum(haut(tot), 1.0)
+        # le coeur des coups forts palit : c'est ce qui les distingue des
+        # faibles, une fois la couleur au plus haut
+        tot += np.clip((fort - BLANC_COUPS[0]) * BLANC_COUPS[1], 0.0,
+                       BLANC_COUPS[2])
+        # le trait s'efface sous le coeur de la lumiere, pas sous son halo :
+        # les pads voisins, encore eteints, ne doivent pas s'assombrir
+        zone = img[y0:y0 + h, x0:x0 + w]
+        zone *= (1.0 - OCCULTE * np.minimum(fort, 1.0))[..., None]
+        zone += tot.transpose(1, 2, 0)
+
+    def colorize(self, field, t, collapse, shake, rng, accent=None):
         W, H = self.W, self.H
         core = gauss(field, self.sigma)
 
@@ -5197,6 +5694,9 @@ class Renderer:
         np.sqrt(quart, out=quart)
         hot *= quart
         img += hot[..., None] * self.c_hot
+        # la lumiere des coups, quand elle n'a pas la couleur du trait
+        if accent is not None:
+            self._lumiere_coups(img, accent, ecart, pres, loin, gmul)
         if luisant is not None:
             img += np.clip(luisant, 0.0, 1.4)[..., None]
         sp = self.split * self.sub_hit(t)

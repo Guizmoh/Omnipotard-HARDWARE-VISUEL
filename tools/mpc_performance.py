@@ -37,13 +37,14 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
-    SR, PALETTES, BACKGROUNDS, Renderer, Beam, _decode, _lowpass, detect_beat,
+    SR, PALETTES, BACKGROUNDS, Renderer, Beam, FaisceauCouleur, _decode,
+    _lowpass, detect_beat,
     detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, PADS_REELS,
     pool_context,
     fit_jobs, DECLENCHEURS, hasard_events, TRAVELLINGS,
     python_trop_petit,
     compute_spectro, PRESETS, QUALITES, APERCU, apercu_possible,
-    MACHINES, NOMS_MACHINES,
+    MACHINES, NOMS_MACHINES, TEXTURES_TOUCHES, COULEURS_COUPS,
 )
 import midi as midi_fichier          # noqa: E402 -- lecteur de fichiers MIDI
 
@@ -168,6 +169,9 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               neon=1.0, reflet=0.5, tube=0.0,
                               midi_force=1.0,
                               vignettage=1.0, scanlines=1.0, aberration=0.0,
+                              eclat_pads=1.0, couleur_coups="trait",
+                              couleur_coups_libre=(1.0, 0.48, 0.12),
+                              texture_touches="nappe",
                               **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
@@ -179,6 +183,12 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.midi_force = float(midi_force)
     r.vignettage, r.scanlines = float(vignettage), float(scanlines)
     r.aberration = float(aberration)
+    r.eclat_pads = float(eclat_pads)
+    r.couleur_coups = (couleur_coups if couleur_coups in COULEURS_COUPS
+                       else "trait")
+    r.couleur_coups_libre = tuple(float(c) for c in couleur_coups_libre)
+    r.texture_touches = (texture_touches if texture_touches in TEXTURES_TOUCHES
+                         else "nappe")
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
     r.glitch = float(glitch)
@@ -273,6 +283,10 @@ def frame_performance(r, t, duration):
     shake = r.glitch_at(t)
 
     beam = Beam(r.H, r.W, r.gain)
+    # la lumiere des coups, quand elle n'a pas la couleur du trait : un
+    # faisceau a part, que la mise en couleur traite dans sa teinte
+    r._accent = (FaisceauCouleur(r.H, r.W, r.gain)
+                 if getattr(r, "couleur_coups", "trait") != "trait" else None)
     # Le decor tient la largeur de l'image : quadrillage, coins, et le fil du
     # morceau qui entre par la gauche et ressort a droite. Il garde donc sa
     # taille quand la machine, elle, change de la sienne.
@@ -315,7 +329,9 @@ def frame_performance(r, t, duration):
     r._etincelles(beam, t, 1.0)               # etincelles, par-dessus
     beam.mul, r._ech = 1.0, 1.0
     field = beam.render()
-    img = r.colorize(field, t, 1.0, shake, rng)
+    accent = r._accent.render() if r._accent is not None else None
+    r._accent = None
+    img = r.colorize(field, t, 1.0, shake, rng, accent=accent)
 
     fade = min(1.0, t / 0.5) * min(1.0, (duration - t) / 0.6)
     if fade < 0.999:
@@ -724,6 +740,19 @@ def add_look_args(ap):
                          "met la melodie au milieu du clavier")
     ap.add_argument("--midi-force", type=float, default=1.0, metavar="X",
                     help="eclat des touches jouees (0 = aucune)")
+    ap.add_argument("--eclat-pads", type=float, default=1.0, metavar="X",
+                    help="lumiere des pads frappes (et des touches allumees "
+                         "par les coups) : 1 = celle d'une touche de clavier "
+                         "jouee, 2 = deux fois plus, 0 = aucune")
+    ap.add_argument("--couleur-coups", choices=COULEURS_COUPS, default="trait",
+                    help="couleur de la lumiere a chaque coup : celle du "
+                         "trait, une couleur au choix (--couleur-coups-libre), "
+                         "une par instrument, ou au hasard a chaque coup")
+    ap.add_argument("--couleur-coups-libre", default="#ff7a1f", metavar="#RRGGBB",
+                    help="la couleur des coups avec --couleur-coups libre")
+    ap.add_argument("--texture-touches", choices=TEXTURES_TOUCHES,
+                    default="nappe",
+                    help="ce qui remplit une touche ou un pad allume")
     ap.add_argument("--vignettage", type=float, default=1.0, metavar="X",
                     help="coins assombris : 1 = comme avant, 0 = dalle plate, "
                          "2 = deux fois plus creuse")
@@ -912,6 +941,10 @@ def look_kwargs(args):
             "midi_tempo": args.midi_tempo,
             "midi_type": args.midi_type,
             "midi_force": args.midi_force,
+            "eclat_pads": args.eclat_pads,
+            "couleur_coups": args.couleur_coups,
+            "couleur_coups_libre": hex_to_rgb(args.couleur_coups_libre),
+            "texture_touches": args.texture_touches,
             "vignettage": args.vignettage, "scanlines": args.scanlines,
             "aberration": args.aberration,
             "passage": args.passage,

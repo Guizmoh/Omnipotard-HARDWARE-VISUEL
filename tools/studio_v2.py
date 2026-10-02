@@ -40,7 +40,8 @@ ONGLETS = (
     # La carte de la melodie est rangee avec la machine : ses deux curseurs
     # rejoignent ensuite, par le script, la carte ou l'on depose le fichier.
     # Sans cette ligne ils tombaient dans un onglet « Divers » a eux seuls.
-    ("Machine", ("Machine", "Melodie (fichier MIDI)", "Trait")),
+    ("Machine", ("Machine", "Lumiere des coups", "Melodie (fichier MIDI)",
+                 "Trait")),
     ("Couleurs", ("Couleur du trait", "Fond", "Image ou video de fond")),
     ("Reactions", ("Reactions au son",)),
     ("Avaries", ("Avaries d'image",)),
@@ -61,6 +62,8 @@ SIMPLE = {
     # le tempo du morceau : c'est lui qui cale la melodie, il doit se voir
     # des qu'il y en a une
     "midiBpm",
+    # la lumiere des coups : c'est elle qui fait voir la batterie
+    "eclatPads", "couleurCoups", "couleurCoupsLibre", "textureTouches",
 }
 REGLE = SIMPLE | {
     "trait", "bgColor", "bgClear", "bgAnim", "reflet", "tube", "nettete",
@@ -389,6 +392,7 @@ PAGE = r"""<!doctype html>
   .niveaux button:hover:not(.on){color:var(--ink);background:#141b21}
   .niveaux button.on{background:var(--acc);color:var(--sur-acc);font-weight:700}
   .cache{display:none}
+  .champ.hors{display:none}
 
   .avis{color:var(--mal)}
   #midimeta[hidden], #midiReglages[hidden], #midiAvis[hidden]{display:none}
@@ -773,7 +777,14 @@ function params() {
 }
 
 /* ---------- apercu ---------- */
+/* la couleur au choix ne se montre qu'avec « une couleur au choix » */
+function majLibre() {
+  const c = document.querySelector('[data-champ="couleurCoupsLibre"]');
+  if (c && $('#couleurCoups'))
+    c.classList.toggle('hors', $('#couleurCoups').value !== 'libre');
+}
 function apercu() {
+  majLibre();
   if (!morceau) return;
   rendreImage();
   clearTimeout(minuteur);
@@ -1554,6 +1565,7 @@ const _duree = () => duree;
     (cTempo.querySelector('input[type=range]') || cTempo).insertAdjacentElement('afterend', der);
   }
   brancherCalage();
+  majLibre();
   // la carte qui les portait est vide : majNiveau la fait disparaitre
   majNiveau();
   // La machine du debut est la premiere entree du plan : en changer doit le

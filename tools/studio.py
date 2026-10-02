@@ -44,7 +44,7 @@ import midi                                                   # noqa: E402
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
     VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs, MACHINES,
-    NOMS_MACHINES,
+    NOMS_MACHINES, COULEURS_COUPS, TEXTURES_TOUCHES,
     compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
     lire_plan_machines,
     backdrop_quality, PRESETS, STYLES, CHAMPS, AIDE, COMPTE, QUALITES, pick_split_times,
@@ -165,6 +165,14 @@ def _dans(valeur, permises, defaut):
     return valeur if valeur in permises else defaut
 
 
+def _couleur(valeur, defaut):
+    """Une couleur #rrggbb de la page ; illisible, celle par defaut."""
+    try:
+        return hex_to_rgb(valeur or defaut)
+    except ValueError:
+        return hex_to_rgb(defaut)
+
+
 def look_from(q):
     """Traduit les reglages de la page en arguments du moteur."""
     pal = q.get("palette", "vert")
@@ -194,6 +202,12 @@ def look_from(q):
         # la melodie : un nom de fichier depose dans out/studio/melodies
         "midi": _melodie(q.get("midi")),
         "midi_force": float(q.get("midiForce", 1.0)),
+        # ---- la lumiere des coups : pads et touches frappes
+        "eclat_pads": float(q.get("eclatPads", 1.0)),
+        "couleur_coups": _dans(q.get("couleurCoups"), COULEURS_COUPS, "trait"),
+        "couleur_coups_libre": _couleur(q.get("couleurCoupsLibre"), "#ff7a1f"),
+        "texture_touches": _dans(q.get("textureTouches"), TEXTURES_TOUCHES,
+                                 "nappe"),
         "vignettage": float(q.get("vignettage", 1.0)),
         "scanlines": float(q.get("scanlines", 1.0)),
         "aberration": float(q.get("aberration", 0.0)),
@@ -568,7 +582,9 @@ class Studio:
                 "echo", "echo_n", "echo_delay", "couleurs", "step_div",
                 "presence", "neon", "reflet", "tube",
                 "passage", "passage_turb", "midi_force",
-                "vignettage", "scanlines", "aberration")
+                "vignettage", "scanlines", "aberration",
+                "eclat_pads", "couleur_coups", "couleur_coups_libre",
+                "texture_touches")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "backdrop_clear", "screen_dim", "travel", "travel_mode",
                         "backdrop_sharp", "spectro", "nettete", "taille",
@@ -1604,6 +1620,41 @@ PAGE = r"""<!doctype html>
   </div>
 
   <div class="card">
+    <h2>Lumiere des coups</h2>
+    <label for="eclatPads">eclat des pads frappes &mdash; <span id="v-ep">1.00</span></label>
+    <input type="range" id="eclatPads" min="0" max="3" step="0.05" value="1">
+    <label for="couleurCoups">couleur de la lumiere</label>
+    <select id="couleurCoups">
+      <option value="trait" selected>celle du trait</option>
+      <option value="libre">une couleur au choix</option>
+      <option value="instrument">une par instrument</option>
+      <option value="arc-en-ciel">une au hasard a chaque coup</option>
+    </select>
+    <div id="libreBloc" hidden>
+      <label for="couleurCoupsLibre">la couleur choisie</label>
+      <input type="color" id="couleurCoupsLibre" value="#ff7a1f">
+    </div>
+    <label for="textureTouches">texture des touches allumees</label>
+    <select id="textureTouches">
+      <option value="nappe" selected>nappe pleine</option>
+      <option value="lignes">lignes</option>
+      <option value="hachures">hachures</option>
+      <option value="quadrillage">quadrillage</option>
+      <option value="points">points</option>
+      <option value="cadres">cadres emboites</option>
+      <option value="eclat">eclat au centre</option>
+      <option value="contour">contour epais</option>
+    </select>
+    <p class="hint">Ce qui s'allume quand un coup tombe : les pads de la MPC,
+      de la SP-404 et du Digitakt, les touches du MiniFreak. L'<b>eclat</b>
+      monte ou baisse leur lumiere sans toucher au reste du trace. La
+      <b>couleur</b> peut quitter celle du trait : une seule, choisie, ou une
+      par instrument &mdash; rouge la grosse caisse, jaune la caisse claire,
+      cyan le charley, et sur le clavier une teinte par note de la gamme.
+      La <b>texture</b> dessine l'interieur de la touche allumee.</p>
+  </div>
+
+  <div class="card">
     <h2>Melodie (fichier MIDI)</h2>
     <div class="drop" id="midiDrop">
       <b>Deposer un fichier MIDI</b>.mid, .midi<br>ou cliquer pour choisir
@@ -2175,6 +2226,9 @@ function params() {
     passage: $('#passage').value, passageTurb: $('#passageTurb').value,
     midi: $('#midi').value,
     midiForce: $('#midiForce').value, midiOffset: $('#midiOffset').value,
+    eclatPads: $('#eclatPads').value, couleurCoups: $('#couleurCoups').value,
+    couleurCoupsLibre: $('#couleurCoupsLibre').value,
+    textureTouches: $('#textureTouches').value,
     midiTempo: $('#midiTempo').value, midiType: $('#midiType').value,
     vignettage: $('#vignettage').value, scanlines: $('#scanlines').value,
     aberration: $('#aberration').value,
@@ -2291,6 +2345,8 @@ function parMinute(n, duree) {
   return ', soit ' + (n / (duree / 60)).toFixed(0) + ' par minute';
 }
 function shot() {
+  // la couleur au choix ne sert qu'a « une couleur au choix »
+  if ($('#libreBloc')) $('#libreBloc').hidden = $('#couleurCoups').value !== 'libre';
   if (!track) return;
   rendreLImage();
   clearTimeout(pending);
@@ -2370,6 +2426,7 @@ bind('#haloDoux','#v-hd',2); bind('#poussiere','#v-po',2);
 bind('#flottement','#v-fl',2);
 bind('#echo','#v-ec',2); bind('#echoN','#v-ecn',0);
 bind('#echoDelay','#v-ecd',3); bind('#couleurs','#v-cl',2);
+bind('#eclatPads','#v-ep',2);
 bind('#spectro','#v-sp',2);
 $('#cadence').oninput = e => {
   const n = +e.target.value;
@@ -2386,6 +2443,10 @@ for (const id of ['#travelMode','#punchOn','#shakeOn','#partsOn','#ringOn',
   $(id).onchange = () => { majFrequences(); shot(); };
 // la qualite ne change rien a l'apercu : elle ne touche que l'encodage
 $('#quality').onchange = majFrequences;
+// la lumiere des coups : sa couleur et la texture des touches
+$('#couleurCoups').onchange = () => shot();
+$('#textureTouches').onchange = () => shot();
+$('#couleurCoupsLibre').oninput = () => shot();
 
 /* ---- fond : image ou video ---- */
 let backdrop = '';
