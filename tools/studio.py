@@ -43,6 +43,7 @@ from mpc_performance import (  # noqa: E402
 import midi                                                   # noqa: E402
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
+    menage_fonds,
     VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs, MACHINES,
     NOMS_MACHINES, COULEURS_COUPS, TEXTURES_TOUCHES, MODES_TRAIT,
     compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
@@ -3727,6 +3728,13 @@ def main():
 
     check_deps()
     retirer_obsoletes(par_v2=args.v2)
+    # les vignettes de fond laissees par les rendus d'avant : les versions
+    # precedentes n'en effacaient aucune, et elles finissaient par remplir le
+    # disque (voir VideoBackdrop)
+    libere = menage_fonds()
+    if libere > 50e6:
+        print("  menage : %.1f Go de vignettes de fond laissees par d'anciens "
+              "rendus ont ete effaces" % (libere / 1e9), flush=True)
     lancer_exemples()
     os.makedirs(UPLOADS, exist_ok=True)
     if args.track:

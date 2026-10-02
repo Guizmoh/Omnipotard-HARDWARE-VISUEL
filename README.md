@@ -2115,6 +2115,44 @@ qui doit rester précis, feuilles et contours de nuages compris, montez la
 **netteté du fond** : à partir de 0,75 la vidéo est lue en pleine définition,
 et à 1 elle n'est plus floutée du tout.
 
+## Une vidéo de fond ne remplit plus le disque
+
+Un rendu échouait sur « ffmpeg n'a pas pu lire le fond … (No space left on
+device) » : **le disque était plein**, et c'est le studio qui l'avait rempli.
+
+Pour rendre en parallèle, le studio découpe la vidéo de fond en une image JPEG
+par image du morceau, dans le dossier temporaire du système
+(`%TEMP%\omnipotard-fonds` sous Windows). Trois défauts s'additionnaient :
+
+- **rien n'était jamais effacé** : chaque rendu dont la durée, la définition
+  ou la netteté du fond changeait laissait derrière lui un jeu complet
+  d'images ;
+- **le découpage couvrait toute la durée du morceau**, même pour un clip de
+  trente secondes qui ne fait que tourner en boucle ;
+- en 4K avec une *netteté du fond* poussée, chaque image découpée est
+  elle-même en 4K : un à trois mégaoctets, sept mille deux cents fois pour
+  quatre minutes de musique.
+
+Désormais :
+
+- une vidéo plus courte que le morceau n'est découpée **qu'une fois**, puis
+  rejouée en boucle — un clip de 2 s sous un rendu de 5 s : 61 images au lieu
+  de 151 ;
+- le découpage **est effacé à la fin du rendu**, qu'il ait réussi, échoué ou
+  été arrêté ; un rendu en cours le signale à chaque paquet d'images, et ce
+  qu'un rendu interrompu aurait laissé (studio fermé en route) est effacé
+  une demi-heure plus tard ;
+- au démarrage, le studio **efface ce que les versions précédentes ont
+  laissé** et dit dans sa fenêtre combien de place il a rendue ;
+- la place libre est **vérifiée avant de découper**, en gardant 1,5 Go pour
+  la vidéo rendue et le système. Si elle manque, les images découpées sont
+  faites plus petites (la fenêtre du studio le dit) ; si rien ne tient, le
+  rendu s'arrête tout de suite sur « Le disque est plein : il reste … Go … »
+  au lieu d'échouer au milieu ;
+- une vidéo finale qui n'a pas pu être écrite jusqu'au bout est effacée, et
+  un disque plein est appelé par son nom — plus de conseil hors de propos sur
+  les photos de téléphone.
+
 ## STUDIO WEB — une page HTML, rien a installer
 
 `tools/build_web_studio.py` fabrique **un seul fichier HTML autonome** : on

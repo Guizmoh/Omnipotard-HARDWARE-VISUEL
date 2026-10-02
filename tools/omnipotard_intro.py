@@ -24,6 +24,7 @@ import argparse
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,7 +37,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.10"
+VERSION = "2026-10-02.11"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -791,9 +792,27 @@ class VideoBackdrop:
     morceau entier. Le flou et le recadrage sont faits par ffmpeg pendant
     l'extraction, si bien qu'il ne reste plus qu'une lecture et une
     multiplication par image.
+
+    Elles ne vivent que le temps d'un rendu. Avant, chaque rendu laissait les
+    siennes dans le dossier temporaire du systeme, pour toujours : une par
+    image du morceau, a chaque duree, definition ou nettete differente — des
+    gigaoctets, jusqu'a remplir le disque (« No space left on device »).
+    Desormais :
+
+    - une video plus courte que le morceau tourne en boucle : on n'en detaille
+      qu'un tour, au lieu de toute la duree du morceau ;
+    - la place libre est verifiee avant : si les vignettes n'y tiennent pas,
+      elles sont faites plus petites, et si rien ne tient, on le dit ;
+    - le rendu les efface en finissant (liberer), y compris s'il echoue ou
+      s'il est arrete ; celles qu'un rendu interrompu aurait laissees — studio
+      ferme en route — sont effacees au rendu suivant, une fois qu'aucun rendu
+      ne les touche plus depuis une demi-heure (toucher).
     """
 
     DIV = 3            # les vignettes font le tiers de la definition finale
+    OCTETS_PAR_PIXEL = 0.4     # une vignette JPEG (q 4), large estimation
+    RESERVE = 1.5e9            # laisses libres : la video rendue, le systeme
+    ABANDON = 1800.0           # secondes sans rendu avant d'effacer un reste
 
     def __init__(self, path, w, h, fps, duration, strength=0.80, clear=0.45,
                  scale=None, blur=2.2, screen_dim=0.40, cache_dir=None,
@@ -814,40 +833,79 @@ class VideoBackdrop:
         self.travel, self.mode = float(travel), travel_mode
         marge = (1.0 + self.travel) if (self.travel > 1e-4
                                         and travel_mode != "aucun") else 1.0
-        sw = max(16, int(w * marge) // self.DIV)
-        sh = max(16, int(h * marge) // self.DIV)
+        # un tour de la video suffit quand elle est plus courte que le morceau
+        src = media_duration(path)
+        self.boucle = 0.5 < src < duration
+        tour = src if self.boucle else duration
+        n = int(tour * fps) + 2
 
-        key = "%s-%d-%d-%d-%d-%.2f-%.2f" % (
-            os.path.basename(path), os.path.getsize(path), sw, sh,
-            int(fps), duration, blur)
-        key = re.sub(r"[^A-Za-z0-9._-]+", "_", key)
         root = cache_dir or os.path.join(tempfile.gettempdir(), "omnipotard-fonds")
-        self.dir = os.path.join(root, key)
-        done = os.path.join(self.dir, "_complet")
+        os.makedirs(root, exist_ok=True)
+        menage_fonds(root, self.ABANDON)
+        libre = shutil.disk_usage(root).free - self.RESERVE
 
-        if not os.path.exists(done):
-            os.makedirs(self.dir, exist_ok=True)
-            vf = ("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d"
-                  % (sw, sh, sw, sh))
-            if blur > 0:
-                vf += ",gblur=sigma=%.2f" % max(0.4, blur / self.DIV)
-            r = subprocess.run(
-                ["ffmpeg", "-v", "error", "-y", "-stream_loop", "-1", "-i", path,
-                 "-t", "%.3f" % (duration + 1.0 / max(fps, 1)),
-                 "-vf", vf, "-r", "%.4f" % fps, "-q:v", "4",
-                 os.path.join(self.dir, "%06d.jpg")], stderr=subprocess.PIPE)
-            if r.returncode:
-                raise RuntimeError(_fond_illisible(path, r.stderr))
-            open(done, "w").close()
+        def taille(div):
+            return (max(16, int(w * marge) // div), max(16, int(h * marge) // div))
+
+        def besoin(div):
+            sw, sh = taille(div)
+            return n * sw * sh * self.OCTETS_PAR_PIXEL
+
+        demande = self.DIV
+        while besoin(self.DIV) > libre and self.DIV < 8:
+            self.DIV += 1
+        if besoin(self.DIV) > libre:
+            raise RuntimeError(disque_plein(
+                root, besoin(demande) + self.RESERVE,
+                "decouper la video de fond « %s »" % os.path.basename(path)))
+        if self.DIV != demande:
+            print("  place limitee sur le disque : la video de fond est "
+                  "decoupee en %dx%d au lieu de %dx%d" % (
+                      taille(self.DIV) + taille(demande)), flush=True)
+        sw, sh = taille(self.DIV)
+
+        # un dossier par rendu : deux rendus ne se partagent rien, et chacun
+        # peut effacer le sien en finissant
+        cle = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(path))[:40]
+        self.dir = tempfile.mkdtemp(prefix=cle + "-", dir=root)
+        vf = ("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d"
+              % (sw, sh, sw, sh))
+        if blur > 0:
+            vf += ",gblur=sigma=%.2f" % max(0.4, blur / self.DIV)
+        r = subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-stream_loop", "-1", "-i", path,
+             "-t", "%.3f" % (tour + 1.0 / max(fps, 1)),
+             "-vf", vf, "-r", "%.4f" % fps, "-q:v", "4",
+             os.path.join(self.dir, "%06d.jpg")], stderr=subprocess.PIPE)
+        if r.returncode:
+            self.liberer()
+            if b"No space left" in (r.stderr or b""):
+                raise RuntimeError(disque_plein(
+                    root, besoin(self.DIV) + self.RESERVE,
+                    "decouper la video de fond « %s »" % os.path.basename(path)))
+            raise RuntimeError(_fond_illisible(path, r.stderr))
 
         self.files = sorted(f for f in os.listdir(self.dir) if f.endswith(".jpg"))
         if not self.files:
+            self.liberer()
             raise RuntimeError("aucune image extraite de %s" % path)
         self._cache = (None, None)
 
+    def toucher(self):
+        """Dit qu'un rendu se sert encore des vignettes (voir menage_fonds)."""
+        try:
+            os.utime(self.dir, None)
+        except OSError:
+            pass
+
+    def liberer(self):
+        """Efface les vignettes : le rendu qui les a faites est fini."""
+        shutil.rmtree(self.dir, ignore_errors=True)
+
     def at(self, t):
         from PIL import Image
-        i = min(len(self.files) - 1, max(0, int(t * self.fps + 0.5)))
+        i = max(0, int(t * self.fps + 0.5))
+        i = i % len(self.files) if self.boucle else min(len(self.files) - 1, i)
         if self._cache[0] == i and self.travel <= 1e-4:
             return self._cache[1]        # sans travelling, le cadre ne bouge pas
         im = Image.open(os.path.join(self.dir, self.files[i])).convert("RGB")
@@ -871,6 +929,53 @@ class VideoBackdrop:
         """Le fond pour un trait a l'encre (voir StillBackdrop.clair)."""
         self.at(t)
         return _eclaircir(self._brut, self.mask)
+
+
+def menage_fonds(root=None, age=VideoBackdrop.ABANDON):
+    """Efface les vignettes de fond qu'aucun rendu ne touche plus depuis
+    `age` secondes : celles d'un rendu interrompu, studio ferme en route, et
+    celles que les versions d'avant laissaient derriere chaque rendu. Un
+    rendu en cours touche les siennes a chaque paquet d'images. Rend le
+    nombre d'octets liberes."""
+    import time
+    root = root or os.path.join(tempfile.gettempdir(), "omnipotard-fonds")
+    limite = time.time() - age
+    try:
+        noms = os.listdir(root)
+    except OSError:
+        return 0
+    libere = 0
+    for nom in noms:
+        chemin = os.path.join(root, nom)
+        try:
+            if os.path.getmtime(chemin) >= limite:
+                continue
+            if os.path.isdir(chemin):
+                for dossier, _d, fichiers in os.walk(chemin):
+                    for f in fichiers:
+                        try:
+                            libere += os.path.getsize(os.path.join(dossier, f))
+                        except OSError:
+                            pass
+                shutil.rmtree(chemin, ignore_errors=True)
+            else:
+                libere += os.path.getsize(chemin)
+                os.remove(chemin)
+        except OSError:
+            continue
+    return libere
+
+
+def disque_plein(dossier, besoin, quoi):
+    """La phrase a dire quand le disque n'a plus la place de `quoi`."""
+    try:
+        libre = shutil.disk_usage(dossier).free
+    except OSError:
+        libre = 0
+    return ("Le disque est plein : il reste %.1f Go sur le disque de %s, il en "
+            "faudrait environ %.1f pour %s. Liberez de la place — les videos "
+            "rendues dans out/studio pesent lourd, surtout en 4K — puis "
+            "relancez le rendu." % (libre / 1e9, dossier, besoin / 1e9, quoi))
 
 
 # Le papier : le clair que prend le creux derriere la machine quand le trait
@@ -6446,6 +6551,8 @@ def main():
             with ctx.Pool(args.jobs, initializer=_init_worker,
                           initargs=(_R,)) as pool:
                 for start in range(0, nframes, chunk):
+                    if hasattr(_R.backdrop, "toucher"):
+                        _R.backdrop.toucher()
                     for buf in pool.map(_worker, range(start, min(nframes, start + chunk)), 1):
                         proc.stdin.write(buf)
                     done = min(nframes, start + chunk)
@@ -6458,6 +6565,8 @@ def main():
     finally:
         proc.stdin.close()
         proc.wait()
+        if hasattr(_R.backdrop, "liberer"):
+            _R.backdrop.liberer()
     print("\n%s  (%.1f s, %dx%d @ %dfps)" % (args.out, args.duration, args.width,
                                              args.height, args.fps))
 

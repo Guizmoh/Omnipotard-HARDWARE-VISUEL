@@ -45,7 +45,7 @@ from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     fit_jobs, DECLENCHEURS, hasard_events, TRAVELLINGS,
     python_trop_petit,
     compute_spectro, PRESETS, QUALITES, APERCU, apercu_possible,
-    MACHINES, NOMS_MACHINES, TEXTURES_TOUCHES, COULEURS_COUPS,
+    MACHINES, NOMS_MACHINES, TEXTURES_TOUCHES, COULEURS_COUPS, disque_plein,
 )
 import midi as midi_fichier          # noqa: E402 -- lecteur de fichiers MIDI
 
@@ -646,6 +646,15 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
             "-color_trc", "bt709",
             "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-shortest", out]
 
+    # Les vignettes d'une video de fond ne servent qu'a ce rendu : on dit
+    # qu'on s'en sert encore a chaque paquet d'images, et on les efface en
+    # finissant, quoi qu'il arrive (voir VideoBackdrop).
+    fond = getattr(_R, "backdrop", None)
+
+    def toucher():
+        if hasattr(fond, "toucher"):
+            fond.toucher()
+
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     t0 = time.time()
     arrete = False
@@ -678,6 +687,7 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
                         # la sortie du bloc « with » termine les taches
                         arrete = True
                         break
+                    toucher()
                     idx = range(s0, min(nframes, s0 + chunk))
                     for buf in pool.map(_worker, idx, chunksize=1):
                         proc.stdin.write(buf)
@@ -688,6 +698,8 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
                 if arret and i % 6 == 0 and arret():
                     arrete = True
                     break
+                if i % 24 == 0:
+                    toucher()
                 proc.stdin.write(_worker(i))
                 if progress and i % 12 == 0:
                     progress(i + 1, nframes, time.time() - t0)
@@ -710,15 +722,33 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
             except OSError:
                 pass
         else:
-            proc.stdin.close()
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass                     # ffmpeg deja mort : on le dit plus bas
             proc.wait()
+        if hasattr(fond, "liberer"):
+            fond.liberer()
     if arrete:
         raise RenduArrete("rendu arrete")
+    shutil.rmtree(tmpdir, ignore_errors=True)
     if proc.returncode:
+        # un fichier a moitie ecrit ne sert a rien et prend de la place —
+        # justement celle qui manque, le plus souvent
+        try:
+            os.remove(out)
+        except OSError:
+            pass
+        try:
+            libre = shutil.disk_usage(outdir or ".").free
+        except OSError:
+            libre = None
+        if libre is not None and libre < 300e6:
+            raise RuntimeError(disque_plein(
+                os.path.abspath(outdir or "."), 2e9, "ecrire la video"))
         raise RuntimeError("ffmpeg a echoue (code %d)" % proc.returncode)
     if progress:
         progress(nframes, nframes, time.time() - t0)
-    shutil.rmtree(tmpdir, ignore_errors=True)
     return info
 
 
