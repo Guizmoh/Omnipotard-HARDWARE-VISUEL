@@ -1371,7 +1371,10 @@ exemples qui en demandent une est dessinée. Les exemples suivent le moteur :
 **le studio les refait tout seul à la première ouverture d'une nouvelle
 version**, en tâche de fond et à basse priorité — deux minutes et demie sur
 quatre cœurs, pendant lesquelles la page les pose au fur et à mesure. Ils
-vivent dans `out/studio/exemples/<version>/` (34 Mo).
+vivent dans `out/studio/exemples/<version>/` (34 Mo) ; une fois ceux de la
+nouvelle version tous faits, **ceux des versions précédentes sont effacés** —
+sans ce ménage, chaque mise à jour laissait 34 Mo d'images que plus rien ne
+montrait.
 
 ```bash
 python3 tools/exemples.py              # tous ceux qui manquent
@@ -1976,6 +1979,57 @@ Un défaut trouvé en ramenant tout dans la page de base : elle n'envoyait **ni
 le BPM du morceau ni la case « tel quel »** au moteur — la v2 seule le
 faisait. `tools/verifier_studio.py` ne contrôlait que les curseurs et les
 listes ; il contrôle maintenant aussi les cases, les nombres et les couleurs.
+
+## Deux fenêtres : les réglages à gauche, l'aperçu à droite
+
+La page est coupée en deux. **À gauche, tous les réglages** — préréglage,
+machine, lumière des coups, couleur, fond, trait, réactions au son, avaries,
+écho, texture —, sur deux colonnes qui défilent. **À droite, l'aperçu, qui
+ne bouge pas** : on descend jusqu'à la dernière avarie sans le perdre de vue,
+et on voit ce que donne le réglage qu'on est en train de toucher. Quand tout
+défilait d'un bloc, l'image partait en haut de la page dès qu'on descendait
+dans les effets.
+
+Sous l'aperçu, ce qui entre et ce qui sort, dans une partie qui défile seule :
+
+- **Rendu.** Le bouton *Lancer le rendu* et son avancement viennent en tête,
+  juste sous l'image : ils restent en vue sans rien faire défiler, même sur un
+  écran de 1280×800. Suivent le départ, la durée, la définition, les images
+  par seconde, la qualité du fichier et le bombé de l'écran. Le titre de
+  l'onglet du navigateur suit lui aussi l'avancement (« rendu 42 % ») : on le
+  voit depuis une autre fenêtre.
+- **Morceau** et **Mélodie (fichier MIDI)**, avec tous les outils de calage.
+  Caler une mélodie en gardant l'image sous les yeux, c'est précisément ce
+  que la page ne permettait plus.
+
+**L'aperçu suit le geste.** Pendant qu'on fait glisser un curseur —
+épaisseur du trait, néon, couleur… —, l'image se recalcule en continu : une
+seule image en calcul à la fois, et dès qu'elle arrive, la suivante part avec
+les réglages du moment. Avant, chaque mouvement relançait l'attente, et tant
+que le curseur bougeait l'image ne changeait pas. Mesuré en 960×540 : un
+curseur qu'on fait glisser pendant deux secondes affiche **18 images**. Les
+99 réglages de la colonne de gauche relancent l'aperçu, contrôlé un par un.
+
+**Déposer sur l'aperçu.** Un morceau, un MIDI, une image ou une vidéo lâchés
+sur l'image vont chacun à leur place. Tant qu'aucun morceau n'est chargé, un
+clic sur l'écran ouvre le choix du fichier.
+
+**La taille de l'aperçu se règle.** La fine barre entre les deux fenêtres se
+tire à la souris ; le studio garde la largeur choisie pour la prochaine
+ouverture, et un double-clic sur la barre revient à celle d'origine — un
+tiers de la fenêtre, entre 380 et 560 px.
+
+**Un écran bas** — moins de 760 px de haut, celui d'un petit portable : sous
+un aperçu fixe, il ne resterait qu'une lucarne pour le rendu. La colonne de
+droite défile alors d'un bloc ; l'aperçu reste en vue tant qu'on règle à
+gauche. Sur un écran étroit, tout se remet en une seule colonne, l'aperçu en
+premier.
+
+Les explications du rendu (définition, images par seconde, qualité) et du
+curseur d'instant passent **en bulle, au survol**, pour laisser la place à
+l'image ; la qualité garde une ligne, qui dit ce que donne celle qui est
+choisie. Un rendu terminé ne laisse plus traîner le bouton *Arrêter* à côté
+de *Télécharger*.
 
 ## STUDIO WEB — une page HTML, rien a installer
 

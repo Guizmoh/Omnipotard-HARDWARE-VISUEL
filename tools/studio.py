@@ -1552,9 +1552,68 @@ PAGE = r"""<!doctype html>
   h1{margin:0;font-size:15px;letter-spacing:.16em;text-transform:uppercase;
     color:var(--acc);font-weight:600}
   header span{color:var(--dim)}
-  main{display:grid;grid-template-columns:330px minmax(0,1fr);gap:20px;
-    padding:20px;align-items:start}
-  @media (max-width:860px){main{grid-template-columns:1fr}}
+  /* Deux fenetres. A gauche les reglages, qui defilent ; a droite l'apercu,
+     fixe, et sous lui ce qui entre et ce qui sort : le rendu, le morceau, la
+     melodie. On regle tout en bas des avaries sans perdre l'image de vue.
+     Entre les deux, une poignee : on la tire pour grandir ou rapetisser
+     l'apercu, un double-clic la remet a sa place. */
+  html,body{height:100%}
+  body{display:flex;flex-direction:column;overflow:hidden}
+  main{flex:1;min-height:0;display:grid;gap:0;padding:14px 16px 0;
+    grid-template-columns:minmax(0,1fr) 16px var(--cote,clamp(380px,34vw,560px))}
+  #poignee{cursor:col-resize;position:relative;touch-action:none}
+  #poignee::after{content:"";position:absolute;top:0;bottom:14px;left:7px;
+    width:2px;border-radius:1px;background:var(--line);transition:background .15s}
+  #poignee:hover::after,#poignee.tire::after{background:var(--acc)}
+  #reglages{min-height:0;overflow-y:auto;display:grid;gap:14px;
+    grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;
+    padding:0 6px 40px 0}
+  #cote{min-height:0;display:flex;flex-direction:column}
+  #carteApercu{flex:none}
+  #coteBas{flex:1;min-height:0;overflow-y:auto;padding:0 4px 30px 0}
+  #styles{flex:1;min-height:0;overflow-y:auto}
+  @media (max-width:1250px){#reglages{grid-template-columns:minmax(0,1fr)}}
+  /* un ecran bas, celui d'un portable : sous un apercu fixe il ne resterait
+     qu'une lucarne pour le rendu. La colonne de droite defile alors d'un
+     bloc ; l'apercu reste en vue tant qu'on regle a gauche. */
+  @media (max-height:760px) and (min-width:861px){
+    #cote{overflow-y:auto;display:block;padding-right:4px}
+    #coteBas{overflow:visible;padding-bottom:30px}
+  }
+  /* un ecran etroit : une seule colonne, l'apercu d'abord */
+  @media (max-width:860px){
+    body{display:block;overflow:auto}
+    main{display:flex;flex-direction:column;padding:12px}
+    #cote{order:-1}
+    #reglages,#coteBas{overflow:visible;padding:0}
+    #poignee{display:none}
+  }
+  /* l'ecran de l'apercu : l'image, ou ce qu'on y depose */
+  .ecran{position:relative;border-radius:8px;overflow:hidden;background:#000;
+    border:1px solid var(--line);aspect-ratio:16/9;margin:0 auto;
+    width:min(100%,calc(46vh * 16 / 9))}
+  #ecran.vide{cursor:pointer}
+  .ecran.over{border-color:var(--acc)}
+  .ecran #shot,.ecran #clip{width:100%;height:100%;object-fit:contain;
+    border:0;border-radius:0;display:block}
+  #ecranVide{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:4px;color:var(--dim);
+    text-align:center;font-size:12px;padding:12px;pointer-events:none}
+  #ecranVide b{color:var(--acc);letter-spacing:.08em}
+  #ecranVide[hidden]{display:none}
+  .row.trois{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .row.trois button{font-size:11px;padding:7px 4px;line-height:1.25}
+  .row.lire{grid-template-columns:minmax(0,1fr) 84px}
+  .row.quatre{grid-template-columns:repeat(auto-fit,minmax(88px,1fr))}
+  #carteRendu .row{align-items:end}
+  #carteRendu .tete{display:flex;align-items:center;justify-content:space-between;
+    gap:10px}
+  #carteRendu .tete h2{margin:0}
+  #carteRendu .tete button{width:auto;padding:9px 18px}
+  #carteRendu label.bombe{margin:0 0 8px;line-height:1.35}
+  details.plus{margin-top:8px}
+  details.plus summary{color:var(--dim);font-size:11px;cursor:pointer}
+  details.plus summary:hover{color:var(--ink)}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;
     padding:14px;margin-bottom:14px}
   .card h2{margin:0 0 10px;font-size:11px;letter-spacing:.14em;color:var(--dim);
@@ -1632,8 +1691,9 @@ PAGE = r"""<!doctype html>
   #styles{display:flex;justify-content:center;padding:20px}
   #styles[hidden]{display:none}
   /* les exemples : une image du moteur sous chaque effet, animee au survol */
-  figure.ex{margin:8px 0 4px;position:relative;border-radius:6px;overflow:hidden;
-    border:1px solid var(--line);background:#000;aspect-ratio:16/9;cursor:pointer}
+  figure.ex{margin:8px auto 4px;position:relative;border-radius:6px;overflow:hidden;
+    border:1px solid var(--line);background:#000;aspect-ratio:16/9;cursor:pointer;
+    max-width:320px}
   figure.ex[hidden]{display:none}
   figure.ex img{display:block;width:100%;height:100%;object-fit:cover}
   figure.ex figcaption{position:absolute;left:6px;bottom:5px;font-size:10px;
@@ -1676,21 +1736,25 @@ PAGE = r"""<!doctype html>
 </header>
 
 <main>
- <div>
+<div id="reglages">
+ <div class="col">
   <div class="card">
-    <h2>Morceau</h2>
-    <div class="drop" id="drop">
-      <b>Deposer un fichier</b>mp3, wav, flac, m4a&hellip;<br>ou cliquer pour choisir
+    <h2>Prereglage</h2>
+    <select id="preset"></select>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="presetNom" maxlength="40"
+             placeholder="nom de votre reglage">
+      <button class="ghost" id="presetSave">Enregistrer</button>
     </div>
-    <input type="file" id="file" accept="audio/*" hidden>
-    <div class="meta" id="trackmeta" hidden>
-      <span>duree <b id="m-dur">-</b></span>
-      <span>tempo <b id="m-bpm">-</b></span>
-      <span>coups <b id="m-hits">-</b></span>
-      <span>paroxysmes <b id="m-drops">-</b></span>
-    </div>
+    <button class="ghost" id="presetDel" style="margin-top:6px" disabled>
+      Effacer ce reglage</button>
+    <p class="hint">Ceux qu'un prereglage ne mentionne pas reviennent a leur
+      valeur d'usine : deux prereglages enchaines ne se melangent donc pas.<br>
+      <b>Enregistrer</b> garde d'un coup tous les curseurs, toutes les listes,
+      les couleurs et le titre — tout sauf la definition, la cadence et le
+      morceau. Ils sont ecrits dans <code>out/studio/mes-reglages.json</code>
+      et vous les retrouverez a la prochaine ouverture.</p>
   </div>
-
   <div class="card">
     <h2>Machine</h2>
     <label for="machine">la machine du debut</label>
@@ -1725,7 +1789,6 @@ PAGE = r"""<!doctype html>
       avec 1,9 s de deformation, elle commence a 0:30 et le Digitakt est bien
       pose a 0:32.</p>
   </div>
-
   <div class="card">
     <h2>Lumiere des coups</h2>
     <label for="eclatPads">eclat des pads frappes &mdash; <span id="v-ep">1.00</span></label>
@@ -1760,122 +1823,6 @@ PAGE = r"""<!doctype html>
       cyan le charley, et sur le clavier une teinte par note de la gamme.
       La <b>texture</b> dessine l'interieur de la touche allumee.</p>
   </div>
-
-  <div class="card">
-    <h2>Melodie (fichier MIDI)</h2>
-    <div class="drop" id="midiDrop">
-      <b>Deposer un fichier MIDI</b>.mid, .midi<br>ou cliquer pour choisir
-    </div>
-    <input type="file" id="midifile" accept=".mid,.midi,audio/midi" hidden>
-    <div class="meta" id="midimeta" hidden>
-      <span>notes <b id="mi-n">-</b></span>
-      <span>etendue <b id="mi-e">-</b></span>
-      <span>premiere note <b id="mi-c">-</b></span>
-    </div>
-    <div id="midiReglages" hidden>
-      <label for="midiType">ce que contient le fichier</label>
-      <select id="midiType">
-        <option value="piano">une melodie (touches du clavier)</option>
-        <option value="batterie">une batterie (pads de toutes les machines)</option>
-      </select>
-      <label for="midiBpm">BPM du morceau</label>
-      <input type="number" id="midiBpm" min="20" max="300" step="0.01" value="">
-      <p class="hint" id="midiGrille">&nbsp;</p>
-      <label for="midiForce">eclat des touches jouees &mdash;
-        <span id="v-mif">1.00</span></label>
-      <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1">
-      <label for="midiOffset">avance / retard &mdash;
-        <span id="v-mio">0.00 s</span></label>
-      <input type="range" id="midiOffset" min="-60" max="60" step="0.001" value="0">
-      <p class="hint" id="midiSens">&nbsp;</p>
-      <div class="exact">
-        <label for="midiMs">decalage exact, en ms</label>
-        <input type="number" id="midiMs" step="1" value="0">
-      </div>
-      <div class="row" id="midiFin">
-        <button class="ghost" data-img="-1">&minus;1 image</button>
-        <button class="ghost" data-img="1">+1 image</button>
-        <button class="ghost" data-ms="-10">&minus;10 ms</button>
-        <button class="ghost" data-ms="10">+10 ms</button>
-      </div>
-      <div class="row" id="midiPas">
-        <button class="ghost" data-pas="-4">&minus;1 mesure</button>
-        <button class="ghost" data-pas="-1">&minus;1 temps</button>
-        <button class="ghost" data-pas="-0.25">&minus;1/4</button>
-        <button class="ghost" data-pas="0.25">+1/4</button>
-        <button class="ghost" data-pas="1">+1 temps</button>
-        <button class="ghost" data-pas="4">+1 mesure</button>
-      </div>
-      <p class="hint" id="midiOu">&nbsp;</p>
-      <p class="hint" id="midiImage">&nbsp;</p>
-      <label for="midiTempo">derive &mdash; <span id="v-mit">0.000 %</span></label>
-      <input type="range" id="midiTempo" min="-1" max="1" step="0.005" value="0">
-      <button class="ghost" id="midiMesure">Mesurer la derive</button>
-      <p class="hint" id="midiDerive">&nbsp;</p>
-      <label class="coche"><input type="checkbox" id="midiCale">
-        chercher le decalage tout seul</label>
-      <label class="coche"><input type="checkbox" id="midiTelQuel">
-        lire le fichier tel quel, sans le poser sur la grille du morceau</label>
-      <button class="ghost" id="midiOte">Oter ce fichier</button>
-    </div>
-    <input type="hidden" id="midi">
-    <p class="hint err" id="midiAvis" hidden>Aucun MiniFreak dans le plan des machines : la melodie ne sera jouee nulle part. Choisissez-le comme machine du debut, ou ajoutez-le au sequenceur.</p>
-    <p class="hint">Les vraies notes du morceau, une par une, jouees sur le
-      <b>clavier du MiniFreak</b> : c'est la touche exacte qui s'enfonce. La
-      MPC et le Digitakt n'ont pas de clavier &mdash; leurs pads restent a la
-      batterie, et le fichier n'y change rien.<br>
-      Le fichier est pris <b>tel quel</b> : un MIDI exporte du meme projet que
-      le morceau est deja a l'heure, son decalage vaut zero. La ligne sous les
-      boutons dit a quel instant de la video tombe la premiere note : lancez
-      l'apercu la, et regardez si la touche s'allume avec le son.<br>
-      <b>Si c'est decale d'un bout a l'autre</b>, servez-vous des boutons
-      plutot que du curseur. Un fichier exporte d'un projet tombe deja sur la
-      grille du morceau : ce qui lui manque n'est pas un reglage fin, c'est un
-      nombre entier de temps. Les boutons decalent d'exactement un temps ou une
-      mesure du morceau : on clique jusqu'a ce que ca tombe juste, sans jamais
-      sortir de la grille. Le curseur ne sert qu'a rattraper un fichier qui,
-      lui, n'est pas sur la grille du tout.<br>
-      <b>Si c'est cale au debut et faux a la fin</b>, ce n'est plus un
-      decalage mais une <b>derive</b> : la grille du fichier n'a pas tout a
-      fait le tempo du morceau, et aucun decalage ne la rattrape. Le bouton
-      <b>mesurer la derive</b> compare les deux grilles et pose le curseur.
-      Mesure sur le fichier d'essai : melodie 85,163 BPM, morceau 85,000
-      &mdash; 0,19 % d'ecart, soit sept centiemes de seconde au bout de
-      trente-cinq. L'etirement part de la premiere note, donc le calage deja
-      trouve ne bouge pas.<br>
-      <b>Chercher le decalage tout seul</b> compare les attaques du fichier a
-      celles du morceau. Mesure : sur un fichier percussif il retrouve le
-      decalage exactement ; sur une melodie il se trompe a tous les coups, et
-      sans qu'on puisse s'en apercevoir &mdash; un motif de doubles-croches
-      repetitif ressemble a lui-meme partout dans le morceau, et les
-      decalages candidats se tiennent alors a 3 % les uns des autres. A ne
-      cocher que pour une piste de batterie.<br>
-      Une note <b>tenue</b> n'allume pas sa touche indefiniment : au bout de
-      1,2 s la touche relache, meme si le son continue. Sans cela une nappe
-      gardait la moitie du clavier allumee et on ne voyait plus quelle note
-      venait d'etre jouee.<br>
-      Une note trop grave ou trop aigue pour le clavier y est ramenee par
-      octaves : la melodie garde ses notes, elle change seulement d'octave.</p>
-  </div>
-
-  <div class="card">
-    <h2>Prereglage</h2>
-    <select id="preset"></select>
-    <div class="row" style="margin-top:8px">
-      <input type="text" id="presetNom" maxlength="40"
-             placeholder="nom de votre reglage">
-      <button class="ghost" id="presetSave">Enregistrer</button>
-    </div>
-    <button class="ghost" id="presetDel" style="margin-top:6px" disabled>
-      Effacer ce reglage</button>
-    <p class="hint">Ceux qu'un prereglage ne mentionne pas reviennent a leur
-      valeur d'usine : deux prereglages enchaines ne se melangent donc pas.<br>
-      <b>Enregistrer</b> garde d'un coup tous les curseurs, toutes les listes,
-      les couleurs et le titre — tout sauf la definition, la cadence et le
-      morceau. Ils sont ecrits dans <code>out/studio/mes-reglages.json</code>
-      et vous les retrouverez a la prochaine ouverture.</p>
-  </div>
-
   <div class="card">
     <h2>Couleur du trait</h2>
     <select id="palette">
@@ -1916,7 +1863,6 @@ PAGE = r"""<!doctype html>
       baissez le <b>creux</b> &mdash; en auto, ce qui reste sombre (l'ecran de
       la machine, le creux) garde le neon, le reste passe a l'encre.</p>
   </div>
-
   <div class="card">
     <h2>Fond</h2>
     <label for="bg">texture</label>
@@ -1952,7 +1898,6 @@ PAGE = r"""<!doctype html>
         ressorte quand meme.</p>
     </div>
   </div>
-
   <div class="card">
     <h2>Image ou video de fond</h2>
     <div class="drop" id="bdrop">
@@ -1982,7 +1927,6 @@ PAGE = r"""<!doctype html>
         suffisent a lui oter son air de decor colle derriere la machine.</p>
     </div>
   </div>
-
   <div class="card">
     <h2>Trait</h2>
     <label for="taille">taille de la machine &mdash; <span id="v-ta">1.00</span></label>
@@ -2036,7 +1980,8 @@ PAGE = r"""<!doctype html>
       caisse — la basse, souvent posee sur le meme temps que la caisse claire,
       donnait l'impression qu'ils se declenchaient sur elle.</p>
   </div>
-
+ </div>
+ <div class="col">
   <div class="card">
     <h2>Reactions au son</h2>
     <p class="hint" style="margin-top:0">Chaque reaction se cale sur ce que
@@ -2094,7 +2039,6 @@ PAGE = r"""<!doctype html>
       par image : c'est ce qui permet d'en lancer des dizaines de milliers
       sans que le rendu s'effondre.</p>
   </div>
-
   <div class="card">
     <h2>Avaries d'image</h2>
     <p class="hint" style="margin-top:0">Les memes pannes que sur les
@@ -2169,7 +2113,6 @@ PAGE = r"""<!doctype html>
       pendant que le son continue tout droit. Des tranches courtes hachent,
       des longues desorientent.</p>
   </div>
-
   <div class="card">
     <h2>Echo, couleurs, spectrogramme</h2>
     <label for="echo">echo d'images &mdash; <span id="v-ec">0.00</span></label>
@@ -2198,7 +2141,6 @@ PAGE = r"""<!doctype html>
       par bande de frequences — baissez l'amplitude de la courbe pour bien le
       voir.</p>
   </div>
-
   <div class="card">
     <h2>Texture &mdash; trip hop, lo-fi</h2>
     <p class="hint" style="margin-top:0">Celles-ci ne frappent sur rien : elles
@@ -2223,14 +2165,73 @@ PAGE = r"""<!doctype html>
       Le <b>halo laiteux</b> releve les noirs et etale la lumiere, a l'oppose du
       contraste franc de l'oscilloscope.</p>
   </div>
+ </div>
+</div>
 
-  <div class="card">
-    <h2>Rendu</h2>
-    <div class="row">
+<div id="poignee" title="tirer pour changer la taille de l'apercu ; double-clic : taille d'origine"></div>
+<aside id="cote">
+  <div class="card" id="carteApercu">
+    <h2>Apercu</h2>
+    <div class="ecran vide" id="ecran">
+      <img id="shot" alt="">
+      <video id="clip" hidden loop controls playsinline></video>
+      <div id="ecranVide"><b>Deposez un morceau ici</b>ou cliquez pour le
+        choisir. Un MIDI, une image, une video deposes ici vont aussi a leur
+        place</div>
+    </div>
+    <div id="shoterr"></div>
+    <label for="scrub">instant du morceau &mdash; <span id="v-t">0.0 s</span></label>
+    <input type="range" id="scrub" min="0" max="100" step="0.1" value="0" disabled>
+    <div class="row trois" style="margin-top:8px">
+      <button class="ghost" id="toSplit">prochain dedoublement</button>
+      <button class="ghost" id="toDrop">prochain paroxysme</button>
+      <button class="ghost" id="hi">chercher un kick</button>
+    </div>
+    <div class="row lire" style="margin-top:8px">
+      <button id="lire" disabled>Lire en mouvement</button>
+      <select id="clipDur" title="duree de l'apercu anime"
+        aria-label="duree de l'apercu anime">
+        <option value="2">2 s</option>
+        <option value="4" selected>4 s</option>
+        <option value="8">8 s</option>
+        <option value="12">12 s</option>
+        <option value="16">16 s</option>
+      </select>
+    </div>
+    <div id="clipprog" hidden>
+      <div class="bar"><i id="cbar"></i></div>
+      <div class="hint" id="ctext"></div>
+      <button class="ghost" id="clipStop" style="margin-top:6px">Arreter</button>
+    </div>
+    <details class="plus"><summary>comment lire l'apercu</summary>
+    <p class="hint">L'apercu est une vraie image du rendu, calculee avec vos
+      reglages : ce que vous voyez ici est ce que vous obtiendrez.<br>
+      <b>Lire en mouvement</b> calcule pour de bon quelques secondes a partir
+      de l'instant regarde, avec le son, et les joue en boucle. C'est la seule
+      facon de juger ce qui bouge — begaiement, travelling, etincelles,
+      spectrogramme. La lecture est en 15 images par seconde pour ne pas faire
+      attendre : le rendu final, lui, en fera 30 ou 60.</p>
+    </details>
+  </div>
+ <div id="coteBas">
+  <div class="card" id="carteRendu">
+    <!-- le bouton et l'etat du rendu d'abord : juste sous l'apercu, ils
+         restent en vue sans rien faire defiler -->
+    <div class="tete"><h2>Rendu</h2>
+      <button id="go" disabled>Lancer le rendu</button></div>
+    <div id="prog" hidden>
+      <div class="bar"><i id="pbar"></i></div>
+      <div class="hint" id="ptext"></div>
+      <button class="ghost" id="stop" style="margin-top:6px;width:100%">
+        Arreter le rendu</button>
+    </div>
+    <div id="done" hidden style="margin-top:10px">
+      <a class="dl" id="dl">Telecharger</a>
+      <p class="hint" id="donepath"></p>
+    </div>
+    <div class="row quatre">
       <div><label for="start">depart (s)</label><input type="number" id="start" value="0" min="0" step="0.1"></div>
       <div><label for="dur">duree (s)</label><input type="number" id="dur" placeholder="tout" min="1" step="1"></div>
-    </div>
-    <div class="row">
       <div><label for="size">definition</label>
         <select id="size">
           <option value="1920x1080">1080p</option>
@@ -2245,64 +2246,128 @@ PAGE = r"""<!doctype html>
         <select id="fps"><option>30</option><option>60</option><option>24</option>
           <option>12</option></select></div>
     </div>
-    <label for="quality">qualite du fichier</label>
-    <select id="quality"></select>
-    <label><input type="checkbox" id="curve" checked style="width:auto;margin-right:6px">
-      bombe de l'ecran cathodique</label>
-    <button id="go" disabled style="margin-top:12px">Lancer le rendu</button>
-    <div id="prog" hidden>
-      <div class="bar"><i id="pbar"></i></div>
-      <div class="hint" id="ptext"></div>
-      <button class="ghost" id="stop" style="margin-top:6px;width:100%">
-        Arreter le rendu</button>
-    </div>
-    <div id="done" hidden style="margin-top:10px">
-      <a class="dl" id="dl">Telecharger</a>
-      <p class="hint" id="donepath"></p>
+    <div class="row">
+      <div><label for="quality">qualite du fichier</label>
+        <select id="quality"></select></div>
+      <label class="bombe"><input type="checkbox" id="curve" checked style="width:auto;margin-right:6px">
+        bombe de l'ecran cathodique</label>
     </div>
     <button class="ghost" id="stylesOuvre" style="margin-top:8px" disabled>
       Essayer un autre style</button>
   </div>
- </div>
-
- <div>
   <div class="card">
-    <h2>Apercu</h2>
-    <img id="shot" alt="apercu">
-    <video id="clip" hidden loop controls playsinline></video>
-    <div id="shoterr"></div>
-    <label for="scrub">instant du morceau &mdash; <span id="v-t">0.0 s</span></label>
-    <input type="range" id="scrub" min="0" max="100" step="0.1" value="0" disabled>
-    <div class="row" style="margin-top:8px">
-      <button class="ghost" id="toSplit">aller au prochain dedoublement</button>
-      <button class="ghost" id="toDrop">aller au prochain paroxysme</button>
-      <button class="ghost" id="hi">chercher un kick</button>
+    <h2>Morceau</h2>
+    <div class="drop" id="drop">
+      <b>Deposer un fichier</b>mp3, wav, flac, m4a&hellip;<br>ou cliquer pour choisir
     </div>
-    <div class="row" style="margin-top:8px">
-      <button id="lire" disabled>Lire en mouvement</button>
-      <div><label for="clipDur">duree</label>
-        <select id="clipDur">
-          <option value="2">2 s</option>
-          <option value="4" selected>4 s</option>
-          <option value="8">8 s</option>
-          <option value="12">12 s</option>
-          <option value="16">16 s</option>
-        </select></div>
+    <input type="file" id="file" accept="audio/*" hidden>
+    <div class="meta" id="trackmeta" hidden>
+      <span>duree <b id="m-dur">-</b></span>
+      <span>tempo <b id="m-bpm">-</b></span>
+      <span>coups <b id="m-hits">-</b></span>
+      <span>paroxysmes <b id="m-drops">-</b></span>
     </div>
-    <div id="clipprog" hidden>
-      <div class="bar"><i id="cbar"></i></div>
-      <div class="hint" id="ctext"></div>
-      <button class="ghost" id="clipStop" style="margin-top:6px">Arreter</button>
+  </div>
+  <div class="card">
+    <h2>Melodie (fichier MIDI)</h2>
+    <div class="drop" id="midiDrop">
+      <b>Deposer un fichier MIDI</b>.mid, .midi<br>ou cliquer pour choisir
     </div>
-    <p class="hint">L'apercu est une vraie image du rendu, calculee avec vos
-      reglages : ce que vous voyez ici est ce que vous obtiendrez.<br>
-      <b>Lire en mouvement</b> calcule pour de bon quelques secondes a partir
-      de l'instant regarde, avec le son, et les joue en boucle. C'est la seule
-      facon de juger ce qui bouge — begaiement, travelling, etincelles,
-      spectrogramme. La lecture est en 15 images par seconde pour ne pas faire
-      attendre : le rendu final, lui, en fera 30 ou 60.</p>
+    <input type="file" id="midifile" accept=".mid,.midi,audio/midi" hidden>
+    <div class="meta" id="midimeta" hidden>
+      <span>notes <b id="mi-n">-</b></span>
+      <span>etendue <b id="mi-e">-</b></span>
+      <span>premiere note <b id="mi-c">-</b></span>
+    </div>
+    <div id="midiReglages" hidden>
+      <label for="midiType">ce que contient le fichier</label>
+      <select id="midiType">
+        <option value="piano">une melodie (touches du clavier)</option>
+        <option value="batterie">une batterie (pads de toutes les machines)</option>
+      </select>
+      <label for="midiBpm">BPM du morceau</label>
+      <input type="number" id="midiBpm" min="20" max="300" step="0.01" value="">
+      <p class="hint" id="midiGrille">&nbsp;</p>
+      <label for="midiForce">eclat des touches jouees &mdash;
+        <span id="v-mif">1.00</span></label>
+      <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1">
+      <label for="midiOffset">avance / retard &mdash;
+        <span id="v-mio">0.00 s</span></label>
+      <input type="range" id="midiOffset" min="-60" max="60" step="0.001" value="0">
+      <p class="hint" id="midiSens">&nbsp;</p>
+      <div class="exact">
+        <label for="midiMs">decalage exact, en ms</label>
+        <input type="number" id="midiMs" step="1" value="0">
+      </div>
+      <div class="row" id="midiFin">
+        <button class="ghost" data-img="-1">&minus;1 image</button>
+        <button class="ghost" data-img="1">+1 image</button>
+        <button class="ghost" data-ms="-10">&minus;10 ms</button>
+        <button class="ghost" data-ms="10">+10 ms</button>
+      </div>
+      <div class="row" id="midiPas">
+        <button class="ghost" data-pas="-4">&minus;1 mesure</button>
+        <button class="ghost" data-pas="-1">&minus;1 temps</button>
+        <button class="ghost" data-pas="-0.25">&minus;1/4</button>
+        <button class="ghost" data-pas="0.25">+1/4</button>
+        <button class="ghost" data-pas="1">+1 temps</button>
+        <button class="ghost" data-pas="4">+1 mesure</button>
+      </div>
+      <p class="hint" id="midiOu">&nbsp;</p>
+      <p class="hint" id="midiImage">&nbsp;</p>
+      <label for="midiTempo">derive &mdash; <span id="v-mit">0.000 %</span></label>
+      <input type="range" id="midiTempo" min="-1" max="1" step="0.005" value="0">
+      <button class="ghost" id="midiMesure">Mesurer la derive</button>
+      <p class="hint" id="midiDerive">&nbsp;</p>
+      <label class="coche"><input type="checkbox" id="midiCale">
+        chercher le decalage tout seul</label>
+      <label class="coche"><input type="checkbox" id="midiTelQuel">
+        lire le fichier tel quel, sans le poser sur la grille du morceau</label>
+      <button class="ghost" id="midiOte">Oter ce fichier</button>
+    </div>
+    <input type="hidden" id="midi">
+    <p class="hint err" id="midiAvis" hidden>Aucun MiniFreak dans le plan des machines : la melodie ne sera jouee nulle part. Choisissez-le comme machine du debut, ou ajoutez-le au sequenceur.</p>
+    <details class="plus"><summary>comment caler la melodie</summary>
+    <p class="hint">Les vraies notes du morceau, une par une, jouees sur le
+      <b>clavier du MiniFreak</b> : c'est la touche exacte qui s'enfonce. La
+      MPC et le Digitakt n'ont pas de clavier &mdash; leurs pads restent a la
+      batterie, et le fichier n'y change rien.<br>
+      Le fichier est pris <b>tel quel</b> : un MIDI exporte du meme projet que
+      le morceau est deja a l'heure, son decalage vaut zero. La ligne sous les
+      boutons dit a quel instant de la video tombe la premiere note : lancez
+      l'apercu la, et regardez si la touche s'allume avec le son.<br>
+      <b>Si c'est decale d'un bout a l'autre</b>, servez-vous des boutons
+      plutot que du curseur. Un fichier exporte d'un projet tombe deja sur la
+      grille du morceau : ce qui lui manque n'est pas un reglage fin, c'est un
+      nombre entier de temps. Les boutons decalent d'exactement un temps ou une
+      mesure du morceau : on clique jusqu'a ce que ca tombe juste, sans jamais
+      sortir de la grille. Le curseur ne sert qu'a rattraper un fichier qui,
+      lui, n'est pas sur la grille du tout.<br>
+      <b>Si c'est cale au debut et faux a la fin</b>, ce n'est plus un
+      decalage mais une <b>derive</b> : la grille du fichier n'a pas tout a
+      fait le tempo du morceau, et aucun decalage ne la rattrape. Le bouton
+      <b>mesurer la derive</b> compare les deux grilles et pose le curseur.
+      Mesure sur le fichier d'essai : melodie 85,163 BPM, morceau 85,000
+      &mdash; 0,19 % d'ecart, soit sept centiemes de seconde au bout de
+      trente-cinq. L'etirement part de la premiere note, donc le calage deja
+      trouve ne bouge pas.<br>
+      <b>Chercher le decalage tout seul</b> compare les attaques du fichier a
+      celles du morceau. Mesure : sur un fichier percussif il retrouve le
+      decalage exactement ; sur une melodie il se trompe a tous les coups, et
+      sans qu'on puisse s'en apercevoir &mdash; un motif de doubles-croches
+      repetitif ressemble a lui-meme partout dans le morceau, et les
+      decalages candidats se tiennent alors a 3 % les uns des autres. A ne
+      cocher que pour une piste de batterie.<br>
+      Une note <b>tenue</b> n'allume pas sa touche indefiniment : au bout de
+      1,2 s la touche relache, meme si le son continue. Sans cela une nappe
+      gardait la moitie du clavier allumee et on ne voyait plus quelle note
+      venait d'etre jouee.<br>
+      Une note trop grave ou trop aigue pour le clavier y est ramenee par
+      octaves : la melodie garde ses notes, elle change seulement d'octave.</p>
+    </details>
   </div>
  </div>
+</aside>
 </main>
 
 <div id="styles" hidden>
@@ -2510,40 +2575,112 @@ function shot() {
   if ($('#encreBloc')) $('#encreBloc').hidden = $('#modeTrait').value === 'neon';
   if (!track) return;
   rendreLImage();
-  clearTimeout(pending);
-  pending = setTimeout(() => {           // on ne recalcule pas a chaque pixel
-    const n = ++shotSeq;
-    // la premiere image d'un morceau demande quelques secondes (le moteur
-    // depouille tout le son) : on le montre, sinon l'apercu a l'air casse.
-    $('#shot').classList.add('calcul');
-    // On passe par fetch plutot que par img.src : quand le serveur refuse,
-    // une balise <img> ne donne qu'une image cassee, sans dire pourquoi.
-    fetch('/still?' + params().toString()).then(async r => {
-      if (n !== shotSeq) return;             // un reglage a bouge entre-temps
-      if (r.status === 409) return;          // apercu abandonne, un autre arrive
-      if (!r.ok) {
-        let m = 'erreur ' + r.status;
-        try { m = (await r.json()).error || m; } catch (e) { /* pas du JSON */ }
-        throw new Error(m);
-      }
-      const url = URL.createObjectURL(await r.blob());
-      const vieux = $('#shot').dataset.blob;
-      if (vieux) URL.revokeObjectURL(vieux);
-      $('#shot').dataset.blob = url;
-      $('#shot').src = url;
-      $('#shot').classList.remove('calcul');
-      $('#shoterr').classList.remove('on');
-    }).catch(e => {
-      if (n !== shotSeq) return;
-      $('#shot').classList.remove('calcul');
-      // la version est rappelee ici : un message rapporte sans elle ne dit pas
-      // si la correction correspondante est deja installee ou non
-      $('#shoterr').textContent = "L'apercu n'a pas pu etre calcule : "
-        + e.message + "  [" + ($('#ver').textContent || "version inconnue") + "]";
-      $('#shoterr').classList.add('on');
-    });
-  }, 90);
+  apercuARefaire = true;
+  if (!apercuEnVol) { clearTimeout(pending); pending = setTimeout(calculerApercu, 25); }
 }
+
+/* L'apercu suit le reglage pendant qu'on le bouge : une seule image en calcul
+   a la fois, et des qu'elle arrive, la suivante part avec les reglages du
+   moment. Avant, chaque mouvement du curseur relancait l'attente : tant qu'on
+   le faisait glisser, l'image ne changeait pas. Une image coute ~0,13 s en
+   960x540 : on en voit ainsi six ou sept par seconde pendant le geste. */
+let apercuEnVol = false, apercuARefaire = false, minuteurCalcul = null;
+function calculerApercu() {
+  if (!apercuARefaire || !track) return;
+  apercuARefaire = false;
+  apercuEnVol = true;
+  const n = ++shotSeq;
+  // l'image ne s'assombrit que si le calcul traine — la premiere d'un
+  // morceau, ou un reglage qui reconstruit le moteur — : a chaque geste,
+  // elle clignoterait
+  clearTimeout(minuteurCalcul);
+  minuteurCalcul = setTimeout(() => $('#shot').classList.add('calcul'), 450);
+  // On passe par fetch plutot que par img.src : quand le serveur refuse,
+  // une balise <img> ne donne qu'une image cassee, sans dire pourquoi.
+  fetch('/still?' + params().toString()).then(async r => {
+    if (r.status === 409) return;          // apercu abandonne, un autre arrive
+    if (!r.ok) {
+      let m = 'erreur ' + r.status;
+      try { m = (await r.json()).error || m; } catch (e) { /* pas du JSON */ }
+      throw new Error(m);
+    }
+    const url = URL.createObjectURL(await r.blob());
+    const vieux = $('#shot').dataset.blob;
+    if (vieux) URL.revokeObjectURL(vieux);
+    $('#shot').dataset.blob = url;
+    $('#shot').src = url;
+    $('#ecranVide').hidden = true;
+    $('#ecran').classList.remove('vide');
+    $('#shoterr').classList.remove('on');
+  }).catch(e => {
+    if (n !== shotSeq) return;
+    // la version est rappelee ici : un message rapporte sans elle ne dit pas
+    // si la correction correspondante est deja installee ou non
+    $('#shoterr').textContent = "L'apercu n'a pas pu etre calcule : "
+      + e.message + "  [" + ($('#ver').textContent || "version inconnue") + "]";
+    $('#shoterr').classList.add('on');
+  }).finally(() => {
+    clearTimeout(minuteurCalcul);
+    $('#shot').classList.remove('calcul');
+    apercuEnVol = false;
+    if (apercuARefaire) calculerApercu();
+  });
+}
+
+/* Tout ce qu'on depose sur l'apercu va a sa place : un morceau, une melodie,
+   une image ou une video de fond. */
+(function () {
+  const ecran = $('#ecran');
+  ecran.ondragover = e => { e.preventDefault(); ecran.classList.add('over'); };
+  ecran.ondragleave = () => ecran.classList.remove('over');
+  ecran.ondrop = e => {
+    e.preventDefault(); ecran.classList.remove('over');
+    const f = e.dataTransfer.files[0];
+    if (!f) return;
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    if (['mid', 'midi'].includes(ext)) return sendMidi(f);
+    if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic', 'mp4', 'mov',
+         'webm', 'mkv', 'avi', 'm4v'].includes(ext)) return sendBackdrop(f);
+    upload(f);
+  };
+  // tant qu'il n'y a pas de morceau, un clic sur l'ecran le fait choisir
+  ecran.onclick = () => { if (ecran.classList.contains('vide')) $('#file').click(); };
+})();
+
+/* La poignee entre les deux fenetres : on la tire pour grandir ou
+   rapetisser l'apercu, un double-clic revient a la largeur d'origine. La
+   largeur choisie est gardee pour la prochaine ouverture. */
+(function () {
+  const p = $('#poignee'), m = document.querySelector('main');
+  if (!p) return;
+  const CLE = 'omnipotard.largeurApercu';
+  const borne = w => Math.max(320, Math.min(w, window.innerWidth - 440));
+  const poser = w => m.style.setProperty('--cote', Math.round(borne(w)) + 'px');
+  try { const w = +localStorage.getItem(CLE); if (w > 0) poser(w); } catch (e) {}
+  let x0 = null, w0 = 0;
+  p.addEventListener('pointerdown', e => {
+    x0 = e.clientX; w0 = $('#cote').getBoundingClientRect().width;
+    p.setPointerCapture(e.pointerId); p.classList.add('tire'); e.preventDefault();
+  });
+  p.addEventListener('pointermove', e => { if (x0 !== null) poser(w0 + x0 - e.clientX); });
+  const lacher = () => {
+    if (x0 === null) return;
+    x0 = null; p.classList.remove('tire');
+    try { localStorage.setItem(CLE, Math.round($('#cote').getBoundingClientRect().width)); }
+    catch (e) {}
+  };
+  p.addEventListener('pointerup', lacher);
+  p.addEventListener('pointercancel', lacher);
+  p.addEventListener('dblclick', () => {
+    m.style.removeProperty('--cote');
+    try { localStorage.removeItem(CLE); } catch (e) {}
+  });
+  // une fenetre retrecie ne doit pas laisser l'apercu manger les reglages
+  window.addEventListener('resize', () => {
+    const v = parseFloat(m.style.getPropertyValue('--cote'));
+    if (v) poser(v);
+  });
+})();
 
 /* ---------- reglages ---------- */
 $('#palette').onchange = e => {
@@ -3138,34 +3275,40 @@ $('#stop').onclick = async () => {
   catch (e) { $('#stop').disabled = false; }
 };
 
+/* L'avancement du rendu se lit aussi dans le titre de l'onglet : on le suit
+   depuis une autre fenetre, ou la colonne de droite defilee plus bas. */
+const TITRE = document.title;
+function titreRendu(t) { document.title = t ? t + ' \u2014 ' + TITRE : TITRE; }
 function watch(id) {
   clearInterval(jobTimer);
   jobTimer = setInterval(async () => {
     const j = await (await fetch('/job?id=' + id)).json();
     if (j.state === 'erreur') {
-      clearInterval(jobTimer); $('#prog').hidden = true;
+      clearInterval(jobTimer); $('#prog').hidden = true; titreRendu('');
       setStatus('echec du rendu : ' + j.error, true); $('#go').disabled = false;
       return;
     }
     if (j.state === 'fini') {
-      clearInterval(jobTimer);
-      $('#pbar').style.width = '100%';
-      $('#ptext').textContent = 'termine';
+      // la barre et « Arreter » s'effacent : il ne reste que le fichier
+      clearInterval(jobTimer); $('#prog').hidden = true;
       $('#dl').href = '/download?id=' + id;
       $('#dl').setAttribute('download', j.name);
       $('#donepath').textContent = 'ecrit dans out/studio/' + j.name +
         ' (' + (j.size / 1048576).toFixed(1) + ' Mo)';
       $('#done').hidden = false; $('#go').disabled = false;
+      titreRendu('rendu termine');
       setStatus('rendu termine — d\'autres allures a essayer dans l\'onglet Styles');
       return;
     }
     if (j.state === 'arrete') {
       clearInterval(jobTimer); $('#prog').hidden = true; $('#go').disabled = false;
+      titreRendu('');
       setStatus('rendu arrete : le fichier commence a ete efface');
       return;
     }
     const pc = j.total ? j.done / j.total * 100 : 0;
     $('#pbar').style.width = pc.toFixed(1) + '%';
+    titreRendu(j.state === 'rendu' ? 'rendu ' + Math.floor(pc) + ' %' : 'rendu');
     $('#ptext').textContent = j.state === 'rendu'
       ? j.done + '/' + j.total + ' images — encore ' + fmt(j.eta)
       : j.state === 'arret' ? 'arret en cours\u2026' : j.state + '…';
@@ -3234,9 +3377,25 @@ fetch('/config').then(r => r.json())
 
     /* ---- une phrase sous chaque reglage, et sa frequence ---- */
     AIDE = c.aide || {}; COMPTE = c.compte || {};
+    // Sous l'apercu la place est comptee : l'explication du rendu et du
+    // curseur d'instant passe en bulle, au survol. La qualite garde sa ligne,
+    // qui dit ce que donne celle qui est choisie.
+    const EN_BULLE = ['scrub', 'size', 'fps', 'quality'];
     for (const [id, phrase] of Object.entries(AIDE)) {
       const el = $('#' + id);
       if (!el) continue;
+      if (EN_BULLE.includes(id)) {
+        const bulle = phrase.replace(/<[^>]*>/g, '');
+        el.title = bulle;
+        const lab = document.querySelector('label[for="' + id + '"]');
+        if (lab) lab.title = bulle;
+        if (!(id in COMPTE)) continue;
+        const d = document.createElement('div');
+        d.className = 'aide';
+        d.innerHTML = '<b class="freq" id="f-' + id + '"></b>';
+        el.parentNode.insertBefore(d, el.nextSibling);
+        continue;
+      }
       // Le texte se pose apres le selecteur d'instrument quand celui-ci suit
       // immediatement le curseur, pour que le bloc « effet + instrument +
       // explication » reste solidaire. Exiger le voisinage direct evite de

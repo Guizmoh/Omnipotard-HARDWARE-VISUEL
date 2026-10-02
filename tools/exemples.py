@@ -13,7 +13,8 @@ caisse, caisse claire, clap, charleys, basse, accords, percussions — celui du
 verificateur de batterie), et l'image de fond des exemples qui en demandent
 une est dessinee. Les exemples dependent du moteur : ils sont refaits a chaque
 version, dans out/studio/exemples/<version>/. Le studio les lance tout seul,
-en tache de fond, la premiere fois qu'il demarre sur une version nouvelle.
+en tache de fond, la premiere fois qu'il demarre sur une version nouvelle ;
+une fois tous faits, ceux des versions precedentes sont effaces.
 
     python3 tools/exemples.py            # tous
     python3 tools/exemples.py split ring # quelques-uns
@@ -202,6 +203,7 @@ def generer(sortie=None, seulement=None, journal=print):
     import mpc_performance as MP
     import studio as S
     from PIL import Image
+    par_defaut = sortie is None
     sortie = sortie or dossier()
     os.makedirs(sortie, exist_ok=True)
     wav = os.path.join(sortie, "demo.wav")
@@ -280,7 +282,25 @@ def generer(sortie=None, seulement=None, journal=print):
     if len(prets) == len(liste()):
         with open(os.path.join(sortie, "index.json"), "w") as f:
             json.dump(sorted(prets), f)
+        if par_defaut:
+            menage(sortie)
     return faits
+
+
+def menage(garde):
+    """Efface les exemples des versions precedentes.
+
+    Chaque version refait les siens dans un dossier neuf : sans ce menage,
+    chaque mise a jour laissait 33 Mo d'images que plus rien ne montre. Seuls
+    les dossiers nommes comme une version sont touches.
+    """
+    import shutil
+    parent, nom_garde = os.path.split(garde)
+    for nom in os.listdir(parent):
+        chemin = os.path.join(parent, nom)
+        if (nom != nom_garde and os.path.isdir(chemin)
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}\.\d+", nom)):
+            shutil.rmtree(chemin, ignore_errors=True)
 
 
 def _nom(cle):
