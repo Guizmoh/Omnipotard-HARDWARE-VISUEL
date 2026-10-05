@@ -48,7 +48,8 @@ SRC="$TMP/$RACINE"
 [ -d "$SRC/tools" ] || { echo "Archive inattendue."; exit 1; }
 
 mkdir -p tools
-cp -f "$SRC"/tools/* tools/
+# recursif : les sous-dossiers de tools (les polices de la page) suivent
+cp -Rf "$SRC"/tools/. tools/
 # tous les fichiers de la racine, et non une liste tenue a la main : un
 # lanceur ajoute depuis n'arrivait jamais jusqu'ici. Sauf ce script-ci, que
 # le shell relit au fur et a mesure et qu'il ne faut pas reecrire sous ses

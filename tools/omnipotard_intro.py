@@ -37,7 +37,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.12"
+VERSION = "2026-10-02.13"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -76,12 +76,12 @@ PLANCHER_AVARIE = 0.45
 # ni sur un telephone, ni dans un navigateur : d'ou le choix laisse.
 QUALITES = {
     "compatible": {"pix": "yuv420p", "profil": "high", "crf": 17,
-                   "quoi": "lisible partout : telephones, navigateurs, reseaux"},
+                   "quoi": "lisible partout : téléphones, navigateurs, réseaux"},
     "net": {"pix": "yuv444p", "profil": "high444", "crf": 16,
             "quoi": "trait bien plus net, mais VLC ou un logiciel de montage "
                     "seulement"},
     "master": {"pix": "yuv444p", "profil": "high444", "crf": 10,
-               "quoi": "pour remonter la video ensuite ; fichier lourd"},
+               "quoi": "pour remonter la vidéo ensuite ; fichier lourd"},
 }
 
 
@@ -144,16 +144,16 @@ _APERCU_OK = None
 # vient de rendre une video qu'on aime, on veut la voir autrement, pas la
 # refaire.
 STYLES = {
-    "neon de nuit": {
+    "néon de nuit": {
         "quoi": "Orange chaud, halo large, coins profonds : une enseigne "
-                "allumee dans une rue sombre.",
+                "allumée dans une rue sombre.",
         "reglages": {"palette": "orange", "neon": 2.1, "reflet": 0.85,
                      "halo_doux": 1.1, "vignettage": 1.7, "aberration": 0.35,
                      "trail": 1.5},
     },
     "archive cathodique": {
-        "quoi": "Lignes de tube marquees, poussiere, bande qui flotte, cadence "
-                "tenue : un vieil enregistrement d'ecran.",
+        "quoi": "Lignes de tube marquées, poussière, bande qui flotte, cadence "
+                "tenue : un vieil enregistrement d'écran.",
         "reglages": {"palette": "vert", "scanlines": 2.0, "poussiere": 2.0,
                      "flottement": 1.6, "vignettage": 2.0, "cadence": 2,
                      "halo_doux": 0.9, "nettete": 0.72, "aberration": 0.5},
@@ -173,16 +173,16 @@ STYLES = {
                      "aberration": 1.0, "trail": 1.6, "split": 1.6,
                      "wave_gain": 1.4},
     },
-    "reve": {
-        "quoi": "Echos de la machine, halo laiteux, couleurs par instrument : "
+    "rêve": {
+        "quoi": "Échos de la machine, halo laiteux, couleurs par instrument : "
                 "tout flotte.",
         "reglages": {"echo": 0.45, "echo_n": 3, "echo_delay": 0.08,
                      "halo_doux": 0.9, "couleurs": 1.3, "wobble": 0.40,
                      "neon": 0.75, "palette": "bleu"},
     },
-    "epure": {
+    "épure": {
         "quoi": "Rien que le trait : ni lignes, ni halo, ni avarie. La machine "
-                "dessinee comme un plan.",
+                "dessinée comme un plan.",
         "reglages": {"scanlines": 0.0, "vignettage": 0.35, "neon": 0.8,
                      "nettete": 1.45, "halo_doux": 0.0, "glitch": 0.0,
                      "split": 0.0, "aberration": 0.0},
@@ -281,218 +281,218 @@ PRESETS = {
 # ==========================================================================
 
 AIDE = {
-    "machine": "La machine dessinee. Chacune a ses organes : les pads de la "
-               "MPC, les touches du MiniFreak, les declencheurs du Digitakt. "
-               "Les coups les allument de la meme facon. C'est celle du debut "
-               "quand le sequenceur en fait venir d'autres.",
-    "passage": "Le temps que met une machine a se deformer jusqu'a devenir la "
-               "suivante. La deformation precede l'instant inscrit, de sorte "
-               "que la machine est bien posee quand cet instant arrive. A "
-               "zero, le changement est sec.",
-    "passageTurb": "L'ondulation du trace pendant la deformation. A zero les "
-                   "traits glissent proprement d'une forme a l'autre ; plus "
-                   "haut, ils serpentent comme un faisceau derange.",
-    "midiForce": "L'eclat des touches du clavier jouees par le fichier MIDI. "
-                 "A zero le fichier est charge mais rien ne s'allume. La "
-                 "melodie ne se joue que sur le MiniFreak : la MPC et le "
-                 "Digitakt n'ont pas de clavier, leurs pads restent a la "
+    "machine": "La machine dessinée. Chacune a ses organes : les pads de la "
+               "MPC, les touches du MiniFreak, les déclencheurs du Digitakt. "
+               "Les coups les allument de la même façon. C'est celle du début "
+               "quand le séquenceur en fait venir d'autres.",
+    "passage": "Le temps que met une machine à se déformer jusqu'à devenir la "
+               "suivante. La déformation précède l'instant inscrit, de sorte "
+               "que la machine est bien posée quand cet instant arrive. À "
+               "zéro, le changement est sec.",
+    "passageTurb": "L'ondulation du tracé pendant la déformation. À zéro les "
+                   "traits glissent proprement d'une forme à l'autre ; plus "
+                   "haut, ils serpentent comme un faisceau dérangé.",
+    "midiForce": "L'éclat des touches du clavier jouées par le fichier MIDI. "
+                 "À zéro le fichier est chargé mais rien ne s'allume. La "
+                 "mélodie ne se joue que sur le MiniFreak : la MPC et le "
+                 "Digitakt n'ont pas de clavier, leurs pads restent à la "
                  "batterie.",
-    "eclatPads": "La lumiere des pads frappes — et des touches du MiniFreak "
-                 "quand les coups les allument. A 1 un pad recoit autant de "
-                 "lumiere qu'une touche de clavier jouee ; montez-le si la "
-                 "batterie se voit mal, baissez-le si elle eblouit. Le reste "
-                 "du trace ne bouge pas.",
-    "couleurCoups": "La couleur de ce qui s'allume a chaque coup. « celle du "
+    "eclatPads": "La lumière des pads frappés — et des touches du MiniFreak "
+                 "quand les coups les allument. À 1 un pad reçoit autant de "
+                 "lumière qu'une touche de clavier jouée ; montez-le si la "
+                 "batterie se voit mal, baissez-le si elle éblouit. Le reste "
+                 "du tracé ne bouge pas.",
+    "couleurCoups": "La couleur de ce qui s'allume à chaque coup. « celle du "
                     "trait » garde la palette ; « une couleur au choix » "
                     "prend celle du nuancier ; « une par instrument » met la "
                     "grosse caisse en rouge, la caisse claire en jaune, le "
                     "charley en cyan, et sur le clavier une teinte par note "
-                    "de la gamme ; « au hasard » en tire une nouvelle a "
+                    "de la gamme ; « au hasard » en tire une nouvelle à "
                     "chaque coup.",
-    "modeTrait": "Ce qu'est le trait. « neon » : une lumiere, qui s'ajoute "
+    "modeTrait": "Ce qu'est le trait. « néon » : une lumière, qui s'ajoute "
                  "au fond — parfaite sur le sombre, perdue sur un ciel "
-                 "blanc. « encre » : un trait fonce peint par-dessus le "
+                 "blanc. « encre » : un trait foncé peint par-dessus le "
                  "fond, pour les fonds clairs ; les coups y gardent leur "
                  "couleur. « auto » : chaque point choisit selon ce qui est "
-                 "derriere lui, neon sur le sombre, encre sur le clair — le "
-                 "mode d'une video de ciel ou de nuages.",
-    "encre": "La couleur du trait en mode encre ou auto. Fonce par defaut ; "
-             "un bleu nuit ou un brun sepia changent tout le dessin.",
-    "detourage": "Un liseré autour du trait qui le detache du fond : sombre "
-                 "en neon (le ciel s'assombrit autour de la machine), clair "
-                 "en encre. A zero, rien ne change.",
-    "inverser": "Le negatif de toute l'image : le noir devient blanc, le "
+                 "derrière lui, néon sur le sombre, encre sur le clair — le "
+                 "mode d'une vidéo de ciel ou de nuages.",
+    "encre": "La couleur du trait en mode encre ou auto. Foncé par défaut ; "
+             "un bleu nuit ou un brun sépia changent tout le dessin.",
+    "detourage": "Un liseré autour du trait qui le détache du fond : sombre "
+                 "en néon (le ciel s'assombrit autour de la machine), clair "
+                 "en encre. À zéro, rien ne change.",
+    "inverser": "Le négatif de toute l'image : le noir devient blanc, le "
                 "vert devient magenta. Avec un fond sombre, cela donne un "
-                "dessin sur papier ; avec une video, un ciel en negatif.",
+                "dessin sur papier ; avec une vidéo, un ciel en négatif.",
     "couleurCoupsLibre": "La couleur des coups quand « une couleur au "
                          "choix » est retenue.",
-    "textureTouches": "Ce qui remplit une touche ou un pad allume : la nappe "
+    "textureTouches": "Ce qui remplit une touche ou un pad allumé : la nappe "
                       "pleine du clavier, des lignes, des hachures, un "
-                      "quadrillage, des points, des cadres emboites, un "
-                      "eclat qui brille au centre, ou un contour epais. A "
-                      "eclat egal, toutes portent a peu pres la meme "
-                      "lumiere.",
+                      "quadrillage, des points, des cadres emboîtés, un "
+                      "éclat qui brille au centre, ou un contour épais. À "
+                      "éclat égal, toutes portent à peu près la même "
+                      "lumière.",
     "midiOffset": "Avance ou retarde le fichier MIDI, en secondes, par "
-                  "rapport au calage trouve tout seul. A utiliser si les "
-                  "touches s'allument un peu avant ou un peu apres la "
-                  "melodie entendue.",
+                  "rapport au calage trouvé tout seul. À utiliser si les "
+                  "touches s'allument un peu avant ou un peu après la "
+                  "mélodie entendue.",
     "vignettage": "Assombrit les coins de l'image, comme l'optique d'un tube. "
-                  "A 1 c'est la dalle d'origine, a 0 elle est plate, au-dela "
+                  "À 1 c'est la dalle d'origine, à 0 elle est plate, au-delà "
                   "le cadre se creuse et le regard se porte au centre.",
-    "scanlines": "Le peigne horizontal des lignes de tube. A 1 c'est la dalle "
-                 "d'origine, a 0 l'image est lisse. Marque, il donne le grain "
-                 "d'un moniteur filme.",
-    "aberration": "La frange de couleur d'un objectif : rouge d'un cote, bleu "
+    "scanlines": "Le peigne horizontal des lignes de tube. À 1 c'est la dalle "
+                 "d'origine, à 0 l'image est lisse. Marqué, il donne le grain "
+                 "d'un moniteur filmé.",
+    "aberration": "La frange de couleur d'un objectif : rouge d'un côté, bleu "
                   "de l'autre, et seulement en bord de champ — un objectif ne "
-                  "disperse pas au milieu. Elle est permanente, la ou le "
-                  "dedoublement du trait part sur les gros subs et frappe "
-                  "toute l'image. Elle ne coute rien : un decalage entier de "
+                  "disperse pas au milieu. Elle est permanente, là où le "
+                  "dédoublement du trait part sur les gros subs et frappe "
+                  "toute l'image. Elle ne coûte rien : un décalage entier de "
                   "deux plans, pas un rechantillonnage.",
     "midiType": "Ce que contient le fichier. En piano, chaque note allume la "
                 "touche de sa hauteur, sur le clavier du MiniFreak. En batterie, "
-                "la hauteur designe un instrument : chacun prend un pad, du "
+                "la hauteur désigne un instrument : chacun prend un pad, du "
                 "plus grave au plus aigu, et cela sur n'importe quelle machine "
-                "— le fichier remplace alors les coups devines dans le son.",
-    "midiTempo": "Corrige la derive d'un fichier lu tel quel, quand la "
-                 "melodie est calee au debut du plan et fausse a la fin. "
-                 "Inutile sinon : posee sur la grille du morceau, la melodie "
-                 "en a deja le tempo exact. Positif = la melodie retarde, "
-                 "negatif = elle avance.",
-    "midiBpm": "Le tempo du morceau. Le studio le propose — mesure sur la "
+                "— le fichier remplace alors les coups devinés dans le son.",
+    "midiTempo": "Corrige la dérive d'un fichier lu tel quel, quand la "
+                 "mélodie est calée au début du plan et fausse à la fin. "
+                 "Inutile sinon : posée sur la grille du morceau, la mélodie "
+                 "en a déjà le tempo exact. Positif = la mélodie retarde, "
+                 "négatif = elle avance.",
+    "midiBpm": "Le tempo du morceau. Le studio le propose — mesuré sur la "
                "batterie — et on le corrige s'il se trompe, par exemple s'il "
-               "annonce la moitie du vrai tempo. Les notes du fichier sont "
-               "posees sur la grille du morceau, mesuree au millieme autour "
-               "de ce tempo : elles ne derivent plus, quel que soit le tempo "
+               "annonce la moitié du vrai tempo. Les notes du fichier sont "
+               "posées sur la grille du morceau, mesurée au millième autour "
+               "de ce tempo : elles ne dérivent plus, quel que soit le tempo "
                "que le fichier annonce, ou s'il n'en annonce aucun.",
     "midiTelQuel": "Lit le fichier en secondes, comme avant, sans le poser "
-                   "sur la grille du morceau. A ne cocher que si la grille se "
+                   "sur la grille du morceau. À ne cocher que si la grille se "
                    "trompe — un morceau sans batterie, par exemple.",
-    "preset": "Repose tous les curseurs sur un point de depart. Tout reste "
-              "modifiable ensuite. « Mes reglages » sont les votres, gardes "
+    "preset": "Repose tous les curseurs sur un point de départ. Tout reste "
+              "modifiable ensuite. « Mes réglages » sont les vôtres, gardés "
               "d'une fois sur l'autre.",
     "palette": "La teinte du trait. « perso » ouvre un nuancier libre.",
     "trait": "La couleur du trait quand la palette est « perso ».",
-    "bg": "La texture de la dalle, derriere la machine.",
+    "bg": "La texture de la dalle, derrière la machine.",
     "bgColor": "La couleur de cette texture.",
-    "bgStrength": "Son intensite. Le faisceau etant additif, un fond clair "
+    "bgStrength": "Son intensité. Le faisceau étant additif, un fond clair "
                   "mange le contraste du trait.",
-    "bgClear": "Creuse la texture derriere la machine pour qu'elle s'y detache.",
-    "bdStrength": "La presence de l'image ou de la video de fond.",
-    "bdClear": "Creuse l'image derriere la machine, comme pour la texture.",
-    "screenDim": "L'opacite de la dalle de la MPC. A zero, le fond se voit au "
-                 "travers et l'ecran a l'air en verre.",
-    "bdSharp": "De 0 (fondu, quart de definition) a 1 (net, pleine "
-               "definition). Un fond net mange le contraste du trait.",
-    "travel": "Quelle part de l'image est parcourue du debut a la fin du "
+    "bgClear": "Creuse la texture derrière la machine pour qu'elle s'y détache.",
+    "bdStrength": "La présence de l'image ou de la vidéo de fond.",
+    "bdClear": "Creuse l'image derrière la machine, comme pour la texture.",
+    "screenDim": "L'opacité de la dalle de la MPC. À zéro, le fond se voit au "
+                 "travers et l'écran a l'air en verre.",
+    "bdSharp": "De 0 (fondu, quart de définition) à 1 (net, pleine "
+               "définition). Un fond net mange le contraste du trait.",
+    "travel": "Quelle part de l'image est parcourue du début à la fin du "
               "morceau. Vingt pour cent suffisent.",
-    "travelMode": "Le sens du deplacement : on entre dans l'image, on s'en "
-                  "eloigne, ou on la balaye.",
-    "fondVitesse": "La vitesse des videos de fond : au milieu, leur vitesse "
-                   "normale ; a gauche le ralenti (jusqu'a quatre fois plus "
-                   "lent), a droite l'accelere (quatre fois plus vite). Un "
-                   "time-lapse de ciel prend vie accelere, s'apaise ralenti.",
-    "fondBoucle": "Ce que fait la suite arrivee au bout : reprendre du debut, "
-                  "ou repartir a l'envers puis a l'endroit, sans fin — "
+    "travelMode": "Le sens du déplacement : on entre dans l'image, on s'en "
+                  "éloigne, ou on la balaye.",
+    "fondVitesse": "La vitesse des vidéos de fond : au milieu, leur vitesse "
+                   "normale ; à gauche le ralenti (jusqu'à quatre fois plus "
+                   "lent), à droite l'accélère (quatre fois plus vite). Un "
+                   "time-lapse de ciel prend vie accéléré, s'apaise ralenti.",
+    "fondBoucle": "Ce que fait la suite arrivée au bout : reprendre du début, "
+                  "ou repartir à l'envers puis à l'endroit, sans fin — "
                   "l'aller-retour ne saute jamais.",
-    "fondFondu": "Le fondu enchaine d'un fond au suivant, et du dernier au "
-                 "premier quand la suite reprend. A zero, une coupe franche.",
-    "fondPhoto": "Le temps qu'une photo reste a l'ecran dans une suite de "
+    "fondFondu": "Le fondu enchaîné d'un fond au suivant, et du dernier au "
+                 "premier quand la suite reprend. À zéro, une coupe franche.",
+    "fondPhoto": "Le temps qu'une photo reste à l'écran dans une suite de "
                  "fonds, fondus compris.",
-    "split": "Le trait se separe en trois copies decalees, rouge et bleu, puis "
+    "split": "Le trait se sépare en trois copies décalées, rouge et bleu, puis "
              "se recolle. La liste dit quels coups ont le droit de le lancer.",
-    "splitCount": "Combien de fois au plus dans la video. Deux dedoublements "
-                  "ne peuvent pas tomber a moins de 25 secondes.",
-    "splitPx": "L'ecart entre les trois copies, en pixels.",
-    "wobble": "Fait onduler le trace de la machine en permanence. A zero, "
+    "splitCount": "Combien de fois au plus dans la vidéo. Deux dédoublements "
+                  "ne peuvent pas tomber à moins de 25 secondes.",
+    "splitPx": "L'écart entre les trois copies, en pixels.",
+    "wobble": "Fait onduler le tracé de la machine en permanence. À zéro, "
               "trait net.",
     "snare": "La caisse claire embrase le trait en jaune et enfle son halo.",
-    "wave": "L'amplitude de la courbe sonore derriere la machine.",
+    "wave": "L'amplitude de la courbe sonore derrière la machine.",
     "wavePunch": "De combien cette courbe gonfle sur les temps forts.",
     "waveSmooth": "Lissage de la courbe : large, elle suit le grave et se "
-                  "calme ; etroit, elle tremble au detail.",
-    "trail": "La trainee que laisse la courbe. Elle s'allonge quand plusieurs "
+                  "calme ; étroit, elle tremble au détail.",
+    "trail": "La traînée que laisse la courbe. Elle s'allonge quand plusieurs "
              "instruments jouent ensemble.",
-    "glitch": "Les rafales de tranches decalees sur les montees du morceau.",
-    "title": "Le nom ecrit sur la dalle. Vide, c'est celui du fichier.",
+    "glitch": "Les rafales de tranches décalées sur les montées du morceau.",
+    "title": "Le nom écrit sur la dalle. Vide, c'est celui du fichier.",
     "punch": "L'image respire : un zoom bref sur chaque coup.",
-    "shake": "L'image est bousculee d'un cran sur chaque coup.",
-    "parts": "L'eclat des braises ejectees. Elles naissent des traits memes de "
+    "shake": "L'image est bousculée d'un cran sur chaque coup.",
+    "parts": "L'éclat des braises éjectées. Elles naissent des traits mêmes de "
              "la machine et partent perpendiculairement.",
-    "partsN": "Combien de braises par coup. Leur eclat baisse a mesure "
+    "partsN": "Combien de braises par coup. Leur éclat baisse à mesure "
               "qu'elles se multiplient.",
-    "partsSpeed": "Jusqu'ou elles filent avant de s'eteindre.",
+    "partsSpeed": "Jusqu'où elles filent avant de s'éteindre.",
     "partsLife": "Combien de temps elles restent visibles.",
     "ring": "Un anneau s'ouvre depuis la machine et s'efface.",
     "gridPulse": "La grille du fond s'allume sur le coup.",
-    "bgFlash": "L'image de fond est eclairee comme par un flash. Sans image de "
+    "bgFlash": "L'image de fond est éclairée comme par un flash. Sans image de "
                "fond, rien ne se voit.",
     "tranches": "Des bandes horizontales de l'image partent de travers.",
-    "blocs": "Des rectangles sont pris ailleurs dans l'image et recopies.",
+    "blocs": "Des rectangles sont pris ailleurs dans l'image et recopiés.",
     "roll": "Le tube perd sa synchro : l'image saute, avec sa barre de couture.",
-    "ghost": "Une copie decalee et transparente se superpose a l'image.",
-    "invert": "Le coeur du trait se replie vers le sombre en gardant ses bords "
+    "ghost": "Une copie décalée et transparente se superpose à l'image.",
+    "invert": "Le cœur du trait se replie vers le sombre en gardant ses bords "
               "lumineux.",
-    "stut": "L'image decroche du son et rejoue en boucle un bout pris a "
+    "stut": "L'image décroche du son et rejoue en boucle un bout pris à "
             "l'instant du coup. Le son, lui, continue.",
-    "stutLoop": "La longueur du bout rejoue. Sous une image, c'est un gel pur ; "
-                "deux ou trois images donnent un sursaut repete.",
-    "miroir": "L'image se replie sur elle-meme, en largeur ou en hauteur.",
+    "stutLoop": "La longueur du bout rejoué. Sous une image, c'est un gel pur ; "
+                "deux ou trois images donnent un sursaut répété.",
+    "miroir": "L'image se replie sur elle-même, en largeur ou en hauteur.",
     "ondul": "Le balayage ondule et la machine semble fondre.",
     "mosaic": "L'image tombe en gros pixels.",
-    "kaleido": "L'image repetee en grille, un carreau sur deux retourne.",
-    "cisaille": "L'image penche d'un bloc, comme cisaillee.",
+    "kaleido": "L'image répétée en grille, un carreau sur deux retourné.",
+    "cisaille": "L'image penche d'un bloc, comme cisaillée.",
     "coupure": "L'image s'absente, deux images durant.",
     "tapestop": "Le temps ralentit puis rattrape d'un coup, comme une bande "
                 "qui patine.",
-    "scramble": "Le temps decoupe en blocs et rejoue dans le desordre, "
+    "scramble": "Le temps découpé en blocs et rejoué dans le désordre, "
                 "pendant que le son continue tout droit.",
-    "scrLen": "La longueur d'un bloc. Court, ca hache ; long, ca desoriente.",
-    "echo": "La machine telle qu'elle etait il y a quelques centiemes, de plus "
-            "en plus pale, dessinee sous l'image du moment.",
-    "echoN": "Combien d'echos empiles.",
-    "echoDelay": "L'ecart entre deux echos.",
-    "couleurs": "Le trait prend la teinte du dernier instrument frappe : rouge "
+    "scrLen": "La longueur d'un bloc. Court, ça hache ; long, ça désoriente.",
+    "echo": "La machine telle qu'elle était il y a quelques centièmes, de plus "
+            "en plus pâle, dessinée sous l'image du moment.",
+    "echoN": "Combien d'échos empilés.",
+    "echoDelay": "L'écart entre deux échos.",
+    "couleurs": "Le trait prend la teinte du dernier instrument frappé : rouge "
                 "la grosse caisse, jaune la caisse claire, cyan le charley, "
                 "violet la basse.",
-    "spectro": "Les trois dernieres secondes du morceau deroulees sur la "
-               "dalle, une ligne par bande de frequences. Baisser l'amplitude "
+    "spectro": "Les trois dernières secondes du morceau déroulées sur la "
+               "dalle, une ligne par bande de fréquences. Baisser l'amplitude "
                "de la courbe pour bien le voir.",
-    "cadence": "Chaque image gardee plusieurs fois : la video avance par "
+    "cadence": "Chaque image gardée plusieurs fois : la vidéo avance par "
                "paliers sans rien ralentir.",
-    "haloDoux": "Les noirs remontent et la lumiere s'etale, a l'oppose du "
+    "haloDoux": "Les noirs remontent et la lumière s'étale, à l'opposé du "
                 "contraste franc de l'oscilloscope.",
     "poussiere": "Grains, rayures verticales et cheveux de pellicule.",
-    "flottement": "Lent va-et-vient de l'image, comme une cassette fatiguee.",
-    "taille": "La place que prend la machine dans l'image. En la reduisant "
-              "on decouvre le fond autour d'elle ; le quadrillage et le fil "
-              "du morceau, eux, gardent la largeur de l'ecran.",
-    "presence": "L'eclat de la machine. En la baissant elle s'efface derriere "
-                "le fond sans disparaitre, comme un reflet sur une vitre.",
-    "neon": "La force avec laquelle le neon eclaire ce qui l'entoure. Le "
-            "trait lui-meme ne change pas : c'est la lumiere qu'il jette "
+    "flottement": "Lent va-et-vient de l'image, comme une cassette fatiguée.",
+    "taille": "La place que prend la machine dans l'image. En la réduisant "
+              "on découvre le fond autour d'elle ; le quadrillage et le fil "
+              "du morceau, eux, gardent la largeur de l'écran.",
+    "presence": "L'éclat de la machine. En la baissant elle s'efface derrière "
+                "le fond sans disparaître, comme un reflet sur une vitre.",
+    "neon": "La force avec laquelle le néon éclaire ce qui l'entoure. Le "
+            "trait lui-même ne change pas : c'est la lumière qu'il jette "
             "autour de lui qui monte ou descend.",
-    "reflet": "A quelle distance se tient la surface qui renvoie cette "
-              "lumiere. Collee, la lueur est serree et vive ; lointaine, elle "
-              "s'etale et palit.",
-    "tube": "Donne au trait l'epaisseur d'un tube de verre : les bords "
-            "s'assombrissent et un reflet file le long de son arete haute.",
+    "reflet": "À quelle distance se tient la surface qui renvoie cette "
+              "lumière. Collée, la lueur est serrée et vive ; lointaine, elle "
+              "s'étale et pâlit.",
+    "tube": "Donne au trait l'épaisseur d'un tube de verre : les bords "
+            "s'assombrissent et un reflet file le long de son arête haute.",
     "bgAnim": "Fait vivre la texture du fond : les lignes et le quadrillage "
-              "descendent, le grain bout comme une pellicule. A zero, la "
-              "texture est fixe. Sans effet sur « uni » et « degrade », qui "
-              "n'ont rien a faire defiler.",
-    "nettete": "La finesse du trait lui-meme. A 1 il est large et velours ; "
-               "plus haut il se resserre, jusqu'a un cheveu de lumiere. Le "
-               "gain de nettete se voit surtout en 1080p et au-dessus.",
-    "stepDiv": "La vitesse a laquelle la rangee de pas, en haut de la "
+              "descendent, le grain bout comme une pellicule. À zéro, la "
+              "texture est fixe. Sans effet sur « uni » et « dégradé », qui "
+              "n'ont rien à faire défiler.",
+    "nettete": "La finesse du trait lui-même. À 1 il est large et velours ; "
+               "plus haut il se resserre, jusqu'à un cheveu de lumière. Le "
+               "gain de netteté se voit surtout en 1080p et au-dessus.",
+    "stepDiv": "La vitesse à laquelle la rangée de pas, en haut de la "
                "machine, avance d'une case.",
-    "quality": "Comment le fichier est encode. « compatible » menage les "
-               "telephones et les navigateurs ; les deux autres gardent la "
+    "quality": "Comment le fichier est encodé. « compatible » ménage les "
+               "téléphones et les navigateurs ; les deux autres gardent la "
                "couleur du trait intacte mais ne se lisent que sur "
                "ordinateur.",
-    "size": "La definition de la video finale. La 4K demande beaucoup de "
-            "memoire et de temps.",
+    "size": "La définition de la vidéo finale. La 4K demande beaucoup de "
+            "mémoire et de temps.",
     "fps": "Images par seconde. 30 suffit ; 60 adoucit les mouvements rapides.",
-    "scrub": "L'instant du morceau que montre l'apercu.",
+    "scrub": "L'instant du morceau que montre l'aperçu.",
 }
 
 COMPTE = {
@@ -769,7 +769,7 @@ def _fond_illisible(path, err=b""):
     lignes = (err or b"").decode("utf-8", "replace").strip().splitlines()
     detail = (" (%s)" % lignes[-1][:120]) if lignes else ""
     return ("ffmpeg n'a pas pu lire le fond « %s »%s. Si c'est une photo prise "
-            "au telephone, elle est sans doute au format HEIC : reenregistrez-la "
+            "au téléphone, elle est sans doute au format HEIC : réenregistrez-la "
             "en JPEG ou en PNG." % (os.path.basename(path), detail))
 
 
@@ -956,8 +956,8 @@ class SuiteDeFonds:
             from PIL import Image                # noqa: F401 -- verifie tot
         except ImportError:
             raise RuntimeError(
-                "un fond anime a besoin de la bibliotheque pillow. "
-                "A installer une seule fois avec :  pip install pillow  "
+                "un fond animé a besoin de la bibliothèque pillow. "
+                "À installer une seule fois avec :  pip install pillow  "
                 "(une image fixe en fond, elle, fonctionne sans)")
         if isinstance(paths, str):
             paths = [paths]
@@ -1225,8 +1225,8 @@ def disque_plein(dossier, besoin, quoi):
     except OSError:
         libre = 0
     return ("Le disque est plein : il reste %.1f Go sur le disque de %s, il en "
-            "faudrait environ %.1f pour %s. Liberez de la place — les videos "
-            "rendues dans out/studio pesent lourd, surtout en 4K — puis "
+            "faudrait environ %.1f pour %s. Libérez de la place — les vidéos "
+            "rendues dans out/studio pèsent lourd, surtout en 4K — puis "
             "relancez le rendu." % (libre / 1e9, dossier, besoin / 1e9, quoi))
 
 
@@ -2857,7 +2857,7 @@ MACHINES = {
         "potards": [(cx, cy, QLINK_R) for cx, cy in QLINK],
         "bande": STRIP,
         "bords": (BODY[0], BODY[2]),
-        "quoi": "l'originale : seize pads, bande de pas, grand ecran tactile",
+        "quoi": "l'originale : seize pads, bande de pas, grand écran tactile",
     },
     "minifreak": {
         "nom": "MiniFreak",
@@ -2900,8 +2900,8 @@ MACHINES = {
         "remplis": [f for _, _, f, _ in MF_CLAVIER],
         "traits": [fs for _, _, _, fs in MF_CLAVIER],
         "note0": 36,
-        "quoi": "clavier 37 touches : il joue la melodie du fichier MIDI, ou "
-                "s'allume sur les coups a defaut",
+        "quoi": "clavier 37 touches : il joue la mélodie du fichier MIDI, ou "
+                "s'allume sur les coups à défaut",
     },
     "sp404": {
         "nom": "SP-404 MKII",
@@ -2916,7 +2916,7 @@ MACHINES = {
         "potards": [(cx, cy, SP_KNOB_R) for cx, cy in SP_KNOBS],
         "bande": None,
         "bords": (SP_BODY[0], SP_BODY[2]),
-        "quoi": "la boite verticale : seize pads en carre, quatre gros "
+        "quoi": "la boîte verticale : seize pads en carré, quatre gros "
                 "potards, un cadran au milieu",
     },
     "digitakt": {
@@ -2931,7 +2931,7 @@ MACHINES = {
         "potards": [(cx, cy, DK_ENC_R) for cx, cy in DK_ENC],
         "bande": None,
         "bords": (DK_BODY[0], DK_BODY[2]),
-        "quoi": "seize declencheurs qui font pads et pas a la fois, huit "
+        "quoi": "seize déclencheurs qui font pads et pas à la fois, huit "
                 "encodeurs",
     },
 }
@@ -3491,9 +3491,9 @@ def groupes_declencheurs():
     """La liste complete, groupee comme la page l'affiche."""
     return [
         ("Instruments", list(INSTRUMENTS)),
-        ("Bandes de frequences (une hauteur, pas un instrument)",
+        ("Bandes de fréquences (une hauteur, pas un instrument)",
          [n for n, _, _, _, _ in BANDES]),
-        ("Hasard, pose sur la grille du morceau", [n for n, _ in HASARDS]),
+        ("Hasard, posé sur la grille du morceau", [n for n, _ in HASARDS]),
         ("Un coup sur deux, pour que deux effets ne tombent pas ensemble",
          [f + SEPARATEUR + p for f in PARTAGEES for p in PARTS]),
     ]

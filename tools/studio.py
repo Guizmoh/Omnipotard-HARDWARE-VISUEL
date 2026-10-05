@@ -18,6 +18,7 @@ bibliotheque web, pas de CDN — la page est servie telle quelle.
 """
 
 import argparse
+import base64
 import glob
 import json
 import os
@@ -43,7 +44,8 @@ from mpc_performance import (  # noqa: E402
 import midi                                                   # noqa: E402
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
-    menage_fonds, apercu_fonds, genre_fond, BOUCLES_FOND,
+    menage_fonds, apercu_fonds, genre_fond, BOUCLES_FOND, plan_fonds,
+    _durees_fonds,
     VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs, MACHINES,
     NOMS_MACHINES, COULEURS_COUPS, TEXTURES_TOUCHES, MODES_TRAIT,
     compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
@@ -77,6 +79,8 @@ UPLOADS = os.path.join(WORKDIR, "morceaux")
 FONDS = os.path.join(WORKDIR, "fonds")        # images et videos de fond
 MELODIES = os.path.join(WORKDIR, "melodies")  # fichiers MIDI
 OUTDIR = WORKDIR
+# les polices de la page (Inter, JetBrains Mono), livrees avec le studio
+POLICES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "polices")
 MO = 1024 * 1024
 MAX_UPLOAD = 220 * MO                   # un morceau, pas une discotheque
 # Une video de telephone pese des centaines de megaoctets, et une video de
@@ -344,7 +348,7 @@ def ecrire_mes_reglages(tout):
 def propre(valeurs):
     """Ce qui vient de la page, ramene a des cles et des valeurs simples."""
     if not isinstance(valeurs, dict):
-        raise ValueError("reglages illisibles")
+        raise ValueError("réglages illisibles")
     out = {}
     for cle, v in list(valeurs.items())[:400]:
         cle = re.sub(r"[^A-Za-z0-9_-]", "", str(cle))[:40]
@@ -433,6 +437,99 @@ def backdrop_paths(noms):
 
 
 # --------------------------------------------------------------------------
+#  La frise : ce que la page dessine sous l'apercu
+# --------------------------------------------------------------------------
+
+# Colonnes par seconde de la forme d'onde. A 25, une frise zoomee sur vingt
+# secondes garde encore une colonne tous les deux ou trois pixels ; le
+# morceau entier pese 30 Ko.
+ONDE_PAR_S = 25
+# Les trois bandes que la frise superpose : la grosse caisse et la basse, le
+# corps des voix et des instruments, le brillant des cymbales.
+ONDE_BANDES = ((20.0, 160.0), (160.0, 2500.0), (2500.0, 16000.0))
+
+
+def onde_du_son(mono, sr, par_s=ONDE_PAR_S):
+    """L'energie du son dans trois bandes de frequences, de 0 a 255.
+
+    Une colonne par 1/par_s seconde, mesuree sur une fenetre de deux pas :
+    une attaque tombee entre deux colonnes compte quand meme. Chaque bande
+    est ramenee a son propre maximum — sinon les aigus, cent fois moins
+    energiques que la basse, ne se verraient pas —, mais sans etre gonflee
+    plus de cinq fois : un morceau sans basse ne s'en invente pas une. La
+    page, qui loge souvent dix colonnes dans un pixel, en prend la moyenne
+    quadratique : le maximum, lui, ne gardait que les coups de charley.
+    """
+    x = np.asarray(mono, np.float32)
+    sr = int(sr)
+    pas = max(1, int(round(sr / float(par_s))))
+    n = max(1, len(x) // pas)
+    N = 1
+    while N < 2 * pas:
+        N *= 2
+    fenetre = np.hanning(N).astype(np.float32)
+    f = np.fft.rfftfreq(N, 1.0 / sr)
+    masques = [(f >= lo) & (f < hi) for lo, hi in ONDE_BANDES]
+    xp = np.pad(x, (N // 2, N // 2 + pas))
+    vues = np.lib.stride_tricks.sliding_window_view(xp, N)[::pas][:n]
+    e = np.zeros((len(ONDE_BANDES), n), np.float32)
+    for i0 in range(0, n, 256):
+        p = np.abs(np.fft.rfft(vues[i0:i0 + 256] * fenetre, axis=1)) ** 2
+        for b, m in enumerate(masques):
+            e[b, i0:i0 + len(p)] = np.sqrt(p[:, m].sum(axis=1))
+    ref = np.percentile(e, 99.0, axis=1)
+    ref = np.maximum(np.maximum(ref, 0.2 * float(ref.max())), 1e-9)
+    # lineaire : une courbe qui releve les faibles niveaux faisait de tout
+    # le morceau un mur, ou l'on ne voyait plus ni l'intro ni le creux
+    v = np.clip(e / ref[:, None], 0.0, 1.0)
+    return {"par_s": float(sr) / pas, "n": int(n),
+            "bandes": [base64.b64encode((b * 255.0 + 0.5).astype(np.uint8)
+                                        .tobytes()).decode("ascii")
+                       for b in v]}
+
+
+def plan_des_fonds(chemins, vitesse, boucle, fondu, photo, total):
+    """Ce que la suite de fonds montre au fil du morceau, par tranches.
+
+    Le meme plan_fonds que le rendu, lu tous les quelques dixiemes : la
+    frise montre donc exactement ce que la video montrera. Rend les blocs
+    [debut, fin, element, sens] — sens -1 quand l'element se joue a l'envers,
+    en aller-retour — et les fondus [debut, fin].
+    """
+    genres = [genre_fond(p) for p in chemins]
+    durees = _durees_fonds(genres, vitesse, photo)
+    total = max(0.0, float(total))
+    if not durees or total <= 0.0:
+        return [], []
+    pas = max(0.05, total / 4000.0)
+    blocs, fondus = [], []
+    for i in range(int(np.ceil(total / pas))):
+        t = i * pas
+        res = plan_fonds(durees, t, boucle, fondu)
+        k, u, _w = max(res, key=lambda r: r[2])
+        # le sens se lit sur l'instant dans l'element, un pas plus loin
+        suite = [r for r in plan_fonds(durees, t + pas, boucle, fondu)
+                 if r[0] == k]
+        sens = -1 if suite and suite[0][1] < u - 1e-9 else 1
+        if genres[k][0] != "video":
+            sens = 1                    # une photo n'a pas d'envers
+        fin = min(total, t + pas)
+        if blocs and blocs[-1][2] == k and blocs[-1][3] == sens:
+            blocs[-1][1] = fin
+        else:
+            blocs.append([t, fin, k, sens])
+        if len(res) > 1:
+            if fondus and abs(fondus[-1][1] - t) < 1e-6:
+                fondus[-1][1] = fin
+            else:
+                fondus.append([t, fin])
+    def arrondi(liste):
+        return [[round(x, 3) if isinstance(x, float) else x for x in b]
+                for b in liste]
+    return arrondi(blocs), arrondi(fondus)
+
+
+# --------------------------------------------------------------------------
 #  Etat : analyses et rendus en cours
 # --------------------------------------------------------------------------
 
@@ -515,6 +612,17 @@ class Studio:
             reg["midi_bpm"] = g["bpm"]
             reg["midi_phase"] = g["phase"] if g.get("phase_sure") else None
         return preparer_midi(tr["info"], reg)
+
+    def onde(self, tr):
+        """La forme d'onde du morceau pour la frise, calculee une fois."""
+        with self.lock:
+            o = tr.get("onde")
+        if o is None:
+            a = tr["info"]["_audio"]
+            o = onde_du_son(a["mono"], a["sr"])
+            with self.lock:
+                tr["onde"] = o
+        return o
 
     def info_courante(self):
         """L'analyse du dernier morceau depose, s'il y en a un.
@@ -1140,7 +1248,7 @@ class Handler(BaseHTTPRequestHandler):
                 tr = STUDIO.track(q["track"])
                 chemin = _melodie(q.get("midi"))
                 if not chemin or not os.path.exists(chemin):
-                    return self._fail("aucune melodie chargee")
+                    return self._fail("aucune mélodie chargée")
                 tel_quel = _coche(q.get("telQuel"))
                 reg, lu = STUDIO.calage(tr, chemin, float(q.get("bpm") or 0.0),
                                         tel_quel)
@@ -1163,7 +1271,7 @@ class Handler(BaseHTTPRequestHandler):
                 tr = STUDIO.track(q["track"])
                 chemin = _melodie(q.get("midi"))
                 if not chemin or not os.path.exists(chemin):
-                    return self._fail("aucune melodie chargee")
+                    return self._fail("aucune mélodie chargée")
                 notes = midi.lire_notes(chemin)
                 r, pa, pm, net = midi.deriver(
                     notes, [e[0] for e in tr["info"]["_audio"]["events"]],
@@ -1187,6 +1295,52 @@ class Handler(BaseHTTPRequestHandler):
                 st = pick_split_times(t, f, ok, tr["info"]["duration"],
                                       int(float(q.get("count", 3))))
                 return self._json({"times": [round(float(x), 2) for x in st]})
+
+            # ---- la frise sous l'apercu
+            if u.path == "/onde":
+                tr = STUDIO.track(q["track"])
+                return self._json(dict(STUDIO.onde(tr),
+                                       duree=float(tr["info"]["total"])))
+            if u.path == "/notes":
+                # Les notes telles que le moteur les jouera : posees sur la
+                # grille du morceau par le meme calcul que l'apercu. La page
+                # n'a plus qu'a y ajouter le decalage de son curseur.
+                tr = STUDIO.track(q["track"])
+                chemin = _melodie(q.get("midi"))
+                if not chemin or not os.path.exists(chemin):
+                    return self._fail("aucune mélodie chargée")
+                tel_quel = _coche(q.get("telQuel"))
+                reg, _lu = STUDIO.calage(tr, chemin, float(q.get("bpm") or 0.0),
+                                         tel_quel, _coche(q.get("cale")))
+                notes = reg.get("midi") or []
+                return self._json({
+                    "notes": [[round(float(a), 3), round(float(b), 3), int(c),
+                               round(float(d), 2)] for a, b, c, d in notes],
+                    # le decalage trouve tout seul, quand la case est cochee
+                    "auto": float(reg.get("midi_offset", 0.0)),
+                    "grille": not tel_quel})
+            if u.path == "/plan_fonds":
+                chemins = backdrop_paths(q.get("noms"))
+                if not chemins:
+                    return self._json({"blocs": [], "fondus": []})
+                blocs, fondus = plan_des_fonds(
+                    chemins, min(4.0, max(0.25, float(q.get("vitesse") or 1.0))),
+                    _dans(q.get("boucle"), BOUCLES_FOND, "boucle"),
+                    float(q.get("fondu") or 0.0), float(q.get("photo") or 6.0),
+                    float(q.get("total") or 0.0))
+                return self._json({"blocs": blocs, "fondus": fondus})
+            if u.path.startswith("/polices/"):
+                # Les polices de la page, servies d'ici : le studio ne
+                # telecharge rien et tourne sans reseau.
+                nom = u.path[len("/polices/"):]
+                f = os.path.join(POLICES, nom)
+                if not re.fullmatch(r"[a-z0-9-]{1,60}\.woff2", nom) \
+                        or not os.path.exists(f):
+                    return self._fail("police inconnue", 404)
+                with open(f, "rb") as fh:
+                    corps = fh.read()
+                return self._send(200, "font/woff2", corps,
+                                  {"Cache-Control": "max-age=604800"})
 
             if u.path == "/job":
                 with STUDIO.lock:
@@ -1216,7 +1370,7 @@ class Handler(BaseHTTPRequestHandler):
                 with STUDIO.lock:
                     job = STUDIO.jobs.get(q.get("id"))
                 if not job or job["state"] != "fini":
-                    return self._fail("rendu non termine", 404)
+                    return self._fail("rendu non terminé", 404)
                 # « inline » sert l'apercu anime, qui se joue dans la page
                 # au lieu d'etre telecharge
                 entete = ({} if q.get("inline") == "1" else
@@ -1267,8 +1421,8 @@ class Handler(BaseHTTPRequestHandler):
                 path = os.path.join(FONDS, name)
                 if not self._recevoir(path, MAX_FOND):
                     return self._fail("fond trop gros (%d Mo au plus). Une "
-                                      "video plus courte, ou exportee moins "
-                                      "lourde, fera le meme effet."
+                                      "vidéo plus courte, ou exportée moins "
+                                      "lourde, fera le même effet."
                                       % (MAX_FOND // MO), 413)
                 try:                        # ffmpeg doit savoir le lire
                     load_backdrop(path, 64, 36)
@@ -1312,7 +1466,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/reglages":
                 corps = self._corps()
                 if corps is None:
-                    return self._fail("reglages illisibles", 413)
+                    return self._fail("réglages illisibles", 413)
                 d = json.loads(corps or b"{}")
                 nom = " ".join(str(d.get("nom") or "").split())[:40]
                 tout = lire_mes_reglages()
@@ -1320,9 +1474,9 @@ class Handler(BaseHTTPRequestHandler):
                     tout.pop(nom, None)
                 else:
                     if not nom:
-                        return self._fail("donnez un nom a ce reglage")
+                        return self._fail("donnez un nom à ce réglage")
                     if nom not in tout and len(tout) >= MAX_REGLAGES:
-                        return self._fail("deja %d reglages enregistres : "
+                        return self._fail("déjà %d réglages enregistrés : "
                                           "effacez-en un" % MAX_REGLAGES)
                     tout[nom] = propre(d.get("valeurs"))
                 ecrire_mes_reglages(tout)
@@ -1331,7 +1485,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/render":
                 corps = self._corps()
                 if corps is None:
-                    return self._fail("reglages illisibles", 413)
+                    return self._fail("réglages illisibles", 413)
                 job = STUDIO.start_job(json.loads(corps or b"{}"))
                 return self._json({k: v for k, v in job.items()
                                    if not k.startswith("_") and k != "out"})
@@ -1404,6 +1558,13 @@ function midiAvis() {
   a.hidden = !$('#midi').value || bat || plan.indexOf('minifreak') >= 0;
 }
 
+/* Le nom d'une machine tel que la liste du debut l'affiche, sans sa
+   description : « MiniFreak » plutot que « minifreak ». */
+function seqNom(n) {
+  const o = [...$('#machine').options].find(x => x.value === n);
+  return o ? o.textContent.split(' — ')[0] : n;
+}
+
 function seqDessine() {
   const noms = seqMachines(), l = $('#seqListe');
   l.innerHTML = '';
@@ -1414,7 +1575,7 @@ function seqDessine() {
       + '<input type="text" class="seqt" value="' + seqTemps(e.t) + '">'
       + '<select class="seqm">'
       + noms.map(n => '<option value="' + n + '"'
-                 + (n === e.m ? ' selected' : '') + '>' + n + '</option>').join('')
+                 + (n === e.m ? ' selected' : '') + '>' + seqNom(n) + '</option>').join('')
       + '</select><button class="ghost seqx">&times;</button>';
     d.querySelector('.seqt').onchange = ev => {
       const t = ev.target.value.trim().split(':');
@@ -1431,7 +1592,7 @@ function seqDessine() {
   });
   if (!SEQ.length) {
     l.innerHTML = '<p class="hint" style="margin:2px 0 6px">Une seule machine '
-      + 'du debut a la fin. Ajoutez un changement pour qu\'elle se deforme '
+      + 'du début à la fin. Ajoutez un changement pour qu\'elle se déforme '
       + 'en une autre.</p>';
   }
 }
@@ -1507,13 +1668,18 @@ function midiOte() {
   if ($('#mi-p')) $('#mi-p').textContent = '';
   if (typeof majCalage === 'function') majCalage();
   $('#midiReglages').hidden = true;
-  $('#midiDrop').innerHTML = '<b>Deposer un fichier MIDI</b>.mid, .midi<br>'
-    + 'ou cliquer pour choisir';
+  $('#midiVide').hidden = false;
+  $('#midiActions').hidden = true;
+  $('#midiDrop').classList.remove('charge');
+  $('#midiDrop').title = '';
+  $('#midiDrop').innerHTML = '<b>Déposer un fichier MIDI</b>.mid, .midi'
+    + ' \u2014 ou cliquer pour choisir';
+  majPoints();
 }
 
 async function sendMidi(f) {
   try {
-    const j = await deposer('/midi', f, 'de la melodie');
+    const j = await deposer('/midi', f, 'de la mélodie');
     $('#midi').value = j.name;
     $('#mi-n').textContent = j.notes;
     $('#mi-e').textContent = j.grave + ' \u2192 ' + j.aigu;
@@ -1525,7 +1691,7 @@ async function sendMidi(f) {
       origine.textContent = j.pistes ? 'dans le fichier : ' + j.pistes : '';
       if (j.melange) origine.textContent += ' — attention : la batterie'
         + ' (canal 10) et les autres notes s\'allument ensemble. Pour un rendu'
-        + ' net, exportez la melodie seule.';
+        + ' net, exportez la mélodie seule.';
     }
     MIDI_DEBUT = +j.debut || 0;
     if (typeof majOffset === 'function') majOffset();
@@ -1533,12 +1699,14 @@ async function sendMidi(f) {
     if (typeof majCalage === 'function') majCalage();
     $('#midimeta').hidden = false;
     $('#midiReglages').hidden = false;
-    $('#midiDrop').innerHTML = '<b>' + j.name
-      + '</b>cliquer pour changer de melodie';
+    $('#midiVide').hidden = true;
+    $('#midiActions').hidden = false;
+    puceFichier($('#midiDrop'), 'melodie', j.name, 'remplacer');
+    majPoints();
     midiAvis();
     _etat(j.notes + ' notes lues dans ' + j.name);
     _redessine();
-  } catch (e) { _etat('melodie refusee : ' + e.message, true); }
+  } catch (e) { _etat('mélodie refusée : ' + e.message, true); }
 }
 
 """
@@ -1549,881 +1717,1061 @@ PAGE = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Studio Omnipotard</title>
 <style>
+  /* Les polices sont livrees avec le studio (tools/polices) : rien ne se
+     telecharge, la page tourne sans reseau. Inter pour le texte, JetBrains
+     Mono pour les nombres, qui gardent ainsi leur chasse. */
+  @font-face{font-family:"Inter";font-weight:400;font-display:swap;src:url(/polices/inter-400.woff2) format("woff2")}
+  @font-face{font-family:"Inter";font-weight:500;font-display:swap;src:url(/polices/inter-500.woff2) format("woff2")}
+  @font-face{font-family:"Inter";font-weight:600;font-display:swap;src:url(/polices/inter-600.woff2) format("woff2")}
+  @font-face{font-family:"Inter";font-weight:700;font-display:swap;src:url(/polices/inter-700.woff2) format("woff2")}
+  @font-face{font-family:"JetBrains Mono";font-weight:400;font-display:swap;src:url(/polices/jetbrains-mono-400.woff2) format("woff2")}
+  @font-face{font-family:"JetBrains Mono";font-weight:500;font-display:swap;src:url(/polices/jetbrains-mono-500.woff2) format("woff2")}
   :root{
-    --bg:#07090b; --panel:#0e1216; --line:#1d262e; --ink:#e5ded7;
-    --dim:#948880; --bad:#ff5470;
-    /* l'accent orange, et ce qui va avec */
-    --acc:#ff7a1f; --sur-acc:#170900;
-    /* Le texte se lit en caracteres proportionnels, les nombres gardent la
-       chasse fixe. Rien n'est telecharge : le studio tourne sans reseau. */
-    --texte:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",
-            "Noto Sans",Arial,sans-serif;
-    --mono:ui-monospace,SFMono-Regular,"Cascadia Mono","Segoe UI Mono",Menlo,
-           Consolas,monospace;
-    font-family:var(--texte);
+    --f:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --m:"JetBrains Mono",ui-monospace,"Cascadia Mono","Segoe UI Mono",Menlo,Consolas,monospace;
+    /* les fonds, du plus profond au plus clair, et les filets */
+    --bg:#0a0c0f; --bg2:#0e1115; --pan:#12161b; --pan2:#171c22; --pan3:#1d232b;
+    --lig:#222932; --lig2:#2c343e; --lig3:#3a4350;
+    /* le texte : principal, secondaire, discret */
+    --tx:#e9ecf0; --tx2:#a4adb8; --tx3:#6d7783;
+    /* l'accent bleu, et ce qui va avec */
+    --acc:#38bdf8; --acc2:#7dd3fc; --acc-f:rgba(56,189,248,.14); --acc-tx:#04121c;
+    --ok:#3ddc97; --err:#ff5c7a;
+    /* la frise : paroxysmes, dedoublements, notes, fonds */
+    --parox:#ff6b8a; --dedo:#fbbf24; --note:#86efac; --fond:#c4b5fd;
+    --r:10px; --r2:7px; --r3:5px;
+    --ombre:0 10px 30px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.35);
+    color-scheme:dark;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font-size:13.5px;
-    line-height:1.58;-webkit-font-smoothing:antialiased}
-  h1,#ver,.meta b,.aide b.freq,#donepath,#ptext{font-family:var(--mono)}
-  label span{font-family:var(--mono);font-variant-numeric:tabular-nums;
-    text-transform:none}
-  header{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;
-    align-items:baseline;gap:12px;flex-wrap:wrap}
-  h1{margin:0;font-size:15px;letter-spacing:.16em;text-transform:uppercase;
-    color:var(--acc);font-weight:600}
-  header span{color:var(--dim)}
-  /* Deux fenetres. A gauche les reglages, qui defilent ; a droite l'apercu,
-     fixe, et sous lui ce qui entre et ce qui sort : le rendu, le morceau, la
-     melodie. On regle tout en bas des avaries sans perdre l'image de vue.
-     Entre les deux, une poignee : on la tire pour grandir ou rapetisser
-     l'apercu, un double-clic la remet a sa place. */
+  /* « hidden » doit toujours l'emporter : une regle qui donne un display
+     l'annulait sans bruit, et il fallait le redire element par element */
+  [hidden]{display:none!important}
   html,body{height:100%}
-  body{display:flex;flex-direction:column;overflow:hidden}
-  main{flex:1;min-height:0;display:grid;gap:0;padding:14px 16px 0;
-    grid-template-columns:minmax(0,1fr) 16px var(--cote,clamp(380px,34vw,560px))}
-  #poignee{cursor:col-resize;position:relative;touch-action:none}
-  #poignee::after{content:"";position:absolute;top:0;bottom:14px;left:7px;
-    width:2px;border-radius:1px;background:var(--line);transition:background .15s}
+  body{margin:0;display:flex;flex-direction:column;overflow:hidden;
+    background:var(--bg);color:var(--tx);font:13px/1.45 var(--f);
+    -webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01"}
+  *{scrollbar-width:thin;scrollbar-color:var(--lig2) transparent}
+  b{font-weight:600}
+  code{font:12px var(--m);color:var(--tx2)}
+
+  /* ---- les champs ---- */
+  button,input,select{font:inherit;color:inherit}
+  button{cursor:pointer;border:none;border-radius:var(--r2);padding:8px 14px;
+    font-size:12px;font-weight:600;line-height:1.2;white-space:nowrap;
+    background:var(--acc);color:var(--acc-tx);
+    box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 4px 14px rgba(56,189,248,.16);
+    transition:background .12s,border-color .12s,color .12s}
+  button:hover{background:var(--acc2)}
+  button:disabled{background:var(--pan3);color:var(--tx3);box-shadow:none;cursor:default}
+  button.ghost{background:var(--pan3);color:var(--tx);border:1px solid var(--lig2);
+    font-weight:500;box-shadow:none}
+  button.ghost:hover{background:#222a33;border-color:var(--lig3)}
+  button.ghost:disabled{background:var(--pan2);color:var(--tx3);border-color:var(--lig)}
+  button:focus-visible,select:focus-visible,input:focus-visible,
+  #frise:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+  select,input[type=number],input[type=text]{width:100%;height:30px;
+    padding:5px 9px;border-radius:var(--r3);background-color:var(--pan3);
+    border:1px solid var(--lig2);color:var(--tx);font-size:12px;min-width:0}
+  select{appearance:none;-webkit-appearance:none;padding-right:26px;cursor:pointer;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23a4adb8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 9px center;
+    text-overflow:ellipsis}
+  select option,select optgroup{background:#1a1f26;color:var(--tx)}
+  select:hover,input[type=number]:hover,input[type=text]:hover{border-color:var(--lig3)}
+  select:focus,input[type=number]:focus,input[type=text]:focus{outline:none;
+    border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-f)}
+  input::placeholder{color:var(--tx3)}
+  input[type=color]{width:64px;height:30px;padding:2px;border-radius:var(--r3);
+    background:var(--pan3);border:1px solid var(--lig2);cursor:pointer}
+  /* un curseur : la part deja parcourue est peinte en bleu (--p) */
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;
+    margin:0;padding:0;background:transparent;cursor:pointer;min-width:0}
+  input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;
+    background:linear-gradient(to right,var(--acc) 0,var(--acc) var(--p,50%),var(--lig2) var(--p,50%))}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
+    margin-top:-4.5px;border-radius:50%;background:#f4f6f8;border:none;
+    box-shadow:0 0 0 3px rgba(0,0,0,.45),0 1px 3px rgba(0,0,0,.5)}
+  input[type=range]:hover::-webkit-slider-thumb{box-shadow:0 0 0 4px var(--acc-f),0 1px 3px rgba(0,0,0,.5)}
+  input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:var(--lig2)}
+  input[type=range]::-moz-range-progress{height:4px;border-radius:2px;background:var(--acc)}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;
+    background:#f4f6f8;border:none;box-shadow:0 0 0 3px rgba(0,0,0,.45)}
+  /* une case : un interrupteur */
+  input[type=checkbox]{-webkit-appearance:none;appearance:none;flex:none;margin:0;
+    width:30px;height:17px;border-radius:9px;background:var(--lig2);position:relative;
+    cursor:pointer;transition:background .15s}
+  input[type=checkbox]::after{content:"";position:absolute;top:2.5px;left:3px;
+    width:12px;height:12px;border-radius:50%;background:#cfd6de;transition:left .15s}
+  input[type=checkbox]:checked{background:var(--acc)}
+  input[type=checkbox]:checked::after{left:15px;background:#fff}
+  .ic{display:inline-grid;place-items:center;font-style:normal;flex:none}
+  .ic svg{width:100%;height:100%}
+
+  /* ---- l'en-tete ---- */
+  header{flex:none;height:52px;display:flex;align-items:center;gap:14px;
+    padding:0 16px;border-bottom:1px solid var(--lig);
+    background:linear-gradient(#0f1217,#0c0f13)}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px;
+    white-space:nowrap;letter-spacing:.01em}
+  .logo .ic{width:26px;height:26px;padding:4px;border-radius:7px;color:var(--acc);
+    background:radial-gradient(circle at 50% 40%,rgba(56,189,248,.35),transparent 70%),#0a1218;
+    border:1px solid rgba(56,189,248,.45);box-shadow:0 0 14px rgba(56,189,248,.25)}
+  .logo span{color:var(--tx3);font-weight:500}
+  #vues{display:flex;gap:2px;padding:3px;border-radius:8px;background:var(--pan2);
+    border:1px solid var(--lig)}
+  #vues button{background:none;border:none;box-shadow:none;color:var(--tx2);
+    font-weight:500;padding:5px 12px;border-radius:6px}
+  #vues button:hover{color:var(--tx);background:none}
+  #vues button.on{background:var(--pan3);color:var(--tx);box-shadow:inset 0 0 0 1px var(--lig2)}
+  #puce{display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;
+    border-radius:8px;background:var(--pan2);border:1px solid var(--lig);box-shadow:none;
+    color:var(--tx2);font-weight:400;max-width:360px;min-width:0}
+  #puce:hover{border-color:var(--lig3);background:var(--pan3)}
+  #puce .ic{width:14px;height:14px;color:var(--acc)}
+  #puce b{color:var(--tx);font-weight:500;overflow:hidden;text-overflow:ellipsis}
+  #puce .pt{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none;
+    box-shadow:0 0 8px var(--ok)}
+  #puce.vide .pt{background:var(--tx3);box-shadow:none}
+  #puce.vide b{color:var(--tx2);font-weight:400}
+  #status{flex:1;min-width:0;font-size:12px;color:var(--tx2);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  #status.err{color:var(--err)}
+  #ver{font:400 11px var(--m);color:var(--tx3);white-space:nowrap}
+  #exporter{display:flex;align-items:center;gap:7px;height:32px;padding:0 14px}
+  #exporter .ic{width:15px;height:15px}
+
+  /* ---- trois colonnes : les sections, le reglage, la scene ----
+     A gauche les sections, une seule ouverte a la fois ; au milieu ses
+     reglages, qui defilent ; a droite l'apercu, fixe, la frise du morceau
+     et ce qui entre et sort. La poignee entre les reglages et la scene
+     elargit le panneau ; un double-clic le remet a sa largeur. */
+  main{flex:1;min-height:0;display:grid;
+    grid-template-columns:82px var(--panneau,clamp(360px,28vw,460px)) 7px minmax(0,1fr)}
+  #rail{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:2px;
+    padding:10px 8px;background:var(--bg2);border-right:1px solid var(--lig)}
+  #rail button{position:relative;display:flex;flex-direction:column;align-items:center;
+    gap:5px;width:100%;padding:9px 2px 8px;background:transparent;border:none;
+    box-shadow:none;color:var(--tx3);font-size:10px;font-weight:500;border-radius:9px;
+    white-space:normal;text-align:center}
+  #rail button .ic{width:19px;height:19px}
+  #rail button:hover{background:var(--pan2);color:var(--tx)}
+  #rail button.actif{background:var(--pan3);color:var(--tx);box-shadow:inset 2px 0 0 var(--acc)}
+  #rail button.actif .ic{color:var(--acc)}
+  /* un point : la section s'ecarte des valeurs d'usine */
+  #rail button.modif::after{content:"";position:absolute;top:7px;right:14px;width:6px;
+    height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 6px rgba(56,189,248,.6)}
+  #rail hr{flex:none;border:none;height:1px;background:var(--lig);margin:6px}
+  #panneau{min-height:0;overflow-y:auto;background:var(--pan)}
+  #poignee{cursor:col-resize;position:relative;touch-action:none;background:var(--pan);
+    border-right:1px solid var(--lig)}
+  #poignee::after{content:"";position:absolute;top:50%;left:2px;width:2px;height:36px;
+    margin-top:-18px;border-radius:1px;background:var(--lig2);transition:background .15s}
   #poignee:hover::after,#poignee.tire::after{background:var(--acc)}
-  #reglages{min-height:0;overflow-y:auto;display:grid;gap:14px;
-    grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;
-    padding:0 6px 40px 0}
-  #cote{min-height:0;display:flex;flex-direction:column}
-  #carteApercu{flex:none}
-  #coteBas{flex:1;min-height:0;overflow-y:auto;padding:0 4px 30px 0}
-  #styles{flex:1;min-height:0;overflow-y:auto}
-  @media (max-width:1250px){#reglages{grid-template-columns:minmax(0,1fr)}}
-  /* un ecran bas, celui d'un portable : sous un apercu fixe il ne resterait
-     qu'une lucarne pour le rendu. La colonne de droite defile alors d'un
-     bloc ; l'apercu reste en vue tant qu'on regle a gauche. */
-  @media (max-height:760px) and (min-width:861px){
-    #cote{overflow-y:auto;display:block;padding-right:4px}
-    #coteBas{overflow:visible;padding-bottom:30px}
+
+  /* ---- une section du panneau ---- */
+  .section{display:none;padding:18px 22px 64px}
+  .section.actif{display:block}
+  .section>.tete{display:flex;align-items:center;gap:10px}
+  .section>.tete .ic{width:19px;height:19px;color:var(--acc)}
+  .section>.tete h2{margin:0;font-size:16px;font-weight:600;line-height:1.3}
+  .q{flex:none;margin-left:auto;width:22px;height:22px;padding:0;border-radius:50%;
+    background:transparent;border:1px solid var(--lig2);box-shadow:none;
+    color:var(--tx3);font-size:11px;font-weight:600}
+  .q:hover,.q.ouvert{background:transparent;border-color:var(--acc);color:var(--acc)}
+  .desc{margin:4px 0 14px 29px;color:var(--tx3);font-size:12px;line-height:1.5}
+  .explications{margin:0 0 14px;padding:12px 14px;border-radius:var(--r2);
+    background:var(--bg2);border:1px solid var(--lig);color:var(--tx2);font-size:12px;
+    line-height:1.6}
+  .explications p{margin:0 0 8px}
+  .explications p:last-child{margin:0}
+  .explications b{color:var(--tx)}
+  .groupe{margin:22px 0 2px;font-size:10.5px;font-weight:600;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--tx3)}
+  .section .row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:8px}
+  #presetDel{margin-top:8px;width:100%}
+  .info{margin:6px 0 4px;color:var(--tx3);font-size:11.5px;line-height:1.5}
+  .info b{color:var(--tx);font-weight:500}
+  .hint{color:var(--tx3);font-size:11.5px;line-height:1.5}
+  .err{color:var(--err)}
+  .boutons{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
+  .boutons button{padding:6px 10px;font-size:11.5px}
+  .section>button.ghost,#midiReglages>button.ghost{margin-top:10px}
+
+  /* ---- un reglage : nom | curseur | valeur | explication ---- */
+  .ctl{position:relative;display:grid;align-items:center;column-gap:12px;
+    grid-template-columns:minmax(0,36%) minmax(0,1fr) 64px 18px;
+    min-height:38px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.045)}
+  .ctl>label{grid-column:1;grid-row:1;margin:0;color:var(--tx2);font-size:12px;
+    line-height:1.3;min-width:0}
+  .ctl:hover>label{color:var(--tx)}
+  .ctl>input[type=range]{grid-column:2;grid-row:1}
+  .ctl>output{grid-column:3;grid-row:1;text-align:right;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;font:500 11.5px var(--m);color:var(--tx);
+    font-variant-numeric:tabular-nums}
+  .ctl>.ctl-i{grid-column:4;grid-row:1}
+  /* l'instrument qui declenche l'effet, sous son curseur */
+  .ctl>select.inst{grid-column:2/5;grid-row:2;justify-self:start;width:auto;
+    max-width:100%;height:24px;margin-top:5px;padding:2px 24px 2px 8px;font-size:11px;
+    color:var(--tx2);background-color:transparent;border-color:var(--lig);
+    background-position:right 8px center}
+  .ctl.liste>select,.ctl.texte>input,.ctl.nombre>input{grid-column:2/4;grid-row:1}
+  .ctl.couleur>input{grid-column:2;grid-row:1}
+  .ctl.coche>label{grid-column:1/4;display:flex;align-items:center;gap:10px;cursor:pointer}
+  .ctl.large{grid-template-columns:minmax(0,30%) minmax(0,1fr) 96px 18px}
+  .ctl .aide,.ctl figure.ex{display:none}
+  .ctl-i{width:18px;height:18px;padding:0;border-radius:50%;display:grid;place-items:center;
+    background:transparent;border:1px solid var(--lig2);box-shadow:none;color:var(--tx3);
+    font:600 10px/1 var(--f);cursor:help}
+  .ctl-i:hover,.ctl-i.ouvert{background:transparent;border-color:var(--acc);color:var(--acc)}
+
+  /* ---- le sequenceur de machines ---- */
+  .seq{margin:12px 0 4px;padding:10px 12px 12px;border-radius:var(--r2);
+    background:var(--bg2);border:1px solid var(--lig)}
+  .seq .titre{font-size:12px;color:var(--tx2)}
+  .seq .row{display:grid;gap:6px;align-items:center;margin-top:8px}
+  .seq .seqplus{grid-template-columns:1fr}
+  .seq .seqauto{grid-template-columns:minmax(0,1fr) 64px auto}
+  .seq .seqrow{grid-template-columns:auto 72px minmax(0,1fr) 30px;margin-top:6px}
+  .seq .seqrow input,.seq .seqrow select{height:28px}
+  .seq .seqx{width:30px;height:28px;padding:0}
+  .seq .unite{color:var(--tx3);font-size:11.5px}
+  .seq .hint{margin:6px 0 2px}
+
+  /* ---- les depots de fichiers ---- */
+  .drop{display:block;border:1px dashed var(--lig3);border-radius:var(--r2);
+    background:rgba(255,255,255,.015);color:var(--tx3);font-size:12px;padding:14px;
+    text-align:center;cursor:pointer;transition:border-color .15s,color .15s}
+  .drop:hover,.drop.over{border-color:var(--acc);color:var(--tx2)}
+  .drop b{display:block;color:var(--tx);font-weight:500;margin-bottom:2px}
+  /* un fichier charge : sa puce, au lieu de la zone de depot */
+  .drop.charge{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;
+    align-items:center;text-align:left;padding:9px 10px;border-style:solid;
+    border-color:var(--lig);background:var(--pan2)}
+  .drop.charge .ic{width:16px;height:16px;color:var(--acc)}
+  .drop.charge b{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .drop.charge .rempl{font-size:11px;color:var(--tx3)}
+  .drop.charge:hover .rempl{color:var(--acc)}
+  .vide{border:1px dashed var(--lig3);border-radius:var(--r2);padding:16px;
+    text-align:center;color:var(--tx3);font-size:12px}
+  .vide b{display:block;color:var(--tx2);font-weight:500;margin-bottom:2px}
+  .vide button{margin-top:10px}
+  /* la suite de fonds : un fichier par ligne, dans l'ordre de passage */
+  #bdliste{list-style:none;counter-reset:fond;margin:10px 0 4px;padding:0}
+  #bdliste li{counter-increment:fond;display:grid;align-items:center;gap:4px;
+    grid-template-columns:minmax(0,1fr) auto auto auto;padding:6px 0;
+    border-bottom:1px solid rgba(255,255,255,.045);font-size:12px}
+  #bdliste li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #bdliste li span::before{content:counter(fond) ". ";color:var(--tx3);font-family:var(--m)}
+  #bdliste li small{margin-left:6px;color:var(--tx3);font:11px var(--m)}
+  #bdliste button{width:26px;height:24px;padding:0;font-size:12px}
+
+  /* ---- la scene : l'apercu, la frise, l'export et les sources ----
+     Sur un ecran large et bas — un portable, un 1080p dans un navigateur —
+     l'export et les sources passent a droite de l'apercu : il y gagne la
+     moitie de sa taille. Sinon ils vont dessous. */
+  #scene{min-width:0;min-height:0;overflow-y:auto;container:scene/size;
+    background:radial-gradient(1200px 500px at 50% -10%,#121a24,transparent)}
+  #sceneGrille{display:grid;min-height:100%;padding:16px 20px 18px;gap:12px;
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:minmax(auto,1fr) auto auto;
+    grid-template-areas:"apercu" "chrono" "bas"}
+  #carteApercu{grid-area:apercu;position:relative;min-height:max(220px,45cqh);
+    display:flex;align-items:center;justify-content:center;container-type:size}
+  .ecran{position:relative;aspect-ratio:16/9;overflow:hidden;background:#000;
+    width:min(100%,calc((100vh - 470px) * 16 / 9));
+    width:min(100cqw,calc(100cqh * 16 / 9));
+    border-radius:var(--r);border:1px solid var(--lig);
+    box-shadow:0 0 0 1px rgba(0,0,0,.6),0 18px 50px rgba(0,0,0,.55)}
+  #ecran.vide{cursor:pointer}
+  .ecran.over{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-f)}
+  .ecran #shot,.ecran #clip{display:block;width:100%;height:100%;object-fit:contain;
+    background:#000;border:0}
+  #shot.calcul{opacity:.35;transition:opacity .2s}
+  /* sans image, une balise <img> dessine un cadre : on la tait */
+  #ecran.vide #shot{visibility:hidden}
+  #ecranVide{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:4px;padding:16px;text-align:center;
+    color:var(--tx3);font-size:12px;pointer-events:none}
+  #ecranVide .ic{width:34px;height:34px;color:var(--acc);margin-bottom:8px}
+  #ecranVide b{color:var(--tx);font-size:14px;font-weight:500}
+  #shoterr{display:none;position:absolute;left:12px;right:12px;bottom:12px;z-index:2;
+    padding:8px 10px;border-radius:var(--r2);font-size:12px;line-height:1.45;
+    background:#2a1416;border:1px solid #6b2b30;color:#ffb4b4}
+  #shoterr.on{display:block}
+
+  /* la barre de lecture et la frise, d'un seul tenant */
+  #chrono{grid-area:chrono;min-width:0;background:var(--pan);border:1px solid var(--lig);
+    border-radius:var(--r);overflow:hidden}
+  #lecture{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 10px;
+    border-bottom:1px solid var(--lig)}
+  #lire{display:flex;align-items:center;gap:8px;height:32px;padding:0 14px}
+  #lire .ic{width:12px;height:12px}
+  #clipDur{width:70px;height:32px}
+  #clipprog{display:flex;align-items:center;gap:8px}
+  #clipprog .bar{width:110px;margin:0}
+  #ctext{font:400 11px var(--m);color:var(--tx3);white-space:nowrap}
+  #clipStop{height:28px;padding:0 10px}
+  .temps{padding:0 6px;font:500 12.5px var(--m);color:var(--tx);white-space:nowrap;
+    font-variant-numeric:tabular-nums}
+  .temps em{font-style:normal;color:var(--tx3)}
+  .outils{display:flex;align-items:center;gap:4px}
+  .ib{width:30px;height:30px;padding:0;display:grid;place-items:center}
+  .ib .ic{width:15px;height:15px}
+  .ib.texte{width:auto;padding:0 10px;display:flex;gap:6px;font-size:11.5px}
+  .flex{flex:1}
+  #zoomTxt{min-width:38px;text-align:center;font:400 11px var(--m);color:var(--tx3)}
+  #frise{position:relative;height:96px;outline:none;cursor:crosshair;
+    background:var(--bg2);user-select:none;-webkit-user-select:none;touch-action:pan-y}
+  #frise canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #friseInfo{position:absolute;top:3px;z-index:2;pointer-events:none;padding:2px 7px;
+    border-radius:5px;background:rgba(10,12,15,.94);border:1px solid var(--lig2);
+    font:500 11px/1.5 var(--m);color:var(--tx);white-space:nowrap}
+  #friseVide{position:absolute;inset:0;margin:0;display:flex;align-items:center;
+    justify-content:center;padding:0 20px;text-align:center;color:var(--tx3);
+    font-size:12px;pointer-events:none}
+
+  /* l'export et les sources */
+  #bas{grid-area:bas;display:grid;gap:12px;align-items:start;
+    grid-template-columns:minmax(0,1.1fr) minmax(0,2fr)}
+  .card{min-width:0;background:var(--pan);border:1px solid var(--lig);
+    border-radius:var(--r);padding:14px}
+  .card .tete{display:flex;align-items:center;gap:9px;margin-bottom:12px}
+  .card .tete .ic{width:16px;height:16px;color:var(--acc)}
+  .card .tete h2{margin:0;font-size:12.5px;font-weight:600}
+  #go{margin-left:auto;height:32px;padding:0 14px}
+  #carteRendu{container-type:inline-size}
+  #carteRendu .champs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  #carteRendu .champs label{display:block;margin:0 0 4px;font-size:11px;color:var(--tx3)}
+  #carteRendu label.coche{grid-column:1/-1;display:flex;align-items:center;gap:10px;
+    margin:2px 0 0;font-size:12px;line-height:1.3;color:var(--tx2);cursor:pointer}
+  @container (min-width:290px){
+    #carteRendu .champs{grid-template-columns:repeat(3,minmax(0,1fr))}
+  }
+  #carteRendu .aide{margin:10px 0 0;font-size:11px;color:var(--tx3)}
+  #carteRendu .aide b.freq{font:400 11.5px/1.45 var(--f);color:var(--tx3)}
+  #prog,#done{margin-bottom:12px}
+  #stop{width:100%;margin-top:6px}
+  .bar{height:4px;margin:8px 0;border-radius:2px;background:var(--lig2);overflow:hidden}
+  .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .3s}
+  #ptext{font-family:var(--m);font-size:11px}
+  a.dl{display:flex;align-items:center;justify-content:center;height:34px;
+    border-radius:var(--r2);background:var(--acc);color:var(--acc-tx);font-weight:600;
+    text-decoration:none}
+  a.dl:hover{background:var(--acc2)}
+  #donepath{margin:6px 0 0;font:400 11px var(--m);word-break:break-all}
+  #carteSources{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .source{min-width:0;container-type:inline-size}
+  .source .tete{margin-bottom:10px}
+  .meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;
+    margin-top:10px}
+  @container (min-width:300px){
+    #trackmeta{grid-template-columns:repeat(4,minmax(0,1fr))}
+    #midimeta{grid-template-columns:repeat(3,minmax(0,1fr))}
+  }
+  .meta span{font-size:11px;color:var(--tx3)}
+  .meta b{display:block;font:500 12px var(--m);color:var(--tx);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  #midiAvis{margin:10px 0 0}
+  .actions{display:flex;gap:6px;margin-top:10px}
+  .actions button{flex:1;padding:7px 8px}
+
+  /* une scene etroite : les deux cartes cote a cote, les sources l'une
+     sous l'autre, les boutons de saut sans leur texte */
+  @container scene (max-width:999px){
+    #bas{grid-template-columns:repeat(2,minmax(0,1fr))}
+    #carteSources{grid-template-columns:minmax(0,1fr)}
+    .ib.texte{width:30px;padding:0;display:grid}
+    .ib.texte span{display:none}
+  }
+  @container scene (min-aspect-ratio: 13 / 10){
+    /* une hauteur fixe : la premiere rangee prend ce que laisse la frise */
+    #sceneGrille{height:100%;min-height:0;
+      grid-template-columns:minmax(0,1fr) clamp(290px,25%,360px);
+      grid-template-rows:minmax(0,1fr) auto;
+      grid-template-areas:"apercu bas" "chrono chrono"}
+    #carteApercu{min-height:220px}
+    #bas{display:flex;flex-direction:column;align-items:stretch;align-self:stretch;
+      min-height:0;overflow-y:auto;margin-right:-6px;padding-right:6px}
+    #carteSources{grid-template-columns:minmax(0,1fr)}
+  }
+
+  /* ---- la bulle d'explication : la phrase, la frequence, l'exemple ---- */
+  #bulle{position:fixed;z-index:100;width:320px;padding:12px;border-radius:var(--r);
+    background:#1a2028;border:1px solid var(--lig2);box-shadow:var(--ombre);
+    color:var(--tx2);font-size:12px;line-height:1.5;pointer-events:none}
+  #bulle.fige{pointer-events:auto}
+  #bulle .titre{margin-bottom:4px;color:var(--tx);font-weight:600}
+  #bulle b.freq{display:block;margin-top:6px;color:var(--acc);font:500 11px/1.45 var(--m)}
+  #bulle b{color:var(--tx)}
+  #bulle p{margin:0 0 6px}
+  #bulle p:last-child{margin:0}
+  #bulle img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;margin-top:10px;
+    border-radius:6px;border:1px solid var(--lig);background:#000}
+
+  /* ---- l'onglet des styles : il prend la place du studio ---- */
+  #styles{flex:1;min-height:0;overflow-y:auto;display:flex;justify-content:center;
+    padding:24px}
+  #styles .fen{align-self:flex-start;width:100%;max-width:1180px;padding:22px 24px;
+    border-radius:12px;background:var(--pan);border:1px solid var(--lig)}
+  #styles .tete{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+  #styles .tete>div{flex:1;min-width:0}
+  #styles h2{margin:0;font-size:18px;font-weight:600}
+  #styles .grille{display:grid;gap:14px;margin-top:18px;
+    grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+  #styles .st{display:flex;flex-direction:column;overflow:hidden;border-radius:var(--r);
+    background:var(--bg2);border:1px solid var(--lig);transition:border-color .15s}
+  #styles .st:hover{border-color:var(--lig3)}
+  #styles .st img,#styles .st .vide{display:block;width:100%;aspect-ratio:16/9;
+    object-fit:cover;background:#000;border:none;border-radius:0}
+  #styles .st .vide{display:flex;align-items:center;justify-content:center;padding:0}
+  #styles .st .txt{flex:1;padding:12px 14px 10px}
+  #styles .st b{display:block;margin-bottom:4px;color:var(--tx)}
+  #styles .st b::first-letter{text-transform:uppercase}
+  #styles .st p{margin:0;color:var(--tx3);font-size:12px;line-height:1.5}
+  #styles .st .act{display:flex;gap:8px;padding:0 14px 14px}
+  #styles .st .act button{flex:1}
+
+  /* ---- les ecrans plus petits ---- */
+  @media (max-width:1180px){
+    main{grid-template-columns:66px var(--panneau,clamp(330px,31vw,380px)) 7px minmax(0,1fr)}
+    #rail{padding:8px 5px}
+    #rail button{font-size:9.5px;padding:8px 0 7px}
+    #rail button.modif::after{right:8px}
+    .section{padding:16px 16px 56px}
+    #ver{display:none}
   }
   /* un ecran etroit : une seule colonne, l'apercu d'abord */
   @media (max-width:860px){
-    body{display:block;overflow:auto}
-    main{display:flex;flex-direction:column;padding:12px}
-    #cote{order:-1}
-    #reglages,#coteBas{overflow:visible;padding:0}
+    body{display:block;overflow:auto;height:auto}
+    header{position:sticky;top:0;z-index:5;flex-wrap:nowrap;overflow-x:auto}
+    #status{display:none}
+    main{display:flex;flex-direction:column}
+    #scene{order:1;container-type:inline-size;overflow:visible}
+    #sceneGrille{min-height:0;padding:12px}
+    #carteApercu{container-type:normal;min-height:0}
+    .ecran{width:100%}
+    #rail{order:2;flex-direction:row;overflow-x:auto;padding:6px;border-right:none;
+      border-bottom:1px solid var(--lig)}
+    #rail button{flex:0 0 68px}
+    #rail hr{width:1px;height:auto;margin:6px 2px}
+    #panneau{order:3;overflow:visible}
     #poignee{display:none}
+    #bas{grid-template-columns:minmax(0,1fr)}
   }
-  /* l'ecran de l'apercu : l'image, ou ce qu'on y depose */
-  .ecran{position:relative;border-radius:8px;overflow:hidden;background:#000;
-    border:1px solid var(--line);aspect-ratio:16/9;margin:0 auto;
-    width:min(100%,calc(46vh * 16 / 9))}
-  #ecran.vide{cursor:pointer}
-  .ecran.over{border-color:var(--acc)}
-  .ecran #shot,.ecran #clip{width:100%;height:100%;object-fit:contain;
-    border:0;border-radius:0;display:block}
-  #ecranVide{position:absolute;inset:0;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:4px;color:var(--dim);
-    text-align:center;font-size:12px;padding:12px;pointer-events:none}
-  #ecranVide b{color:var(--acc);letter-spacing:.08em}
-  #ecranVide[hidden]{display:none}
-  .row.trois{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .row.trois button{font-size:11px;padding:7px 4px;line-height:1.25}
-  .row.lire{grid-template-columns:minmax(0,1fr) 84px}
-  .row.quatre{grid-template-columns:repeat(auto-fit,minmax(88px,1fr))}
-  #carteRendu .row{align-items:end}
-  #carteRendu .tete{display:flex;align-items:center;justify-content:space-between;
-    gap:10px}
-  #carteRendu .tete h2{margin:0}
-  #carteRendu .tete button{width:auto;padding:9px 18px}
-  #carteRendu label.bombe{margin:0 0 8px;line-height:1.35}
-  /* la suite de fonds : un fichier par ligne, dans l'ordre de passage */
-  #bdliste{list-style:none;counter-reset:fond;margin:10px 0 0;padding:0}
-  #bdliste[hidden]{display:none}
-  #bdliste li{counter-increment:fond;display:grid;align-items:center;gap:4px;
-    grid-template-columns:minmax(0,1fr) auto auto auto;padding:4px 0;
-    border-bottom:1px solid var(--line);font-size:12px}
-  #bdliste li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #bdliste li span::before{content:counter(fond) ". ";color:var(--dim)}
-  #bdliste li small{color:var(--dim);font-family:var(--mono)}
-  #bdliste button{width:auto;padding:3px 8px;font-size:12px;line-height:1.2}
-  #bdjeu[hidden],#bdphoto[hidden]{display:none}
-  details.plus{margin-top:8px}
-  details.plus summary{color:var(--dim);font-size:11px;cursor:pointer}
-  details.plus summary:hover{color:var(--ink)}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;
-    padding:14px;margin-bottom:14px}
-  .card h2{margin:0 0 10px;font-size:11px;letter-spacing:.14em;color:var(--dim);
-    text-transform:uppercase;font-weight:600}
-  label{display:block;margin:9px 0 3px;color:var(--dim);font-size:11px;
-    letter-spacing:.06em;text-transform:uppercase}
-  input,select,button{font:inherit;color:var(--ink);background:#141a20;
-    border:1px solid var(--line);border-radius:5px;padding:6px 8px;width:100%}
-  input[type=color]{padding:2px;height:32px;cursor:pointer}
-  input[type=range]{padding:0;background:none;border:none;accent-color:var(--acc)}
-  button{background:var(--acc);color:var(--sur-acc);border:none;font-weight:700;
-    cursor:pointer;letter-spacing:.1em;text-transform:uppercase;padding:10px}
-  button:disabled{background:#312821;color:var(--dim);cursor:default}
-  button.ghost{background:#141a20;color:var(--ink);font-weight:400;
-    border:1px solid var(--line);letter-spacing:0;text-transform:none}
-  .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  #midiFin,#midiPas{margin-top:8px}
-  .exact{display:grid;grid-template-columns:1fr 110px;gap:8px;align-items:center;
-    margin-top:6px}
-  .exact label{margin:0}
-  .drop{border:1px dashed #2c3a44;border-radius:8px;padding:22px 12px;
-    text-align:center;color:var(--dim);cursor:pointer;transition:.15s}
-  .drop:hover,.drop.over{border-color:var(--acc);color:var(--ink)}
-  .drop b{color:var(--acc);display:block;margin-bottom:4px;letter-spacing:.08em}
-  #shot.calcul{opacity:.35;transition:opacity .2s}
-  select.inst{margin:2px 0 4px;font-size:11px;color:var(--dim)}
-  .aide{font-size:11px;line-height:1.5;color:#958981;margin:2px 0 12px}
-  /* le style en ligne aurait ecrase l'attribut « hidden », qui ne passe que
-     par la feuille de style du navigateur */
-  #clip{width:100%;display:block;border-radius:6px;background:#000}
-  /* « hidden » ne coupe rien tout seul des qu'une regle donne un display :
-     il faut le redire pour chacun des deux apercus */
-  #clip[hidden], #shot[hidden]{display:none}
-  .aide b.freq{display:block;color:var(--acc);font-weight:600;margin-top:2px;
-    letter-spacing:.03em}
-  #shoterr{display:none;margin-top:8px;padding:8px 10px;border-radius:6px;
-    font-size:12px;line-height:1.45;background:#2a1416;border:1px solid #6b2b30;
-    color:#ffb4b4}
-  #shoterr.on{display:block}
-#shot{width:100%;border-radius:8px;border:1px solid var(--line);display:block;
-    background:#000;aspect-ratio:16/9;object-fit:contain}
-  .meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--dim);margin-top:10px;
-    font-size:11px;letter-spacing:.06em}
-  .meta b{color:var(--ink);font-weight:600}
-  .bar{height:5px;background:#141a20;border-radius:3px;overflow:hidden;margin:8px 0}
-  .bar i{display:block;height:100%;background:var(--acc);width:0;transition:.3s}
-  .err{color:var(--bad)}
-  .hint{color:var(--dim);font-size:11px;margin-top:8px}
-  /* Le sequenceur de machines : une ligne par changement.
-     Toutes ces regles sont ecrites « .seq X » et non « X » : une regle a deux
-     classes l'emporte sur une regle a une seule, et « .seq .row » ecrasait
-     sinon les colonnes de chaque ligne — qui se retrouvait a trois colonnes
-     pour quatre elements, le bouton d'effacement tombant a la ligne. */
-  .seq{margin:10px 0 4px}
-  .seq .row{align-items:center;gap:6px;margin-top:8px}
-  .seq .seqplus{grid-template-columns:1fr}
-  .seq .seqauto{grid-template-columns:1fr 72px auto}
-  .seq .seqrow{grid-template-columns:auto 84px 1fr auto;margin-top:6px}
-  .seq input,.seq select,.seq button{margin:0;padding:8px 9px}
-  .seq .seqx{padding:7px 11px;line-height:1}
-  .seq .unite{color:var(--dim);font-size:11px;letter-spacing:.06em}
-  /* « hidden » ne coupe rien des qu'une autre regle donne un display */
-  #midimeta[hidden], #midiReglages[hidden], #midiAvis[hidden]{display:none}
-  a.dl{display:block;text-align:center;background:var(--acc);color:var(--sur-acc);
-    padding:10px;border-radius:5px;text-decoration:none;font-weight:700;
-    letter-spacing:.1em;text-transform:uppercase}
-  /* les onglets de l'en-tete : le studio, et les styles a essayer */
-  #vues{display:flex;gap:4px}
-  #vues button{background:none;color:var(--dim);border:1px solid var(--line);
-    border-radius:6px;padding:6px 14px;font-weight:600;letter-spacing:.08em}
-  #vues button:hover{color:var(--ink);border-color:#3a4650}
-  #vues button.on{background:var(--acc);color:var(--sur-acc);border-color:var(--acc)}
-  main[hidden]{display:none}
-  /* l'onglet des styles : il prend la place des reglages */
-  #styles{display:flex;justify-content:center;padding:20px}
-  #styles[hidden]{display:none}
-  /* les exemples : une image du moteur sous chaque effet, animee au survol */
-  figure.ex{margin:8px auto 4px;position:relative;border-radius:6px;overflow:hidden;
-    border:1px solid var(--line);background:#000;aspect-ratio:16/9;cursor:pointer;
-    max-width:320px}
-  figure.ex[hidden]{display:none}
-  figure.ex img{display:block;width:100%;height:100%;object-fit:cover}
-  figure.ex figcaption{position:absolute;left:6px;bottom:5px;font-size:10px;
-    color:#fff;background:rgba(0,0,0,.6);padding:1px 6px;border-radius:3px;
-    letter-spacing:.04em;pointer-events:none;transition:opacity .2s}
-  figure.ex.joue figcaption{opacity:0}
-  #styles .fen{background:var(--panel);border:1px solid var(--line);
-    border-radius:10px;max-width:1080px;width:100%;padding:20px 22px}
-  #styles .tete{display:flex;justify-content:space-between;
-    align-items:flex-start;gap:16px;margin-bottom:6px}
-  #styles h2{margin:0;color:var(--acc);letter-spacing:.06em}
-  #styles .tete > div{flex:1;min-width:0}
-  #styles .ferme{background:none;color:var(--dim);border:1px solid var(--line);
-    font-weight:400;padding:4px 12px;flex:none;width:auto}
-  #styles .grille{display:grid;gap:14px;margin-top:14px;
-    grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
-  #styles .st{border:1px solid var(--line);border-radius:8px;overflow:hidden;
-    background:var(--bg);display:flex;flex-direction:column}
-  #styles .st img{display:block;width:100%;aspect-ratio:16/9;
-    background:#000;object-fit:cover}
-  #styles .st .vide{width:100%;aspect-ratio:16/9;background:#000;
-    display:flex;align-items:center;justify-content:center;
-    color:var(--dim);font-size:12px}
-  #styles .st .txt{padding:10px 12px;flex:1}
-  #styles .st b{color:var(--ink);display:block;margin-bottom:4px}
-  #styles .st b::first-letter{text-transform:uppercase}
-  #styles .st p{margin:0;color:var(--dim);font-size:13px;line-height:1.4}
-  #styles .st .act{display:flex;gap:8px;padding:0 12px 12px}
-  #styles .st .act button{flex:1;padding:7px 6px;font-size:12px}
 </style></head><body>
 
 <header>
-  <h1>Studio Omnipotard</h1>
+  <div class="logo"><i class="ic" data-ic="logo"></i>Omnipotard <span>Studio</span></div>
   <nav id="vues">
     <button class="on" data-vue="studio">Studio</button>
     <button data-vue="styles">Styles</button>
   </nav>
-  <span id="ver" style="color:#5a6b64;font-size:11px"></span>
-  <span id="status">deposez un morceau pour commencer</span>
+  <button type="button" id="puce" class="vide" title="choisir un morceau">
+    <span class="pt"></span><i class="ic" data-ic="morceau"></i><b id="puceNom">aucun morceau</b><span id="puceDet"></span></button>
+  <span id="status">déposez un morceau pour commencer</span>
+  <span id="ver"></span>
+  <button type="button" id="exporter" disabled title="lancer le rendu avec les réglages de la carte Export"><i class="ic" data-ic="rendu"></i><span>Exporter</span></button>
 </header>
 
 <main>
-<div id="reglages">
- <div class="col">
-  <div class="card">
-    <h2>Prereglage</h2>
-    <select id="preset"></select>
-    <div class="row" style="margin-top:8px">
+<nav id="rail" aria-label="sections des réglages">
+  <button type="button" data-section="prereglage"><i class="ic" data-ic="prereglage"></i><span>Préréglage</span></button>
+  <hr>
+  <button type="button" data-section="machine"><i class="ic" data-ic="machine"></i><span>Machine</span></button>
+  <button type="button" data-section="lumiere"><i class="ic" data-ic="lumiere"></i><span>Lumière</span></button>
+  <button type="button" data-section="couleur"><i class="ic" data-ic="couleur"></i><span>Couleur</span></button>
+  <button type="button" data-section="dalle"><i class="ic" data-ic="dalle"></i><span>Dalle</span></button>
+  <button type="button" data-section="fonds"><i class="ic" data-ic="fonds"></i><span>Fonds</span></button>
+  <button type="button" data-section="trait"><i class="ic" data-ic="trait"></i><span>Trait</span></button>
+  <hr>
+  <button type="button" data-section="reactions"><i class="ic" data-ic="reactions"></i><span>Réactions</span></button>
+  <button type="button" data-section="avaries"><i class="ic" data-ic="avaries"></i><span>Avaries</span></button>
+  <button type="button" data-section="echo"><i class="ic" data-ic="echo"></i><span>Écho</span></button>
+  <button type="button" data-section="texture"><i class="ic" data-ic="texture"></i><span>Texture</span></button>
+  <hr>
+  <button type="button" data-section="melodie"><i class="ic" data-ic="melodie"></i><span>Mélodie</span></button>
+</nav>
+
+<section id="panneau">
+  <div class="section" data-section="prereglage">
+    <div class="tete"><i class="ic" data-ic="prereglage"></i><h2>Préréglage</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">Un point de départ : il repose tous les curseurs d'un coup. Vos propres réglages s'enregistrent ici.</p>
+    <div class="explications" hidden>
+      <p>Ceux qu'un préréglage ne mentionne pas reviennent à leur valeur d'usine : deux préréglages enchaînés ne se mélangent donc pas.</p>
+      <p><b>Enregistrer</b> garde d'un coup tous les curseurs, toutes les listes, les couleurs et le titre — tout sauf la définition, la cadence et le morceau. Ils sont écrits dans <code>out/studio/mes-reglages.json</code> et vous les retrouverez à la prochaine ouverture.</p>
+    </div>
+    <div class="ctl liste"><label for="preset">préréglage</label>
+      <select id="preset"></select></div>
+    <div class="row">
       <input type="text" id="presetNom" maxlength="40"
-             placeholder="nom de votre reglage">
+             placeholder="nom de votre réglage">
       <button class="ghost" id="presetSave">Enregistrer</button>
     </div>
-    <button class="ghost" id="presetDel" style="margin-top:6px" disabled>
-      Effacer ce reglage</button>
-    <p class="hint">Ceux qu'un prereglage ne mentionne pas reviennent a leur
-      valeur d'usine : deux prereglages enchaines ne se melangent donc pas.<br>
-      <b>Enregistrer</b> garde d'un coup tous les curseurs, toutes les listes,
-      les couleurs et le titre — tout sauf la definition, la cadence et le
-      morceau. Ils sont ecrits dans <code>out/studio/mes-reglages.json</code>
-      et vous les retrouverez a la prochaine ouverture.</p>
+    <button class="ghost" id="presetDel" disabled>Effacer ce réglage</button>
   </div>
-  <div class="card">
-    <h2>Machine</h2>
-    <label for="machine">la machine du debut</label>
-    <select id="machine"></select>
 
+  <div class="section" data-section="machine">
+    <div class="tete"><i class="ic" data-ic="machine"></i><h2>Machine</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">La machine dessinée, et celles qui lui succèdent au fil du morceau.</p>
+    <div class="explications" hidden>
+      <p>Le tracé d'une machine se déforme jusqu'à devenir celui de la suivante : les pads glissent sur les déclencheurs, les encodeurs sur les potards. Les noms, eux, ne se déforment pas — ils se croisent sur place, parce qu'une lettre qui se déforme en une autre ne se lit plus.</p>
+      <p>La déformation <b>précède</b> l'instant inscrit : à « 0:32 digitakt » avec 1,9 s de déformation, elle commence à 0:30 et le Digitakt est bien posé à 0:32.</p>
+    </div>
+    <div class="ctl liste"><label for="machine">la machine du début</label>
+      <select id="machine"></select></div>
     <div class="seq" id="seqBloc">
-      <label>puis, en cours de morceau</label>
+      <div class="titre">puis, en cours de morceau</div>
       <div id="seqListe"></div>
       <div class="row seqplus">
         <button class="ghost" id="seqPlus">Ajouter un changement</button>
       </div>
       <div class="row seqauto">
-        <button class="ghost" id="seqAuto">Repartir toutes les</button>
+        <button class="ghost" id="seqAuto">Répartir toutes les</button>
         <input type="number" id="seqChaque" min="4" max="600" step="1" value="30">
         <span class="unite">s</span>
       </div>
       <input type="hidden" id="machines">
     </div>
+    <div class="groupe">D'une machine à l'autre</div>
+    <div class="ctl"><label for="passage">durée de la déformation</label>
+      <input type="range" id="passage" min="0" max="6" step="0.1" value="1.9"><output><span id="v-psg">1.90 s</span></output></div>
+    <div class="ctl"><label for="passageTurb">ondulation pendant la déformation</label>
+      <input type="range" id="passageTurb" min="0" max="2.5" step="0.05" value="1"><output><span id="v-psgt">1.00</span></output></div>
+  </div>
 
-    <label for="passage">duree de la deformation &mdash;
-      <span id="v-psg">1.90 s</span></label>
-    <input type="range" id="passage" min="0" max="6" step="0.1" value="1.9">
-    <label for="passageTurb">ondulation pendant la deformation &mdash;
-      <span id="v-psgt">1.00</span></label>
-    <input type="range" id="passageTurb" min="0" max="2.5" step="0.05" value="1">
-    <p class="hint">Le trace d'une machine se deforme jusqu'a devenir celui de
-      la suivante : les pads glissent sur les declencheurs, les encodeurs sur
-      les potards. Les noms, eux, ne se deforment pas &mdash; ils se croisent
-      sur place, parce qu'une lettre qui se deforme en une autre ne se lit
-      plus.<br>
-      La deformation <b>precede</b> l'instant inscrit : a « 0:32 digitakt »
-      avec 1,9 s de deformation, elle commence a 0:30 et le Digitakt est bien
-      pose a 0:32.</p>
-  </div>
-  <div class="card">
-    <h2>Lumiere des coups</h2>
-    <label for="eclatPads">eclat des pads frappes &mdash; <span id="v-ep">1.00</span></label>
-    <input type="range" id="eclatPads" min="0" max="3" step="0.05" value="1">
-    <label for="couleurCoups">couleur de la lumiere</label>
-    <select id="couleurCoups">
-      <option value="trait" selected>celle du trait</option>
-      <option value="libre">une couleur au choix</option>
-      <option value="instrument">une par instrument</option>
-      <option value="arc-en-ciel">une au hasard a chaque coup</option>
-    </select>
+  <div class="section" data-section="lumiere">
+    <div class="tete"><i class="ic" data-ic="lumiere"></i><h2>Lumière des coups</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">Comment s'allument les pads et les touches frappés : éclat, couleur, texture.</p>
+    <div class="explications" hidden>
+      <p>Ce qui s'allume quand un coup tombe : les pads de la MPC, de la SP-404 et du Digitakt, les touches du MiniFreak. L'<b>éclat</b> monte ou baisse leur lumière sans toucher au reste du tracé. La <b>couleur</b> peut quitter celle du trait : une seule, choisie, ou une par instrument — rouge la grosse caisse, jaune la caisse claire, cyan le charley, et sur le clavier une teinte par note de la gamme. La <b>texture</b> dessine l'intérieur de la touche allumée.</p>
+    </div>
+    <div class="ctl"><label for="eclatPads">éclat des pads frappés</label>
+      <input type="range" id="eclatPads" min="0" max="3" step="0.05" value="1"><output><span id="v-ep">1.00</span></output></div>
+    <div class="ctl liste"><label for="couleurCoups">couleur de la lumière</label>
+      <select id="couleurCoups">
+        <option value="trait" selected>celle du trait</option>
+        <option value="libre">une couleur au choix</option>
+        <option value="instrument">une par instrument</option>
+        <option value="arc-en-ciel">une au hasard à chaque coup</option>
+      </select></div>
     <div id="libreBloc" hidden>
-      <label for="couleurCoupsLibre">la couleur choisie</label>
-      <input type="color" id="couleurCoupsLibre" value="#ff7a1f">
+      <div class="ctl couleur"><label for="couleurCoupsLibre">la couleur choisie</label>
+        <input type="color" id="couleurCoupsLibre" value="#ff7a1f"></div>
     </div>
-    <label for="textureTouches">texture des touches allumees</label>
-    <select id="textureTouches">
-      <option value="nappe" selected>nappe pleine</option>
-      <option value="lignes">lignes</option>
-      <option value="hachures">hachures</option>
-      <option value="quadrillage">quadrillage</option>
-      <option value="points">points</option>
-      <option value="cadres">cadres emboites</option>
-      <option value="eclat">eclat au centre</option>
-      <option value="contour">contour epais</option>
-    </select>
-    <p class="hint">Ce qui s'allume quand un coup tombe : les pads de la MPC,
-      de la SP-404 et du Digitakt, les touches du MiniFreak. L'<b>eclat</b>
-      monte ou baisse leur lumiere sans toucher au reste du trace. La
-      <b>couleur</b> peut quitter celle du trait : une seule, choisie, ou une
-      par instrument &mdash; rouge la grosse caisse, jaune la caisse claire,
-      cyan le charley, et sur le clavier une teinte par note de la gamme.
-      La <b>texture</b> dessine l'interieur de la touche allumee.</p>
+    <div class="ctl liste"><label for="textureTouches">texture des touches allumées</label>
+      <select id="textureTouches">
+        <option value="nappe" selected>nappe pleine</option>
+        <option value="lignes">lignes</option>
+        <option value="hachures">hachures</option>
+        <option value="quadrillage">quadrillage</option>
+        <option value="points">points</option>
+        <option value="cadres">cadres emboîtés</option>
+        <option value="eclat">éclat au centre</option>
+        <option value="contour">contour épais</option>
+      </select></div>
   </div>
-  <div class="card">
-    <h2>Couleur du trait</h2>
-    <select id="palette">
-      <option value="vert">vert (par defaut)</option>
-      <option value="orange">orange</option>
-      <option value="bleu">bleu</option>
-      <option value="bleu-fond">bleu sur fond bleu</option>
-      <option value="perso">couleur libre&hellip;</option>
-    </select>
+
+  <div class="section" data-section="couleur">
+    <div class="tete"><i class="ic" data-ic="couleur"></i><h2>Couleur du trait</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">La teinte du trait et sa nature : néon, encre pour les fonds clairs, ou les deux.</p>
+    <div class="explications" hidden>
+      <p>Sur un <b>fond clair</b> — un ciel, une vidéo de nuages — un néon se perd : sa lumière s'ajoute au blanc. Trois réponses : <b>encre</b> peint la machine en trait foncé par-dessus le fond (les coups gardent leur couleur) ; <b>auto</b> choisit point par point, néon sur le sombre et encre sur le clair, ce qui suit un ciel qui change ; le <b>détourage</b> pose un liseré autour du trait, sombre en néon, clair en encre. Le creux derrière la machine s'éclaircit en encre au lieu de s'assombrir.</p>
+      <p>Les réglages du fond sont faits pour le néon : ils assombrissent la photo. Pour un ciel lumineux, montez la <b>présence du fond</b> et baissez le <b>dégagement</b> — en auto, ce qui reste sombre (l'écran de la machine, le creux) garde le néon, le reste passe à l'encre.</p>
+    </div>
+    <div class="ctl liste"><label for="palette">couleur</label>
+      <select id="palette">
+        <option value="vert">vert (par défaut)</option>
+        <option value="orange">orange</option>
+        <option value="bleu">bleu</option>
+        <option value="bleu-fond">bleu sur fond bleu</option>
+        <option value="perso">couleur libre…</option>
+      </select></div>
     <div id="traitwrap" hidden>
-      <label for="trait">teinte</label>
-      <input type="color" id="trait" value="#3dff72">
+      <div class="ctl couleur"><label for="trait">teinte</label>
+        <input type="color" id="trait" value="#3dff72"></div>
     </div>
-    <label for="modeTrait">nature du trait</label>
-    <select id="modeTrait">
-      <option value="neon" selected>neon : une lumiere (fonds sombres)</option>
-      <option value="encre">encre : un trait fonce (fonds clairs)</option>
-      <option value="auto">auto : selon le fond derriere chaque trait</option>
-    </select>
+    <div class="ctl liste"><label for="modeTrait">nature du trait</label>
+      <select id="modeTrait">
+        <option value="neon" selected>néon : une lumière (fonds sombres)</option>
+        <option value="encre">encre : un trait foncé (fonds clairs)</option>
+        <option value="auto">auto : selon le fond derrière chaque trait</option>
+      </select></div>
     <div id="encreBloc" hidden>
-      <label for="encre">couleur de l'encre</label>
-      <input type="color" id="encre" value="#0a1210">
+      <div class="ctl couleur"><label for="encre">couleur de l'encre</label>
+        <input type="color" id="encre" value="#0a1210"></div>
     </div>
-    <label for="detourage">detourage &mdash; <span id="v-det">0.00</span></label>
-    <input type="range" id="detourage" min="0" max="2" step="0.05" value="0">
-    <label class="coche"><input type="checkbox" id="inverser">
-      inverser les couleurs (negatif)</label>
-    <p class="hint">Sur un <b>fond clair</b> &mdash; un ciel, une video de
-      nuages &mdash; un neon s'y perd : sa lumiere s'ajoute au blanc. Trois
-      reponses : <b>encre</b> peint la machine en trait fonce par-dessus le
-      fond (les coups gardent leur couleur) ; <b>auto</b> choisit point par
-      point, neon sur le sombre et encre sur le clair, ce qui suit un ciel
-      qui change ; le <b>detourage</b> pose un liseré autour du trait, sombre
-      en neon, clair en encre. Le creux derriere la machine s'eclaircit en
-      encre au lieu de s'assombrir.<br>
-      Les reglages du fond sont faits pour le neon : ils assombrissent la
-      photo. Pour un ciel lumineux, montez l'<b>intensite</b> du fond et
-      baissez le <b>creux</b> &mdash; en auto, ce qui reste sombre (l'ecran de
-      la machine, le creux) garde le neon, le reste passe a l'encre.</p>
+    <div class="ctl"><label for="detourage">détourage</label>
+      <input type="range" id="detourage" min="0" max="2" step="0.05" value="0"><output><span id="v-det">0.00</span></output></div>
+    <div class="ctl coche"><label class="coche"><input type="checkbox" id="inverser"><span>inverser les couleurs (négatif)</span></label></div>
   </div>
-  <div class="card">
-    <h2>Fond</h2>
-    <label for="bg">texture</label>
-    <select id="bg">
-      <option value="noir">noir (aucun)</option>
-      <option value="uni">couleur unie</option>
-      <option value="grille">grille d'oscilloscope</option>
-      <option value="points">trame de points</option>
-      <option value="scan">lignes de tube</option>
-      <option value="degrade">degrade (sombre au centre)</option>
-      <option value="bruit">grain</option>
-    </select>
+
+  <div class="section" data-section="dalle">
+    <div class="tete"><i class="ic" data-ic="dalle"></i><h2>Texture de la dalle</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">La texture qui tapisse l'écran derrière la machine, et l'allure du tube lui-même.</p>
+    <div class="explications" hidden>
+      <p>Le trait est additif : un fond clair mange son contraste. Le <b>dégagement</b> creuse la texture derrière la machine pour qu'elle ressorte quand même.</p>
+      <p>Les coins assombris, les lignes de tube et la frange d'objectif valent pour toutes les textures, même le noir : c'est l'écran lui-même.</p>
+    </div>
+    <div class="ctl liste"><label for="bg">texture</label>
+      <select id="bg">
+        <option value="noir">noir (aucune)</option>
+        <option value="uni">couleur unie</option>
+        <option value="grille">grille d'oscilloscope</option>
+        <option value="points">trame de points</option>
+        <option value="scan">lignes de tube</option>
+        <option value="degrade">dégradé (sombre au centre)</option>
+        <option value="bruit">grain</option>
+      </select></div>
     <div id="bgopts" hidden>
-      <label for="bgColor">couleur du fond</label>
-      <input type="color" id="bgColor" value="#123a5c">
-      <label for="bgStrength">intensite &mdash; <span id="v-str">1.00</span></label>
-      <input type="range" id="bgStrength" min="0" max="2" step="0.05" value="1">
-      <label for="bgClear">degagement derriere la machine &mdash; <span id="v-clr">0.55</span></label>
-      <input type="range" id="bgClear" min="0" max="1" step="0.05" value="0.55">
-      <label for="vignettage">coins assombris &mdash;
-      <span id="v-vig">1.00</span></label>
-    <input type="range" id="vignettage" min="0" max="2" step="0.05" value="1">
-    <label for="scanlines">lignes de tube &mdash;
-      <span id="v-scl">1.00</span></label>
-    <input type="range" id="scanlines" min="0" max="2" step="0.05" value="1">
-    <label for="aberration">frange d'objectif &mdash;
-      <span id="v-abr">0.00</span></label>
-    <input type="range" id="aberration" min="0" max="1.5" step="0.05" value="0">
-    <label for="bgAnim">animation de la texture &mdash; <span id="v-ba">0.00</span></label>
-      <input type="range" id="bgAnim" min="0" max="6" step="0.1" value="0">
-      <p class="hint">Le trait est additif : un fond clair mange son contraste.
-        Le degagement creuse la texture derriere la machine pour qu'elle
-        ressorte quand meme.</p>
+      <div class="ctl couleur"><label for="bgColor">couleur du fond</label>
+        <input type="color" id="bgColor" value="#123a5c"></div>
+      <div class="ctl"><label for="bgStrength">intensité</label>
+        <input type="range" id="bgStrength" min="0" max="2" step="0.05" value="1"><output><span id="v-str">1.00</span></output></div>
+      <div class="ctl"><label for="bgClear">dégagement derrière la machine</label>
+        <input type="range" id="bgClear" min="0" max="1" step="0.05" value="0.55"><output><span id="v-clr">0.55</span></output></div>
+      <div class="ctl"><label for="bgAnim">animation de la texture</label>
+        <input type="range" id="bgAnim" min="0" max="6" step="0.1" value="0"><output><span id="v-ba">0.00</span></output></div>
     </div>
+    <div class="groupe">L'écran</div>
+    <div class="ctl"><label for="vignettage">coins assombris</label>
+      <input type="range" id="vignettage" min="0" max="2" step="0.05" value="1"><output><span id="v-vig">1.00</span></output></div>
+    <div class="ctl"><label for="scanlines">lignes de tube</label>
+      <input type="range" id="scanlines" min="0" max="2" step="0.05" value="1"><output><span id="v-scl">1.00</span></output></div>
+    <div class="ctl"><label for="aberration">frange d'objectif</label>
+      <input type="range" id="aberration" min="0" max="1.5" step="0.05" value="0"><output><span id="v-abr">0.00</span></output></div>
   </div>
-  <div class="card">
-    <h2>Fonds : images et videos</h2>
+
+  <div class="section" data-section="fonds">
+    <div class="tete"><i class="ic" data-ic="fonds"></i><h2>Fonds : images et vidéos</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">Une image, une vidéo, ou plusieurs à la suite, avec leur vitesse et leurs fondus.</p>
+    <div class="explications" hidden>
+      <p>Sur une vidéo, l'aperçu montre l'image de l'instant regardé ; le rendu, lui, la joue en entier, et la reprend quand elle est plus courte que le morceau.</p>
+      <p><b>Plusieurs fichiers</b> se jouent dans l'ordre de la liste, chacun jusqu'au bout pour une vidéo, le temps choisi pour une photo ; le <b>fondu enchaîné</b> passe de l'un à l'autre, et du dernier au premier quand la suite reprend. En <b>aller-retour</b>, la suite se rejoue à l'envers au lieu de repartir du début : pas de saut, même sans fondu.</p>
+      <p>Le <b>travelling</b> s'étale sur tout le morceau : l'image est chargée plus grande que l'écran et on s'y déplace lentement. Quelques pour cent suffisent à lui ôter son air de décor collé derrière la machine.</p>
+    </div>
     <div class="drop" id="bdrop">
-      <b id="bdname">Deposer une ou plusieurs images ou videos</b>
-      jpg, png, mp4, mov&hellip; ou cliquer. Plusieurs fichiers se jouent
-      a la suite.
+      <b id="bdname">Déposer une ou plusieurs images ou vidéos</b>
+      jpg, png, mp4, mov… ou cliquer. Plusieurs fichiers se jouent à la suite.
     </div>
     <input type="file" id="bdfile" accept="image/*,video/*" multiple hidden>
     <ol id="bdliste" hidden></ol>
     <div id="bdopts" hidden>
       <div id="bdjeu" hidden>
-        <label for="fondVitesse">vitesse des videos &mdash;
-          <span id="v-fv">1.00 &times;</span></label>
-        <input type="range" id="fondVitesse" min="-2" max="2" step="0.05" value="0">
-        <label for="fondBoucle">au bout de la suite</label>
-        <select id="fondBoucle">
-          <option value="boucle">reprendre du debut (boucle)</option>
-          <option value="allerretour">repartir a l'envers (aller-retour)</option>
-        </select>
-        <label for="fondFondu">fondu enchaine &mdash; <span id="v-ff">0.0 s</span></label>
-        <input type="range" id="fondFondu" min="0" max="4" step="0.1" value="0">
+        <div class="groupe">La suite</div>
+        <div class="ctl"><label for="fondVitesse">vitesse des vidéos</label>
+          <input type="range" id="fondVitesse" min="-2" max="2" step="0.05" value="0"><output><span id="v-fv">1.00 ×</span></output></div>
+        <div class="ctl liste"><label for="fondBoucle">au bout de la suite</label>
+          <select id="fondBoucle">
+            <option value="boucle">reprendre du début (boucle)</option>
+            <option value="allerretour">repartir à l'envers (aller-retour)</option>
+          </select></div>
+        <div class="ctl"><label for="fondFondu">fondu enchaîné</label>
+          <input type="range" id="fondFondu" min="0" max="4" step="0.1" value="0"><output><span id="v-ff">0.0 s</span></output></div>
         <div id="bdphoto" hidden>
-          <label for="fondPhoto">duree d'une photo &mdash; <span id="v-fp">6.0 s</span></label>
-          <input type="range" id="fondPhoto" min="1" max="30" step="0.5" value="6">
+          <div class="ctl"><label for="fondPhoto">durée d'une photo</label>
+            <input type="range" id="fondPhoto" min="1" max="30" step="0.5" value="6"><output><span id="v-fp">6.0 s</span></output></div>
         </div>
       </div>
-      <label for="bdStrength">presence du fond &mdash; <span id="v-bds">0.78</span></label>
-      <input type="range" id="bdStrength" min="0" max="1.6" step="0.02" value="0.78">
-      <label for="bdClear">degagement derriere la machine &mdash; <span id="v-bdc">0.40</span></label>
-      <input type="range" id="bdClear" min="0" max="1" step="0.05" value="0.40">
-      <label for="screenDim">opacite de la dalle &mdash; <span id="v-sd">0.40</span></label>
-      <input type="range" id="screenDim" min="0" max="1" step="0.05" value="0.40">
-      <label for="bdSharp">nettete du fond &mdash; <span id="v-bdq">0.37</span></label>
-      <input type="range" id="bdSharp" min="0" max="1" step="0.01" value="0.37">
-      <label for="travel">travelling &mdash; <span id="v-tv">0 %</span> de l'image parcourue</label>
-      <input type="range" id="travel" min="0" max="0.5" step="0.01" value="0">
-      <label for="travelMode">sens du travelling</label>
-      <select id="travelMode"></select>
-      <button class="ghost" id="bdclear" style="margin-top:8px">retirer tous les fonds</button>
-      <p class="hint">Sur une video, l'apercu montre l'image de l'instant
-        regarde ; le rendu, lui, la joue en entier, et la reprend quand elle
-        est plus courte que le morceau.<br>
-        <b>Plusieurs fichiers</b> se jouent dans l'ordre de la liste, chacun
-        jusqu'au bout pour une video, le temps choisi pour une photo ; le
-        <b>fondu enchaine</b> passe de l'un a l'autre, et du dernier au premier
-        quand la suite reprend. En <b>aller-retour</b>, la suite se rejoue a
-        l'envers au lieu de repartir du debut : pas de saut, meme sans
-        fondu.<br>
-        Le travelling s'etale sur tout le morceau : l'image est chargee plus
-        grande que l'ecran et on s'y deplace lentement. Quelques pour cent
-        suffisent a lui oter son air de decor colle derriere la machine.</p>
+      <div class="groupe">L'image</div>
+      <div class="ctl"><label for="bdStrength">présence du fond</label>
+        <input type="range" id="bdStrength" min="0" max="1.6" step="0.02" value="0.78"><output><span id="v-bds">0.78</span></output></div>
+      <div class="ctl"><label for="bdClear">dégagement derrière la machine</label>
+        <input type="range" id="bdClear" min="0" max="1" step="0.05" value="0.40"><output><span id="v-bdc">0.40</span></output></div>
+      <div class="ctl"><label for="screenDim">opacité de la dalle</label>
+        <input type="range" id="screenDim" min="0" max="1" step="0.05" value="0.40"><output><span id="v-sd">0.40</span></output></div>
+      <div class="ctl"><label for="bdSharp">netteté du fond</label>
+        <input type="range" id="bdSharp" min="0" max="1" step="0.01" value="0.37"><output><span id="v-bdq">0.37</span></output></div>
+      <div class="ctl"><label for="travel">travelling</label>
+        <input type="range" id="travel" min="0" max="0.5" step="0.01" value="0"><output><span id="v-tv">0 %</span></output></div>
+      <div class="ctl liste"><label for="travelMode">sens du travelling</label>
+        <select id="travelMode"></select></div>
+      <button class="ghost" id="bdclear">Retirer tous les fonds</button>
     </div>
   </div>
-  <div class="card">
-    <h2>Trait</h2>
-    <label for="taille">taille de la machine &mdash; <span id="v-ta">1.00</span></label>
-    <input type="range" id="taille" min="0.35" max="1.3" step="0.01" value="1">
-    <label for="presence">presence de la machine &mdash; <span id="v-pr">1.00</span></label>
-    <input type="range" id="presence" min="0.1" max="1.6" step="0.02" value="1">
-    <label for="neon">eclat du neon &mdash; <span id="v-ne">1.00</span></label>
-    <input type="range" id="neon" min="0.2" max="3" step="0.05" value="1">
-    <label for="reflet">surface qui renvoie la lumiere &mdash;
-      <span id="v-re">0.50</span></label>
-    <input type="range" id="reflet" min="0" max="1" step="0.02" value="0.5">
-    <label for="tube">tube de verre (relief) &mdash; <span id="v-tu">0.00</span></label>
-    <input type="range" id="tube" min="0" max="1.5" step="0.05" value="0">
-    <label for="nettete">finesse du trait &mdash; <span id="v-net">1.00</span></label>
-    <input type="range" id="nettete" min="0.6" max="1.7" step="0.05" value="1">
-    <label for="split">dedoublement du trait sur les gros subs &mdash; <span id="v-split">1.00</span></label>
-    <input type="range" id="split" min="0" max="2.5" step="0.05" value="1">
-    <select id="splitOn" class="inst"></select>
-    <label for="splitCount">dedoublements dans la video &mdash; au plus <span id="v-sc">3</span></label>
-    <input type="range" id="splitCount" min="0" max="12" step="1" value="3">
-    <label for="wobble">ondulation du trace &mdash; <span id="v-wob">0.00</span></label>
-    <input type="range" id="wobble" min="0" max="1.5" step="0.05" value="0">
-    <label for="splitPx">ecart des copies &mdash; <span id="v-spx">11</span> px</label>
-    <input type="range" id="splitPx" min="0" max="30" step="1" value="11">
-    <label for="snare">eclair jaune sur la caisse claire &mdash; <span id="v-sn">1.00</span></label>
-    <input type="range" id="snare" min="0" max="2" step="0.05" value="1">
-    <label for="wave">amplitude de la courbe &mdash; <span id="v-wv">1.10</span></label>
-    <input type="range" id="wave" min="0" max="3" step="0.05" value="1.10">
-    <label for="wavePunch">gonflement sur le temps fort &mdash; <span id="v-wp">0.85</span></label>
-    <input type="range" id="wavePunch" min="0" max="2.5" step="0.05" value="0.85">
-    <label for="waveSmooth">lissage de la courbe &mdash; <span id="v-ws">56</span></label>
-    <input type="range" id="waveSmooth" min="8" max="240" step="4" value="56">
-    <label for="trail">trainee de la bande &mdash; <span id="v-trail">1.00</span></label>
-    <input type="range" id="trail" min="0" max="2.5" step="0.05" value="1">
-    <label for="glitch">glitchs sur les paroxysmes &mdash; <span id="v-gl">1.00</span></label>
-    <input type="range" id="glitch" min="0" max="2" step="0.05" value="1">
-    <label for="stepDiv">vitesse des pas du sequenceur</label>
-    <select id="stepDiv">
-      <option value="1">lente &mdash; une case par temps</option>
-      <option value="2" selected>moyenne &mdash; une case par demi-temps</option>
-      <option value="4">rapide &mdash; une case par quart de temps</option>
-    </select>
-    <label for="title">titre affiche sur la dalle</label>
-    <input type="text" id="title" maxlength="22" placeholder="nom du fichier">
-    <p class="hint">Sur les coups vraiment appuyes — et seulement ceux-la —
-      les trois couches de couleur du trait se separent, puis se recollent
-      quand le coup retombe. Le fond, lui, ne bouge pas.<br>
-      Le nombre est un plafond, pas une consigne : deux dedoublements ne
-      peuvent pas tomber a moins de 25 secondes l'un de l'autre, et une video
-      courte en recoit donc moins. Par defaut ils ne partent que sur la grosse
-      caisse — la basse, souvent posee sur le meme temps que la caisse claire,
-      donnait l'impression qu'ils se declenchaient sur elle.</p>
-  </div>
- </div>
- <div class="col">
-  <div class="card">
-    <h2>Reactions au son</h2>
-    <p class="hint" style="margin-top:0">Chaque reaction se cale sur ce que
-      vous voulez. A zero, elle est eteinte.<br>
-      Les listes proposent quatre sortes de declencheurs.
-      <b>Instruments</b> : la batterie est reconnue a l'analyse, « caisse
-      claire » veut donc vraiment dire caisse claire.
-      <b>Bandes de frequences</b> : une hauteur et non un instrument — elles
-      attrapent aussi ce qui n'est pas percussif, une nappe qui monte, une
-      voix, un souffle de cymbale.
-      <b>Hasard</b> : tire au sort, mais pose sur la grille du morceau, donc
-      jamais a contretemps.
-      <b>Un coup sur deux</b> : deux effets poses l'un sur « 1 sur 2 » et
-      l'autre sur « l'autre sur 2 » ne peuvent jamais partir ensemble — c'est
-      la reponse quand tout tombe en meme temps.</p>
 
-    <label for="punch">zoom d'impact &mdash; <span id="v-pu">0.03</span></label>
-    <input type="range" id="punch" min="0" max="0.25" step="0.005" value="0.032">
-    <select id="punchOn" class="inst"></select>
-
-    <label for="shake">secousse de l'image &mdash; <span id="v-sh">0.00</span></label>
-    <input type="range" id="shake" min="0" max="2" step="0.05" value="0">
-    <select id="shakeOn" class="inst"></select>
-
-    <label for="parts">etincelles ejectees &mdash; <span id="v-pa">0.00</span></label>
-    <input type="range" id="parts" min="0" max="3" step="0.05" value="0">
-    <select id="partsOn" class="inst"></select>
-    <label for="partsN">nombre par coup &mdash; <span id="v-pan">14</span></label>
-    <input type="range" id="partsN" min="2" max="180" step="1" value="4">
-    <div class="row">
-      <div>
-        <label for="partsSpeed">vitesse &mdash; <span id="v-pas">1.00</span></label>
-        <input type="range" id="partsSpeed" min="0.2" max="2.5" step="0.05" value="1">
-      </div>
-      <div>
-        <label for="partsLife">duree &mdash; <span id="v-pal">0.55</span> s</label>
-        <input type="range" id="partsLife" min="0.15" max="1.5" step="0.05" value="0.55">
-      </div>
+  <div class="section" data-section="trait">
+    <div class="tete"><i class="ic" data-ic="trait"></i><h2>Trait</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">Taille, finesse et lumière du tracé, et la courbe du son sur l'écran de la machine.</p>
+    <div class="explications" hidden>
+      <p>Sur les coups vraiment appuyés — et seulement ceux-là — les trois couches de couleur du trait se séparent, puis se recollent quand le coup retombe. Le fond, lui, ne bouge pas.</p>
+      <p>Le nombre de dédoublements est un plafond, pas une consigne : deux dédoublements ne peuvent pas tomber à moins de 25 secondes l'un de l'autre, et une vidéo courte en reçoit donc moins. Par défaut ils ne partent que sur la grosse caisse — la basse, souvent posée sur le même temps que la caisse claire, donnait l'impression qu'ils se déclenchaient sur elle.</p>
     </div>
-
-    <label for="ring">onde de choc &mdash; <span id="v-ri">0.00</span></label>
-    <input type="range" id="ring" min="0" max="3" step="0.05" value="0">
-    <select id="ringOn" class="inst"></select>
-
-    <label for="gridPulse">pulsation de la grille &mdash; <span id="v-gp">0.00</span></label>
-    <input type="range" id="gridPulse" min="0" max="3" step="0.05" value="0">
-    <select id="gridOn" class="inst"></select>
-
-    <label for="bgFlash">eclat du fond &mdash; <span id="v-bf">0.00</span></label>
-    <input type="range" id="bgFlash" min="0" max="2" step="0.05" value="0">
-    <select id="flashOn" class="inst"></select>
-    <p class="hint">Pour une vraie explosion d'etincelles, monter le nombre,
-      la vitesse et la duree ensemble. Au-dela de quelques centaines de
-      braises, le trace de chacune est ecourte pour tenir un budget de points
-      par image : c'est ce qui permet d'en lancer des dizaines de milliers
-      sans que le rendu s'effondre.</p>
+    <div class="groupe">Le tracé</div>
+    <div class="ctl"><label for="taille">taille de la machine</label>
+      <input type="range" id="taille" min="0.35" max="1.3" step="0.01" value="1"><output><span id="v-ta">1.00</span></output></div>
+    <div class="ctl"><label for="presence">présence de la machine</label>
+      <input type="range" id="presence" min="0.1" max="1.6" step="0.02" value="1"><output><span id="v-pr">1.00</span></output></div>
+    <div class="ctl"><label for="neon">éclat du néon</label>
+      <input type="range" id="neon" min="0.2" max="3" step="0.05" value="1"><output><span id="v-ne">1.00</span></output></div>
+    <div class="ctl"><label for="reflet">surface qui renvoie la lumière</label>
+      <input type="range" id="reflet" min="0" max="1" step="0.02" value="0.5"><output><span id="v-re">0.50</span></output></div>
+    <div class="ctl"><label for="tube">tube de verre (relief)</label>
+      <input type="range" id="tube" min="0" max="1.5" step="0.05" value="0"><output><span id="v-tu">0.00</span></output></div>
+    <div class="ctl"><label for="nettete">finesse du trait</label>
+      <input type="range" id="nettete" min="0.6" max="1.7" step="0.05" value="1"><output><span id="v-net">1.00</span></output></div>
+    <div class="ctl"><label for="wobble">ondulation du tracé</label>
+      <input type="range" id="wobble" min="0" max="1.5" step="0.05" value="0"><output><span id="v-wob">0.00</span></output></div>
+    <div class="groupe">Dédoublement sur les gros coups</div>
+    <div class="ctl"><label for="split">dédoublement du trait</label>
+      <input type="range" id="split" min="0" max="2.5" step="0.05" value="1"><output><span id="v-split">1.00</span></output>
+      <select id="splitOn" class="inst"></select></div>
+    <div class="ctl"><label for="splitCount">dédoublements dans la vidéo, au plus</label>
+      <input type="range" id="splitCount" min="0" max="12" step="1" value="3"><output><span id="v-sc">3</span></output></div>
+    <div class="ctl"><label for="splitPx">écart des copies</label>
+      <input type="range" id="splitPx" min="0" max="30" step="1" value="11"><output><span id="v-spx">11</span> px</output></div>
+    <div class="groupe">La courbe du son</div>
+    <div class="ctl"><label for="wave">amplitude de la courbe</label>
+      <input type="range" id="wave" min="0" max="3" step="0.05" value="1.10"><output><span id="v-wv">1.10</span></output></div>
+    <div class="ctl"><label for="wavePunch">gonflement sur le temps fort</label>
+      <input type="range" id="wavePunch" min="0" max="2.5" step="0.05" value="0.85"><output><span id="v-wp">0.85</span></output></div>
+    <div class="ctl"><label for="waveSmooth">lissage de la courbe</label>
+      <input type="range" id="waveSmooth" min="8" max="240" step="4" value="56"><output><span id="v-ws">56</span></output></div>
+    <div class="ctl"><label for="trail">traînée de la bande</label>
+      <input type="range" id="trail" min="0" max="2.5" step="0.05" value="1"><output><span id="v-trail">1.00</span></output></div>
+    <div class="groupe">Coups et paroxysmes</div>
+    <div class="ctl"><label for="snare">éclair jaune sur la caisse claire</label>
+      <input type="range" id="snare" min="0" max="2" step="0.05" value="1"><output><span id="v-sn">1.00</span></output></div>
+    <div class="ctl"><label for="glitch">glitchs sur les paroxysmes</label>
+      <input type="range" id="glitch" min="0" max="2" step="0.05" value="1"><output><span id="v-gl">1.00</span></output></div>
+    <div class="groupe">La dalle de la machine</div>
+    <div class="ctl liste"><label for="stepDiv">vitesse des pas du séquenceur</label>
+      <select id="stepDiv">
+        <option value="1">lente — une case par temps</option>
+        <option value="2" selected>moyenne — une case par demi-temps</option>
+        <option value="4">rapide — une case par quart de temps</option>
+      </select></div>
+    <div class="ctl texte"><label for="title">titre affiché sur la dalle</label>
+      <input type="text" id="title" maxlength="22" placeholder="nom du fichier"></div>
   </div>
-  <div class="card">
-    <h2>Avaries d'image</h2>
-    <p class="hint" style="margin-top:0">Les memes pannes que sur les
-      paroxysmes, mais declenchees par ce qui est joue. Elles s'appliquent a
-      l'image finie, juste avant la deformation du tube : d'ou leur air de
-      signal casse plutot que d'effet dessine.</p>
 
-    <label for="tranches">bandes arrachees &mdash; <span id="v-tr">0.00</span></label>
-    <input type="range" id="tranches" min="0" max="2.5" step="0.05" value="0">
-    <select id="tranchesOn" class="inst"></select>
-
-    <label for="blocs">blocs recopies &mdash; <span id="v-bl">0.00</span></label>
-    <input type="range" id="blocs" min="0" max="2.5" step="0.05" value="0">
-    <select id="blocsOn" class="inst"></select>
-
-    <label for="roll">decrochage vertical &mdash; <span id="v-ro">0.00</span></label>
-    <input type="range" id="roll" min="0" max="2" step="0.05" value="0">
-    <select id="rollOn" class="inst"></select>
-
-    <label for="ghost">image fantome &mdash; <span id="v-gh">0.00</span></label>
-    <input type="range" id="ghost" min="0" max="2.5" step="0.05" value="0">
-    <select id="ghostOn" class="inst"></select>
-
-    <label for="invert">negatif du trait &mdash; <span id="v-in">0.00</span></label>
-    <input type="range" id="invert" min="0" max="2.5" step="0.05" value="0">
-    <select id="invertOn" class="inst"></select>
-
-    <label for="stut">begaiement &mdash; pendant <span id="v-st">0.00</span> s</label>
-    <input type="range" id="stut" min="0" max="0.6" step="0.01" value="0">
-    <select id="stutOn" class="inst"></select>
-    <label for="stutLoop">boucle rejouee &mdash; <span id="v-sl">0.05</span> s</label>
-    <input type="range" id="stutLoop" min="0.01" max="0.3" step="0.01" value="0.05">
-
-    <label for="miroir">miroir &mdash; <span id="v-mi">0.00</span></label>
-    <input type="range" id="miroir" min="0" max="2" step="0.05" value="0">
-    <select id="miroirOn" class="inst"></select>
-
-    <label for="ondul">ondulation liquide &mdash; <span id="v-on">0.00</span></label>
-    <input type="range" id="ondul" min="0" max="2.5" step="0.05" value="0">
-    <select id="ondulOn" class="inst"></select>
-
-    <label for="mosaic">mosaique &mdash; <span id="v-mo">0.00</span></label>
-    <input type="range" id="mosaic" min="0" max="2" step="0.05" value="0">
-    <select id="mosaicOn" class="inst"></select>
-
-    <label for="kaleido">kaleidoscope &mdash; <span id="v-ka">0.00</span></label>
-    <input type="range" id="kaleido" min="0" max="2" step="0.05" value="0">
-    <select id="kaleidoOn" class="inst"></select>
-
-    <label for="cisaille">cisaillement &mdash; <span id="v-ci">0.00</span></label>
-    <input type="range" id="cisaille" min="0" max="2.5" step="0.05" value="0">
-    <select id="cisailleOn" class="inst"></select>
-
-    <label for="coupure">coupure franche &mdash; <span id="v-co">0.00</span></label>
-    <input type="range" id="coupure" min="0" max="2.5" step="0.05" value="0">
-    <select id="coupureOn" class="inst"></select>
-
-    <label for="tapestop">patinage de bande &mdash; <span id="v-ta">0.00</span> s</label>
-    <input type="range" id="tapestop" min="0" max="0.8" step="0.02" value="0">
-    <select id="tapestopOn" class="inst"></select>
-
-    <label for="scramble">tranches de temps brassees &mdash; <span id="v-sc2">0.00</span></label>
-    <input type="range" id="scramble" min="0" max="1" step="0.05" value="0">
-    <label for="scrLen">longueur d'une tranche &mdash; <span id="v-scl">0.14</span> s</label>
-    <input type="range" id="scrLen" min="0.04" max="0.6" step="0.01" value="0.14">
-    <p class="hint">Le <b>begaiement</b> decroche l'image du son : elle rejoue
-      en boucle un bout tres court pris a l'instant du coup. Une boucle plus
-      courte qu'une image donne un gel pur ; deux ou trois images donnent un
-      sursaut repete, bien plus visible.<br>
-      Les <b>tranches brassees</b> ne dependent d'aucun instrument : elles
-      decoupent le temps en blocs reguliers et les rejouent dans le desordre,
-      pendant que le son continue tout droit. Des tranches courtes hachent,
-      des longues desorientent.</p>
-  </div>
-  <div class="card">
-    <h2>Echo, couleurs, spectrogramme</h2>
-    <label for="echo">echo d'images &mdash; <span id="v-ec">0.00</span></label>
-    <input type="range" id="echo" min="0" max="0.85" step="0.05" value="0">
-    <div class="row">
-      <div>
-        <label for="echoN">nombre &mdash; <span id="v-ecn">3</span></label>
-        <input type="range" id="echoN" min="1" max="6" step="1" value="3">
-      </div>
-      <div>
-        <label for="echoDelay">ecart &mdash; <span id="v-ecd">0.045</span> s</label>
-        <input type="range" id="echoDelay" min="0.02" max="0.2" step="0.005" value="0.045">
-      </div>
+  <div class="section" data-section="reactions">
+    <div class="tete"><i class="ic" data-ic="reactions"></i><h2>Réactions au son</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">Ce qui bouge au rythme. Chaque réaction se cale sur un instrument, une bande de fréquences ou le hasard ; à zéro, elle est éteinte.</p>
+    <div class="explications" hidden>
+      <p>Les listes proposent quatre sortes de déclencheurs. <b>Instruments</b> : la batterie est reconnue à l'analyse, « caisse claire » veut donc vraiment dire caisse claire. <b>Bandes de fréquences</b> : une hauteur et non un instrument — elles attrapent aussi ce qui n'est pas percussif, une nappe qui monte, une voix, un souffle de cymbale. <b>Hasard</b> : tiré au sort, mais posé sur la grille du morceau, donc jamais à contretemps. <b>Un coup sur deux</b> : deux effets posés l'un sur « 1 sur 2 » et l'autre sur « l'autre sur 2 » ne peuvent jamais partir ensemble — c'est la réponse quand tout tombe en même temps.</p>
+      <p>Pour une vraie explosion d'étincelles, montez le nombre, la vitesse et la durée ensemble. Au-delà de quelques centaines de braises, le tracé de chacune est écourté pour tenir un budget de points par image : c'est ce qui permet d'en lancer des dizaines de milliers sans que le rendu s'effondre.</p>
     </div>
-
-    <label for="couleurs">couleurs par instrument &mdash; <span id="v-cl">0.00</span></label>
-    <input type="range" id="couleurs" min="0" max="2.5" step="0.05" value="0">
-
-    <label for="spectro">spectrogramme sur la dalle &mdash; <span id="v-sp">0.00</span></label>
-    <input type="range" id="spectro" min="0" max="2" step="0.05" value="0">
-    <p class="hint">L'<b>echo</b> redessine la machine telle qu'elle etait il y a
-      quelques centiemes, de plus en plus pale. Les <b>couleurs par instrument</b>
-      donnent au trait la teinte du dernier coup : rouge la grosse caisse, jaune
-      la caisse claire, cyan le charley, violet la basse. Le <b>spectrogramme</b>
-      deroule les trois dernieres secondes du morceau sur la dalle, une ligne
-      par bande de frequences — baissez l'amplitude de la courbe pour bien le
-      voir.</p>
+    <div class="groupe">L'image</div>
+    <div class="ctl"><label for="punch">zoom d'impact</label>
+      <input type="range" id="punch" min="0" max="0.25" step="0.005" value="0.032"><output><span id="v-pu">0.03</span></output>
+      <select id="punchOn" class="inst"></select></div>
+    <div class="ctl"><label for="shake">secousse de l'image</label>
+      <input type="range" id="shake" min="0" max="2" step="0.05" value="0"><output><span id="v-sh">0.00</span></output>
+      <select id="shakeOn" class="inst"></select></div>
+    <div class="groupe">Étincelles</div>
+    <div class="ctl"><label for="parts">étincelles éjectées</label>
+      <input type="range" id="parts" min="0" max="3" step="0.05" value="0"><output><span id="v-pa">0.00</span></output>
+      <select id="partsOn" class="inst"></select></div>
+    <div class="ctl"><label for="partsN">nombre par coup</label>
+      <input type="range" id="partsN" min="2" max="180" step="1" value="4"><output><span id="v-pan">16</span></output></div>
+    <div class="ctl"><label for="partsSpeed">vitesse des étincelles</label>
+      <input type="range" id="partsSpeed" min="0.2" max="2.5" step="0.05" value="1"><output><span id="v-pas">1.00</span></output></div>
+    <div class="ctl"><label for="partsLife">durée de vie</label>
+      <input type="range" id="partsLife" min="0.15" max="1.5" step="0.05" value="0.55"><output><span id="v-pal">0.55</span> s</output></div>
+    <div class="groupe">Lumière</div>
+    <div class="ctl"><label for="ring">onde de choc</label>
+      <input type="range" id="ring" min="0" max="3" step="0.05" value="0"><output><span id="v-ri">0.00</span></output>
+      <select id="ringOn" class="inst"></select></div>
+    <div class="ctl"><label for="gridPulse">pulsation de la grille</label>
+      <input type="range" id="gridPulse" min="0" max="3" step="0.05" value="0"><output><span id="v-gp">0.00</span></output>
+      <select id="gridOn" class="inst"></select></div>
+    <div class="ctl"><label for="bgFlash">éclat du fond</label>
+      <input type="range" id="bgFlash" min="0" max="2" step="0.05" value="0"><output><span id="v-bf">0.00</span></output>
+      <select id="flashOn" class="inst"></select></div>
   </div>
-  <div class="card">
-    <h2>Texture &mdash; trip hop, lo-fi</h2>
-    <p class="hint" style="margin-top:0">Celles-ci ne frappent sur rien : elles
-      sont la du debut a la fin. C'est ce qui separe un accident d'une matiere
-      — un grain de pellicule qui n'apparaitrait que sur la caisse claire ne
-      ressemblerait a rien.</p>
 
-    <label for="cadence">cadence tenue &mdash; <span id="v-ca">fluide</span></label>
-    <input type="range" id="cadence" min="0" max="5" step="1" value="0">
-
-    <label for="haloDoux">halo laiteux &mdash; <span id="v-hd">0.00</span></label>
-    <input type="range" id="haloDoux" min="0" max="2" step="0.05" value="0">
-
-    <label for="poussiere">poussiere et rayures &mdash; <span id="v-po">0.00</span></label>
-    <input type="range" id="poussiere" min="0" max="2.5" step="0.05" value="0">
-
-    <label for="flottement">flottement de bande &mdash; <span id="v-fl">0.00</span></label>
-    <input type="range" id="flottement" min="0" max="2.5" step="0.05" value="0">
-    <p class="hint">La <b>cadence tenue</b> garde chaque image deux, trois ou
-      quatre fois : la video passe a 15, 10 ou 7 images par seconde sans rien
-      ralentir. C'est le geste qui donne son air d'animation a un clip lo-fi.
-      Le <b>halo laiteux</b> releve les noirs et etale la lumiere, a l'oppose du
-      contraste franc de l'oscilloscope.</p>
+  <div class="section" data-section="avaries">
+    <div class="tete"><i class="ic" data-ic="avaries"></i><h2>Avaries d'image</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">Les pannes d'une vieille image, déclenchées par ce qui est joué : coupures, décalages, blocs, négatif.</p>
+    <div class="explications" hidden>
+      <p>Les mêmes pannes que sur les paroxysmes, mais déclenchées par ce qui est joué. Elles s'appliquent à l'image finie, juste avant la déformation du tube : d'où leur air de signal cassé plutôt que d'effet dessiné.</p>
+      <p>Le <b>bégaiement</b> décroche l'image du son : elle rejoue en boucle un bout très court pris à l'instant du coup. Une boucle plus courte qu'une image donne un gel pur ; deux ou trois images donnent un sursaut répété, bien plus visible.</p>
+      <p>Les <b>tranches brassées</b> ne dépendent d'aucun instrument : elles découpent le temps en blocs réguliers et les rejouent dans le désordre, pendant que le son continue tout droit. Des tranches courtes hachent, des longues désorientent.</p>
+    </div>
+    <div class="groupe">Coupures et décalages</div>
+    <div class="ctl"><label for="tranches">bandes arrachées</label>
+      <input type="range" id="tranches" min="0" max="2.5" step="0.05" value="0"><output><span id="v-tr">0.00</span></output>
+      <select id="tranchesOn" class="inst"></select></div>
+    <div class="ctl"><label for="blocs">blocs recopiés</label>
+      <input type="range" id="blocs" min="0" max="2.5" step="0.05" value="0"><output><span id="v-bl">0.00</span></output>
+      <select id="blocsOn" class="inst"></select></div>
+    <div class="ctl"><label for="roll">décrochage vertical</label>
+      <input type="range" id="roll" min="0" max="2" step="0.05" value="0"><output><span id="v-ro">0.00</span></output>
+      <select id="rollOn" class="inst"></select></div>
+    <div class="ctl"><label for="cisaille">cisaillement</label>
+      <input type="range" id="cisaille" min="0" max="2.5" step="0.05" value="0"><output><span id="v-ci">0.00</span></output>
+      <select id="cisailleOn" class="inst"></select></div>
+    <div class="ctl"><label for="coupure">coupure franche</label>
+      <input type="range" id="coupure" min="0" max="2.5" step="0.05" value="0"><output><span id="v-co">0.00</span></output>
+      <select id="coupureOn" class="inst"></select></div>
+    <div class="groupe">Déformations</div>
+    <div class="ctl"><label for="ghost">image fantôme</label>
+      <input type="range" id="ghost" min="0" max="2.5" step="0.05" value="0"><output><span id="v-gh">0.00</span></output>
+      <select id="ghostOn" class="inst"></select></div>
+    <div class="ctl"><label for="invert">négatif du trait</label>
+      <input type="range" id="invert" min="0" max="2.5" step="0.05" value="0"><output><span id="v-in">0.00</span></output>
+      <select id="invertOn" class="inst"></select></div>
+    <div class="ctl"><label for="miroir">miroir</label>
+      <input type="range" id="miroir" min="0" max="2" step="0.05" value="0"><output><span id="v-mi">0.00</span></output>
+      <select id="miroirOn" class="inst"></select></div>
+    <div class="ctl"><label for="ondul">ondulation liquide</label>
+      <input type="range" id="ondul" min="0" max="2.5" step="0.05" value="0"><output><span id="v-on">0.00</span></output>
+      <select id="ondulOn" class="inst"></select></div>
+    <div class="ctl"><label for="mosaic">mosaïque</label>
+      <input type="range" id="mosaic" min="0" max="2" step="0.05" value="0"><output><span id="v-mo">0.00</span></output>
+      <select id="mosaicOn" class="inst"></select></div>
+    <div class="ctl"><label for="kaleido">kaléidoscope</label>
+      <input type="range" id="kaleido" min="0" max="2" step="0.05" value="0"><output><span id="v-ka">0.00</span></output>
+      <select id="kaleidoOn" class="inst"></select></div>
+    <div class="groupe">Le temps</div>
+    <div class="ctl"><label for="stut">bégaiement</label>
+      <input type="range" id="stut" min="0" max="0.6" step="0.01" value="0"><output><span id="v-st">0.00</span> s</output>
+      <select id="stutOn" class="inst"></select></div>
+    <div class="ctl"><label for="stutLoop">boucle rejouée</label>
+      <input type="range" id="stutLoop" min="0.01" max="0.3" step="0.01" value="0.05"><output><span id="v-sl">0.05</span> s</output></div>
+    <div class="ctl"><label for="tapestop">patinage de bande</label>
+      <input type="range" id="tapestop" min="0" max="0.8" step="0.02" value="0"><output><span id="v-tp">0.00</span> s</output>
+      <select id="tapestopOn" class="inst"></select></div>
+    <div class="ctl"><label for="scramble">tranches de temps brassées</label>
+      <input type="range" id="scramble" min="0" max="1" step="0.05" value="0"><output><span id="v-sc2">0.00</span></output></div>
+    <div class="ctl"><label for="scrLen">longueur d'une tranche</label>
+      <input type="range" id="scrLen" min="0.04" max="0.6" step="0.01" value="0.14"><output><span id="v-srl">0.14</span> s</output></div>
   </div>
- </div>
-</div>
 
-<div id="poignee" title="tirer pour changer la taille de l'apercu ; double-clic : taille d'origine"></div>
-<aside id="cote">
-  <div class="card" id="carteApercu">
-    <h2>Apercu</h2>
+  <div class="section" data-section="echo">
+    <div class="tete"><i class="ic" data-ic="echo"></i><h2>Écho, couleurs, spectrogramme</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">Échos d'images, teinte par instrument, spectrogramme sur la dalle.</p>
+    <div class="explications" hidden>
+      <p>L'<b>écho</b> redessine la machine telle qu'elle était il y a quelques centièmes, de plus en plus pâle. Les <b>couleurs par instrument</b> donnent au trait la teinte du dernier coup : rouge la grosse caisse, jaune la caisse claire, cyan le charley, violet la basse. Le <b>spectrogramme</b> déroule les trois dernières secondes du morceau sur la dalle, une ligne par bande de fréquences — baissez l'amplitude de la courbe pour bien le voir.</p>
+    </div>
+    <div class="ctl"><label for="echo">écho d'images</label>
+      <input type="range" id="echo" min="0" max="0.85" step="0.05" value="0"><output><span id="v-ec">0.00</span></output></div>
+    <div class="ctl"><label for="echoN">nombre d'échos</label>
+      <input type="range" id="echoN" min="1" max="6" step="1" value="3"><output><span id="v-ecn">3</span></output></div>
+    <div class="ctl"><label for="echoDelay">écart entre les échos</label>
+      <input type="range" id="echoDelay" min="0.02" max="0.2" step="0.005" value="0.045"><output><span id="v-ecd">0.045</span> s</output></div>
+    <div class="ctl"><label for="couleurs">couleurs par instrument</label>
+      <input type="range" id="couleurs" min="0" max="2.5" step="0.05" value="0"><output><span id="v-cl">0.00</span></output></div>
+    <div class="ctl"><label for="spectro">spectrogramme sur la dalle</label>
+      <input type="range" id="spectro" min="0" max="2" step="0.05" value="0"><output><span id="v-sp">0.00</span></output></div>
+  </div>
+
+  <div class="section" data-section="texture">
+    <div class="tete"><i class="ic" data-ic="texture"></i><h2>Texture — trip hop, lo-fi</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">Le grain d'une image fatiguée, du début à la fin : cadence tenue, halo laiteux, poussière.</p>
+    <div class="explications" hidden>
+      <p>Celles-ci ne frappent sur rien : elles sont là du début à la fin. C'est ce qui sépare un accident d'une matière — un grain de pellicule qui n'apparaîtrait que sur la caisse claire ne ressemblerait à rien.</p>
+      <p>La <b>cadence tenue</b> garde chaque image deux, trois ou quatre fois : la vidéo passe à 15, 10 ou 7 images par seconde sans rien ralentir. C'est le geste qui donne son air d'animation à un clip lo-fi. Le <b>halo laiteux</b> relève les noirs et étale la lumière, à l'opposé du contraste franc de l'oscilloscope.</p>
+    </div>
+    <div class="ctl"><label for="cadence">cadence tenue</label>
+      <input type="range" id="cadence" min="0" max="5" step="1" value="0"><output><span id="v-ca">fluide</span></output></div>
+    <div class="ctl"><label for="haloDoux">halo laiteux</label>
+      <input type="range" id="haloDoux" min="0" max="2" step="0.05" value="0"><output><span id="v-hd">0.00</span></output></div>
+    <div class="ctl"><label for="poussiere">poussière et rayures</label>
+      <input type="range" id="poussiere" min="0" max="2.5" step="0.05" value="0"><output><span id="v-po">0.00</span></output></div>
+    <div class="ctl"><label for="flottement">flottement de bande</label>
+      <input type="range" id="flottement" min="0" max="2.5" step="0.05" value="0"><output><span id="v-fl">0.00</span></output></div>
+  </div>
+
+  <div class="section" data-section="melodie">
+    <div class="tete"><i class="ic" data-ic="melodie"></i><h2>Mélodie MIDI</h2>
+      <button type="button" class="q" title="explications">?</button></div>
+    <p class="desc">Les vraies notes du morceau, une par une, sur le clavier du MiniFreak : c'est ici qu'on les cale.</p>
+    <div class="explications" hidden>
+      <p>C'est la touche exacte qui s'enfonce. La MPC et le Digitakt n'ont pas de clavier — leurs pads restent à la batterie, et le fichier n'y change rien.</p>
+      <p>Le fichier est pris <b>tel quel</b> : un MIDI exporté du même projet que le morceau est déjà à l'heure, son décalage vaut zéro. La ligne sous les boutons dit à quel instant de la vidéo tombe la première note : lancez l'aperçu là, et regardez si la touche s'allume avec le son. La frise, sous l'aperçu, montre les notes là où elles tomberont.</p>
+      <p><b>Si c'est décalé d'un bout à l'autre</b>, servez-vous des boutons plutôt que du curseur. Un fichier exporté d'un projet tombe déjà sur la grille du morceau : ce qui lui manque n'est pas un réglage fin, c'est un nombre entier de temps. Les boutons décalent d'exactement un temps ou une mesure du morceau : on clique jusqu'à ce que ça tombe juste, sans jamais sortir de la grille. Le curseur ne sert qu'à rattraper un fichier qui, lui, n'est pas sur la grille du tout.</p>
+      <p><b>Si c'est calé au début et faux à la fin</b>, ce n'est plus un décalage mais une <b>dérive</b> : la grille du fichier n'a pas tout à fait le tempo du morceau, et aucun décalage ne la rattrape. Le bouton <b>mesurer la dérive</b> compare les deux grilles et pose le curseur. Mesuré sur le fichier d'essai : mélodie 85,163 BPM, morceau 85,000 — 0,19 % d'écart, soit sept centièmes de seconde au bout de trente-cinq. L'étirement part de la première note, donc le calage déjà trouvé ne bouge pas.</p>
+      <p><b>Chercher le décalage tout seul</b> compare les attaques du fichier à celles du morceau. Mesuré : sur un fichier percussif il retrouve le décalage exactement ; sur une mélodie il se trompe à tous les coups, et sans qu'on puisse s'en apercevoir — un motif de doubles-croches répétitif ressemble à lui-même partout dans le morceau, et les décalages candidats se tiennent alors à 3 % les uns des autres. À ne cocher que pour une piste de batterie.</p>
+      <p>Une note <b>tenue</b> n'allume pas sa touche indéfiniment : au bout de 1,2 s la touche relâche, même si le son continue. Sans cela une nappe gardait la moitié du clavier allumée et on ne voyait plus quelle note venait d'être jouée. Une note trop grave ou trop aiguë pour le clavier y est ramenée par octaves : la mélodie garde ses notes, elle change seulement d'octave.</p>
+    </div>
+    <div class="vide" id="midiVide"><b>Aucune mélodie chargée</b>Déposez un fichier .mid sur l'aperçu ou dans la carte Mélodie, sous la frise.
+      <br><button class="ghost" id="midiChoisir">Choisir un fichier MIDI…</button></div>
+    <div id="midiReglages" hidden>
+      <p class="info" id="mi-p"></p>
+      <div class="ctl liste"><label for="midiType">ce que contient le fichier</label>
+        <select id="midiType">
+          <option value="piano">une mélodie (touches du clavier)</option>
+          <option value="batterie">une batterie (pads de toutes les machines)</option>
+        </select></div>
+      <div class="ctl nombre"><label for="midiBpm">BPM du morceau</label>
+        <input type="number" id="midiBpm" min="20" max="300" step="0.01" value=""></div>
+      <p class="info" id="midiGrille">&nbsp;</p>
+      <div class="ctl"><label for="midiForce">éclat des touches jouées</label>
+        <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1"><output><span id="v-mif">1.00</span></output></div>
+      <div class="groupe">Le décalage</div>
+      <div class="ctl large"><label for="midiOffset">avance / retard</label>
+        <input type="range" id="midiOffset" min="-60" max="60" step="0.001" value="0"><output><span id="v-mio">0 ms</span></output></div>
+      <p class="info" id="midiSens">&nbsp;</p>
+      <div class="ctl nombre"><label for="midiMs">décalage exact, en ms</label>
+        <input type="number" id="midiMs" step="1" value="0"></div>
+      <div class="boutons" id="midiFin">
+        <button class="ghost" data-img="-1">−1 image</button>
+        <button class="ghost" data-img="1">+1 image</button>
+        <button class="ghost" data-ms="-10">−10 ms</button>
+        <button class="ghost" data-ms="10">+10 ms</button>
+      </div>
+      <div class="boutons" id="midiPas">
+        <button class="ghost" data-pas="-4">−1 mesure</button>
+        <button class="ghost" data-pas="-1">−1 temps</button>
+        <button class="ghost" data-pas="-0.25">−1/4</button>
+        <button class="ghost" data-pas="0.25">+1/4</button>
+        <button class="ghost" data-pas="1">+1 temps</button>
+        <button class="ghost" data-pas="4">+1 mesure</button>
+      </div>
+      <p class="info" id="midiOu">&nbsp;</p>
+      <p class="info" id="midiImage">&nbsp;</p>
+      <div class="groupe">La dérive</div>
+      <div class="ctl large"><label for="midiTempo">dérive</label>
+        <input type="range" id="midiTempo" min="-1" max="1" step="0.005" value="0"><output><span id="v-mit">0.000 %</span></output></div>
+      <button class="ghost" id="midiMesure">Mesurer la dérive</button>
+      <p class="info" id="midiDerive">&nbsp;</p>
+      <div class="groupe">Options</div>
+      <div class="ctl coche"><label class="coche"><input type="checkbox" id="midiCale"><span>chercher le décalage tout seul</span></label></div>
+      <div class="ctl coche"><label class="coche"><input type="checkbox" id="midiTelQuel"><span>lire le fichier tel quel, sans le poser sur la grille du morceau</span></label></div>
+    </div>
+  </div>
+</section>
+
+<div id="poignee" title="tirer pour élargir ou rétrécir les réglages ; double-clic : largeur d'origine"></div>
+
+<section id="scene"><div id="sceneGrille">
+  <div id="carteApercu">
     <div class="ecran vide" id="ecran">
       <img id="shot" alt="">
       <video id="clip" hidden loop controls playsinline></video>
-      <div id="ecranVide"><b>Deposez un morceau ici</b>ou cliquez pour le
-        choisir. Un MIDI, une image, une video deposes ici vont aussi a leur
-        place</div>
+      <div id="ecranVide"><i class="ic" data-ic="morceau"></i><b>Déposez un morceau ici</b>ou cliquez pour le choisir. Un MIDI, une image, une vidéo déposés ici vont aussi à leur place.</div>
     </div>
     <div id="shoterr"></div>
-    <label for="scrub">instant du morceau &mdash; <span id="v-t">0.0 s</span></label>
-    <input type="range" id="scrub" min="0" max="100" step="0.1" value="0" disabled>
-    <div class="row trois" style="margin-top:8px">
-      <button class="ghost" id="toSplit">prochain dedoublement</button>
-      <button class="ghost" id="toDrop">prochain paroxysme</button>
-      <button class="ghost" id="hi">chercher un kick</button>
-    </div>
-    <div class="row lire" style="margin-top:8px">
-      <button id="lire" disabled>Lire en mouvement</button>
-      <select id="clipDur" title="duree de l'apercu anime"
-        aria-label="duree de l'apercu anime">
+  </div>
+
+  <div id="chrono">
+    <div id="lecture">
+      <button id="lire" disabled><i class="ic" data-ic="play"></i><span>Lire en mouvement</span></button>
+      <select id="clipDur" title="durée de l'aperçu animé"
+        aria-label="durée de l'aperçu animé">
         <option value="2">2 s</option>
         <option value="4" selected>4 s</option>
         <option value="8">8 s</option>
         <option value="12">12 s</option>
         <option value="16">16 s</option>
       </select>
-    </div>
-    <div id="clipprog" hidden>
-      <div class="bar"><i id="cbar"></i></div>
-      <div class="hint" id="ctext"></div>
-      <button class="ghost" id="clipStop" style="margin-top:6px">Arreter</button>
-    </div>
-    <details class="plus"><summary>comment lire l'apercu</summary>
-    <p class="hint">L'apercu est une vraie image du rendu, calculee avec vos
-      reglages : ce que vous voyez ici est ce que vous obtiendrez.<br>
-      <b>Lire en mouvement</b> calcule pour de bon quelques secondes a partir
-      de l'instant regarde, avec le son, et les joue en boucle. C'est la seule
-      facon de juger ce qui bouge — begaiement, travelling, etincelles,
-      spectrogramme. La lecture est en 15 images par seconde pour ne pas faire
-      attendre : le rendu final, lui, en fera 30 ou 60.</p>
-    </details>
-  </div>
- <div id="coteBas">
-  <div class="card" id="carteRendu">
-    <!-- le bouton et l'etat du rendu d'abord : juste sous l'apercu, ils
-         restent en vue sans rien faire defiler -->
-    <div class="tete"><h2>Rendu</h2>
-      <button id="go" disabled>Lancer le rendu</button></div>
-    <div id="prog" hidden>
-      <div class="bar"><i id="pbar"></i></div>
-      <div class="hint" id="ptext"></div>
-      <button class="ghost" id="stop" style="margin-top:6px;width:100%">
-        Arreter le rendu</button>
-    </div>
-    <div id="done" hidden style="margin-top:10px">
-      <a class="dl" id="dl">Telecharger</a>
-      <p class="hint" id="donepath"></p>
-    </div>
-    <div class="row quatre">
-      <div><label for="start">depart (s)</label><input type="number" id="start" value="0" min="0" step="0.1"></div>
-      <div><label for="dur">duree (s)</label><input type="number" id="dur" placeholder="tout" min="1" step="1"></div>
-      <div><label for="size">definition</label>
-        <select id="size">
-          <option value="1920x1080">1080p</option>
-          <option value="3840x2160">4K</option>
-          <option value="1280x720">720p</option>
-          <option value="1080x1080">carre 1080</option>
-          <option value="1080x1920">vertical 1080</option>
-          <option value="568x320">320p &mdash; essai rapide</option>
-          <option value="320x568">320p vertical &mdash; essai rapide</option>
-        </select></div>
-      <div><label for="fps">images/s</label>
-        <select id="fps"><option>30</option><option>60</option><option>24</option>
-          <option>12</option></select></div>
-    </div>
-    <div class="row">
-      <div><label for="quality">qualite du fichier</label>
-        <select id="quality"></select></div>
-      <label class="bombe"><input type="checkbox" id="curve" checked style="width:auto;margin-right:6px">
-        bombe de l'ecran cathodique</label>
-    </div>
-    <button class="ghost" id="stylesOuvre" style="margin-top:8px" disabled>
-      Essayer un autre style</button>
-  </div>
-  <div class="card">
-    <h2>Morceau</h2>
-    <div class="drop" id="drop">
-      <b>Deposer un fichier</b>mp3, wav, flac, m4a&hellip;<br>ou cliquer pour choisir
-    </div>
-    <input type="file" id="file" accept="audio/*" hidden>
-    <div class="meta" id="trackmeta" hidden>
-      <span>duree <b id="m-dur">-</b></span>
-      <span>tempo <b id="m-bpm">-</b></span>
-      <span>coups <b id="m-hits">-</b></span>
-      <span>paroxysmes <b id="m-drops">-</b></span>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Melodie (fichier MIDI)</h2>
-    <div class="drop" id="midiDrop">
-      <b>Deposer un fichier MIDI</b>.mid, .midi<br>ou cliquer pour choisir
-    </div>
-    <input type="file" id="midifile" accept=".mid,.midi,audio/midi" hidden>
-    <div class="meta" id="midimeta" hidden>
-      <span>notes <b id="mi-n">-</b></span>
-      <span>etendue <b id="mi-e">-</b></span>
-      <span>premiere note <b id="mi-c">-</b></span>
-    </div>
-    <div id="midiReglages" hidden>
-      <label for="midiType">ce que contient le fichier</label>
-      <select id="midiType">
-        <option value="piano">une melodie (touches du clavier)</option>
-        <option value="batterie">une batterie (pads de toutes les machines)</option>
-      </select>
-      <label for="midiBpm">BPM du morceau</label>
-      <input type="number" id="midiBpm" min="20" max="300" step="0.01" value="">
-      <p class="hint" id="midiGrille">&nbsp;</p>
-      <label for="midiForce">eclat des touches jouees &mdash;
-        <span id="v-mif">1.00</span></label>
-      <input type="range" id="midiForce" min="0" max="2.5" step="0.05" value="1">
-      <label for="midiOffset">avance / retard &mdash;
-        <span id="v-mio">0.00 s</span></label>
-      <input type="range" id="midiOffset" min="-60" max="60" step="0.001" value="0">
-      <p class="hint" id="midiSens">&nbsp;</p>
-      <div class="exact">
-        <label for="midiMs">decalage exact, en ms</label>
-        <input type="number" id="midiMs" step="1" value="0">
+      <div id="clipprog" hidden>
+        <div class="bar"><i id="cbar"></i></div>
+        <span id="ctext"></span>
+        <button class="ghost" id="clipStop">Arrêter</button>
       </div>
-      <div class="row" id="midiFin">
-        <button class="ghost" data-img="-1">&minus;1 image</button>
-        <button class="ghost" data-img="1">+1 image</button>
-        <button class="ghost" data-ms="-10">&minus;10 ms</button>
-        <button class="ghost" data-ms="10">+10 ms</button>
+      <span class="temps"><span id="v-t">0:00.0</span> <em>/ <span id="v-fin">0:00.0</span></em></span>
+      <div class="outils">
+        <button class="ghost ib" id="toPrev" disabled title="paroxysme précédent"><i class="ic" data-ic="precedent"></i></button>
+        <button class="ghost ib" id="toDrop" disabled title="prochain paroxysme"><i class="ic" data-ic="suivant"></i></button>
+        <button class="ghost ib texte" id="toSplit" disabled title="prochain dédoublement du trait"><i class="ic" data-ic="dedoublement"></i><span>dédoublement</span></button>
+        <button class="ghost ib texte" id="hi" disabled title="un coup de grosse caisse, pris au hasard"><i class="ic" data-ic="hasard"></i><span>un kick</span></button>
       </div>
-      <div class="row" id="midiPas">
-        <button class="ghost" data-pas="-4">&minus;1 mesure</button>
-        <button class="ghost" data-pas="-1">&minus;1 temps</button>
-        <button class="ghost" data-pas="-0.25">&minus;1/4</button>
-        <button class="ghost" data-pas="0.25">+1/4</button>
-        <button class="ghost" data-pas="1">+1 temps</button>
-        <button class="ghost" data-pas="4">+1 mesure</button>
+      <span class="flex"></span>
+      <div class="outils">
+        <button class="ghost ib" id="zMoins" title="voir plus large (Ctrl + molette sur la frise)">−</button>
+        <span id="zoomTxt">tout</span>
+        <button class="ghost ib" id="zPlus" title="zoomer autour de l'instant regardé (Ctrl + molette sur la frise)">+</button>
       </div>
-      <p class="hint" id="midiOu">&nbsp;</p>
-      <p class="hint" id="midiImage">&nbsp;</p>
-      <label for="midiTempo">derive &mdash; <span id="v-mit">0.000 %</span></label>
-      <input type="range" id="midiTempo" min="-1" max="1" step="0.005" value="0">
-      <button class="ghost" id="midiMesure">Mesurer la derive</button>
-      <p class="hint" id="midiDerive">&nbsp;</p>
-      <label class="coche"><input type="checkbox" id="midiCale">
-        chercher le decalage tout seul</label>
-      <label class="coche"><input type="checkbox" id="midiTelQuel">
-        lire le fichier tel quel, sans le poser sur la grille du morceau</label>
-      <button class="ghost" id="midiOte">Oter ce fichier</button>
+      <button type="button" class="q" id="apercuAide" title="comment lire l'aperçu et la frise">?</button>
     </div>
-    <input type="hidden" id="midi">
-    <p class="hint err" id="midiAvis" hidden>Aucun MiniFreak dans le plan des machines : la melodie ne sera jouee nulle part. Choisissez-le comme machine du debut, ou ajoutez-le au sequenceur.</p>
-    <details class="plus"><summary>comment caler la melodie</summary>
-    <p class="hint">Les vraies notes du morceau, une par une, jouees sur le
-      <b>clavier du MiniFreak</b> : c'est la touche exacte qui s'enfonce. La
-      MPC et le Digitakt n'ont pas de clavier &mdash; leurs pads restent a la
-      batterie, et le fichier n'y change rien.<br>
-      Le fichier est pris <b>tel quel</b> : un MIDI exporte du meme projet que
-      le morceau est deja a l'heure, son decalage vaut zero. La ligne sous les
-      boutons dit a quel instant de la video tombe la premiere note : lancez
-      l'apercu la, et regardez si la touche s'allume avec le son.<br>
-      <b>Si c'est decale d'un bout a l'autre</b>, servez-vous des boutons
-      plutot que du curseur. Un fichier exporte d'un projet tombe deja sur la
-      grille du morceau : ce qui lui manque n'est pas un reglage fin, c'est un
-      nombre entier de temps. Les boutons decalent d'exactement un temps ou une
-      mesure du morceau : on clique jusqu'a ce que ca tombe juste, sans jamais
-      sortir de la grille. Le curseur ne sert qu'a rattraper un fichier qui,
-      lui, n'est pas sur la grille du tout.<br>
-      <b>Si c'est cale au debut et faux a la fin</b>, ce n'est plus un
-      decalage mais une <b>derive</b> : la grille du fichier n'a pas tout a
-      fait le tempo du morceau, et aucun decalage ne la rattrape. Le bouton
-      <b>mesurer la derive</b> compare les deux grilles et pose le curseur.
-      Mesure sur le fichier d'essai : melodie 85,163 BPM, morceau 85,000
-      &mdash; 0,19 % d'ecart, soit sept centiemes de seconde au bout de
-      trente-cinq. L'etirement part de la premiere note, donc le calage deja
-      trouve ne bouge pas.<br>
-      <b>Chercher le decalage tout seul</b> compare les attaques du fichier a
-      celles du morceau. Mesure : sur un fichier percussif il retrouve le
-      decalage exactement ; sur une melodie il se trompe a tous les coups, et
-      sans qu'on puisse s'en apercevoir &mdash; un motif de doubles-croches
-      repetitif ressemble a lui-meme partout dans le morceau, et les
-      decalages candidats se tiennent alors a 3 % les uns des autres. A ne
-      cocher que pour une piste de batterie.<br>
-      Une note <b>tenue</b> n'allume pas sa touche indefiniment : au bout de
-      1,2 s la touche relache, meme si le son continue. Sans cela une nappe
-      gardait la moitie du clavier allumee et on ne voyait plus quelle note
-      venait d'etre jouee.<br>
-      Une note trop grave ou trop aigue pour le clavier y est ramenee par
-      octaves : la melodie garde ses notes, elle change seulement d'octave.</p>
-    </details>
+    <div id="frise" tabindex="0" role="slider" aria-label="instant du morceau"
+         aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+      <canvas id="friseToile"></canvas>
+      <div id="friseInfo" hidden></div>
+      <p id="friseVide">La frise du morceau apparaîtra ici : le son en trois bandes, les paroxysmes, les machines, la mélodie et les fonds. Un clic y place l'aperçu.</p>
+    </div>
   </div>
- </div>
-</aside>
+  <input type="range" id="scrub" min="0" max="100" step="0.1" value="0" disabled hidden>
+  <div id="aideApercu" hidden>
+    <p class="titre">L'aperçu</p>
+    <p>L'aperçu est une vraie image du rendu, calculée avec vos réglages : ce que vous voyez ici est ce que vous obtiendrez.</p>
+    <p><b>Lire en mouvement</b> calcule pour de bon quelques secondes à partir de l'instant regardé, avec le son, et les joue en boucle. C'est la seule façon de juger ce qui bouge — bégaiement, travelling, étincelles, spectrogramme. La lecture est en 15 images par seconde pour ne pas faire attendre : le rendu final, lui, en fera 30 ou 60.</p>
+    <p><b>La frise</b> montre tout le morceau : le son en trois bandes (graves, médiums, aigus), les paroxysmes en rose, les dédoublements en jaune, le plan des machines, les notes de la mélodie et la suite des fonds. Un clic ou un glisser y place l'aperçu ; Ctrl + molette zoome, Maj + molette fait défiler ; les flèches du clavier avancent d'une seconde.</p>
+  </div>
+
+  <div id="bas">
+    <div class="card" id="carteRendu">
+      <div class="tete"><i class="ic" data-ic="rendu"></i><h2>Export</h2>
+        <button id="go" disabled>Lancer le rendu</button></div>
+      <div id="prog" hidden>
+        <div class="bar"><i id="pbar"></i></div>
+        <div class="hint" id="ptext"></div>
+        <button class="ghost" id="stop">Arrêter le rendu</button>
+      </div>
+      <div id="done" hidden>
+        <a class="dl" id="dl">Télécharger</a>
+        <p class="hint" id="donepath"></p>
+      </div>
+      <div class="champs">
+        <div><label for="size">définition</label>
+          <select id="size">
+            <option value="1920x1080">1080p</option>
+            <option value="3840x2160">4K</option>
+            <option value="1280x720">720p</option>
+            <option value="1080x1080">carré 1080</option>
+            <option value="1080x1920">vertical 1080</option>
+            <option value="568x320">320p — essai rapide</option>
+            <option value="320x568">320p vertical — essai rapide</option>
+          </select></div>
+        <div><label for="fps">images/s</label>
+          <select id="fps"><option>30</option><option>60</option><option>24</option>
+            <option>12</option></select></div>
+        <div><label for="quality">qualité du fichier</label>
+          <select id="quality"></select></div>
+        <div><label for="start">départ (s)</label><input type="number" id="start" value="0" min="0" step="0.1"></div>
+        <div><label for="dur">durée (s)</label><input type="number" id="dur" placeholder="tout" min="1" step="1"></div>
+        <label class="coche bombe"><input type="checkbox" id="curve" checked><span>bombé de l'écran cathodique</span></label>
+      </div>
+    </div>
+    <div class="card" id="carteSources">
+      <div class="source">
+        <div class="tete"><i class="ic" data-ic="morceau"></i><h2>Morceau</h2></div>
+        <div class="drop" id="drop">
+          <b>Déposer un fichier</b>mp3, wav, flac, m4a… ou cliquer pour choisir
+        </div>
+        <input type="file" id="file" accept="audio/*" hidden>
+        <div class="meta" id="trackmeta" hidden>
+          <span>durée <b id="m-dur">-</b></span>
+          <span>tempo <b id="m-bpm">-</b></span>
+          <span>coups <b id="m-hits">-</b></span>
+          <span>paroxysmes <b id="m-drops">-</b></span>
+        </div>
+      </div>
+      <div class="source">
+        <div class="tete"><i class="ic" data-ic="melodie"></i><h2>Mélodie MIDI</h2></div>
+        <div class="drop" id="midiDrop">
+          <b>Déposer un fichier MIDI</b>.mid, .midi — ou cliquer pour choisir
+        </div>
+        <input type="file" id="midifile" accept=".mid,.midi,audio/midi" hidden>
+        <input type="hidden" id="midi">
+        <div class="meta" id="midimeta" hidden>
+          <span>notes <b id="mi-n">-</b></span>
+          <span>étendue <b id="mi-e">-</b></span>
+          <span>première note <b id="mi-c">-</b></span>
+        </div>
+        <p class="hint err" id="midiAvis" hidden>Aucun MiniFreak dans le plan des machines : la mélodie ne sera jouée nulle part. Choisissez-le comme machine du début, ou ajoutez-le au séquenceur.</p>
+        <div class="actions" id="midiActions" hidden>
+          <button class="ghost" id="midiCaler">Caler la mélodie…</button>
+          <button class="ghost" id="midiOte">Retirer</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></section>
 </main>
 
 <div id="styles" hidden>
@@ -2432,16 +2780,19 @@ PAGE = r"""<!doctype html>
       <div>
         <h2 id="stylesTitre">Styles</h2>
         <p class="hint" style="margin:6px 0 0">Chaque style se pose
-          <b>par-dessus</b> tes reglages : il change la couleur, la lumiere et
-          la matiere de la dalle, mais garde tes reactions, ta machine et ta
-          melodie. Les vignettes sont prises sur un coup de grosse caisse, la
-          ou les styles reactifs se montrent.</p>
+          <b>par-dessus</b> tes réglages : il change la couleur, la lumière et
+          la matière de la dalle, mais garde tes réactions, ta machine et ta
+          mélodie. Les vignettes sont prises sur un coup de grosse caisse, là
+          où les styles réactifs se montrent.</p>
       </div>
-      <button class="ferme" id="stylesFerme">Retour au studio</button>
+      <button class="ghost ferme" id="stylesFerme">Retour au studio</button>
     </div>
     <div class="grille" id="stylesGrille"></div>
   </div>
 </div>
+
+<div id="bulle" role="tooltip" hidden></div>
+
 <script>
 const $ = s => document.querySelector(s);
 let track = null, drops = [], duration = 0, jobTimer = null, shotSeq = 0;
@@ -2466,27 +2817,31 @@ async function upload(f) {
     FRAPPES = {frappes: j.frappes || {}, drops: j.drops || [],
                duree: j.duree || j.duration || 0, bpm: j.bpm || 0};
     majFrequences();
-    $('#m-dur').textContent = fmt(j.duration);
+    // court : la case est etroite quand les sources passent a droite
+    const sec = Math.round(j.duration);
+    $('#m-dur').textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
     $('#m-bpm').textContent = j.bpm.toFixed(1) + ' BPM';
     $('#m-hits').textContent = j.hits;
     $('#m-drops').textContent = drops.length;
     $('#trackmeta').hidden = false;
-    drop.innerHTML = '<b>' + j.name + '</b>cliquer pour changer de morceau';
+    puceFichier(drop, 'morceau', j.name, 'remplacer');
+    majPuce(j);
     $('#title').placeholder = j.name.replace(/\.[^.]+$/, '');
     $('#scrub').max = Math.max(1, duration - 1); $('#scrub').disabled = false;
     // on ouvre sur un moment ordinaire, pas sur un paroxysme : l'image
     // glitchee ne dit rien des couleurs. Le bouton dedie y emmene.
     $('#scrub').value = (duration * 0.35).toFixed(2);
-    $('#v-t').textContent = (duration * 0.35).toFixed(1) + ' s';
     $('#dur').placeholder = 'tout';
     $('#go').disabled = false;
     $('#lire').disabled = false;
-    $('#stylesOuvre').disabled = false;
+    for (const id of ['#toPrev', '#toDrop', '#toSplit', '#hi']) $(id).disabled = false;
+    FRISE.morceau();
+    majTemps();
     proposerBpm(j.bpm);
     majCalage();
     majOffset();          // le tempo et la longueur viennent d'arriver
     setStatus(j.name + ' — ' + j.bpm.toFixed(1) + ' BPM, ' + drops.length +
-      ' paroxysme(s) : les glitchs tomberont la.');
+      ' paroxysme(s) : les glitchs tomberont là.');
     shot();
   } catch (e) { setStatus('echec : ' + e.message, true); }
 }
@@ -2585,9 +2940,9 @@ function majFrequences() {
     }
     let txt = '';
     if (eteint) {
-      txt = 'eteint';
+      txt = 'éteint';
     } else if (!FRAPPES) {
-      txt = 'deposez un morceau pour connaitre la frequence';
+      txt = 'déposez un morceau pour connaître la fréquence';
     } else if (Array.isArray(genre)) {
       // un effet cable sur des familles fixes, sans selecteur
       const n = genre.reduce((a, f) => a + ((FRAPPES.frappes || {})[f] || 0), 0);
@@ -2611,13 +2966,13 @@ function majFrequences() {
           + Math.round(60 / pas) + ' par minute';
     } else if (genre === 'drops') {
       const n = (FRAPPES.drops || []).length;
-      txt = '~ ' + n + ' fois dans le morceau  (les montees du morceau)';
+      txt = '~ ' + n + ' fois dans le morceau  (les montées du morceau)';
     } else if (genre === 'tranche') {
       const blocs = Math.floor(duree / Math.max(0.04, +$('#scrLen').value));
       const part = +$('#scramble').value;
-      txt = '~ ' + Math.round(blocs * part) + ' blocs brasses sur ' + blocs;
+      txt = '~ ' + Math.round(blocs * part) + ' blocs brassés sur ' + blocs;
     } else {
-      txt = 'en continu, du debut a la fin';
+      txt = 'en continu, du début à la fin';
     }
     cible.textContent = txt;
   }
@@ -2627,6 +2982,9 @@ function parMinute(n, duree) {
   return ', soit ' + (n / (duree / 60)).toFixed(0) + ' par minute';
 }
 function shot() {
+  remplirCurseurs();
+  majPoints();
+  if (FRISE) FRISE.dessiner();
   if (LISTES_EX && EXEMPLES.size) for (const id of LISTES_EX) majExemple(id);
   // la couleur au choix ne sert qu'a « une couleur au choix »
   if ($('#libreBloc')) $('#libreBloc').hidden = $('#couleurCoups').value !== 'libre';
@@ -2675,7 +3033,7 @@ function calculerApercu() {
     if (n !== shotSeq) return;
     // la version est rappelee ici : un message rapporte sans elle ne dit pas
     // si la correction correspondante est deja installee ou non
-    $('#shoterr').textContent = "L'apercu n'a pas pu etre calcule : "
+    $('#shoterr').textContent = "L'aperçu n'a pas pu être calculé : "
       + e.message + "  [" + ($('#ver').textContent || "version inconnue") + "]";
     $('#shoterr').classList.add('on');
   }).finally(() => {
@@ -2707,37 +3065,37 @@ function calculerApercu() {
   ecran.onclick = () => { if (ecran.classList.contains('vide')) $('#file').click(); };
 })();
 
-/* La poignee entre les deux fenetres : on la tire pour grandir ou
-   rapetisser l'apercu, un double-clic revient a la largeur d'origine. La
-   largeur choisie est gardee pour la prochaine ouverture. */
+/* La poignee entre les reglages et la scene : on la tire pour elargir ou
+   retrecir le panneau des reglages, un double-clic le remet a sa largeur.
+   La largeur choisie est gardee pour la prochaine ouverture. */
 (function () {
   const p = $('#poignee'), m = document.querySelector('main');
   if (!p) return;
-  const CLE = 'omnipotard.largeurApercu';
-  const borne = w => Math.max(320, Math.min(w, window.innerWidth - 440));
-  const poser = w => m.style.setProperty('--cote', Math.round(borne(w)) + 'px');
+  const CLE = 'omnipotard.largeurPanneau';
+  // la scene garde toujours de quoi montrer l'apercu
+  const borne = w => Math.max(320, Math.min(w, 760, window.innerWidth - 82 - 480));
+  const poser = w => m.style.setProperty('--panneau', Math.round(borne(w)) + 'px');
   try { const w = +localStorage.getItem(CLE); if (w > 0) poser(w); } catch (e) {}
   let x0 = null, w0 = 0;
   p.addEventListener('pointerdown', e => {
-    x0 = e.clientX; w0 = $('#cote').getBoundingClientRect().width;
+    x0 = e.clientX; w0 = $('#panneau').getBoundingClientRect().width;
     p.setPointerCapture(e.pointerId); p.classList.add('tire'); e.preventDefault();
   });
-  p.addEventListener('pointermove', e => { if (x0 !== null) poser(w0 + x0 - e.clientX); });
+  p.addEventListener('pointermove', e => { if (x0 !== null) poser(w0 + e.clientX - x0); });
   const lacher = () => {
     if (x0 === null) return;
     x0 = null; p.classList.remove('tire');
-    try { localStorage.setItem(CLE, Math.round($('#cote').getBoundingClientRect().width)); }
+    try { localStorage.setItem(CLE, Math.round($('#panneau').getBoundingClientRect().width)); }
     catch (e) {}
   };
   p.addEventListener('pointerup', lacher);
   p.addEventListener('pointercancel', lacher);
   p.addEventListener('dblclick', () => {
-    m.style.removeProperty('--cote');
+    m.style.removeProperty('--panneau');
     try { localStorage.removeItem(CLE); } catch (e) {}
   });
-  // une fenetre retrecie ne doit pas laisser l'apercu manger les reglages
   window.addEventListener('resize', () => {
-    const v = parseFloat(m.style.getPropertyValue('--cote'));
+    const v = parseFloat(m.style.getPropertyValue('--panneau'));
     if (v) poser(v);
   });
 })();
@@ -2773,13 +3131,13 @@ bind('#ring','#v-ri',2); bind('#gridPulse','#v-gp',2); bind('#bgFlash','#v-bf',2
 bind('#tranches','#v-tr',2); bind('#blocs','#v-bl',2); bind('#roll','#v-ro',2);
 bind('#ghost','#v-gh',2); bind('#invert','#v-in',2); bind('#stut','#v-st',2);
 bind('#stutLoop','#v-sl',2); bind('#miroir','#v-mi',2); bind('#ondul','#v-on',2);
-bind('#mosaic','#v-mo',2); bind('#scramble','#v-sc2',2); bind('#scrLen','#v-scl',2);
+bind('#mosaic','#v-mo',2); bind('#scramble','#v-sc2',2); bind('#scrLen','#v-srl',2);
 bind('#bdSharp','#v-bdq',2); bind('#nettete','#v-net',2);
 bind('#taille','#v-ta',2); bind('#presence','#v-pr',2);
 bind('#neon','#v-ne',2); bind('#reflet','#v-re',2); bind('#tube','#v-tu',2);
 bind('#bgAnim','#v-ba',2);
 bind('#kaleido','#v-ka',2); bind('#cisaille','#v-ci',2);
-bind('#coupure','#v-co',2); bind('#tapestop','#v-ta',2);
+bind('#coupure','#v-co',2); bind('#tapestop','#v-tp',2);
 bind('#haloDoux','#v-hd',2); bind('#poussiere','#v-po',2);
 bind('#flottement','#v-fl',2);
 bind('#echo','#v-ec',2); bind('#echoN','#v-ecn',0);
@@ -2837,11 +3195,11 @@ function majFonds() {
     const nom = document.createElement('span');
     nom.textContent = f.name + ' ';
     const q = document.createElement('small');
-    q.textContent = f.video ? 'video ' + dureeTexte(f.duree || 0) : 'photo';
+    q.textContent = f.video ? 'vidéo ' + dureeTexte(f.duree || 0) : 'photo';
     nom.appendChild(q);
     li.appendChild(nom);
     for (const [txt, titre, act] of [['\u2191', 'passer avant', -1],
-                                    ['\u2193', 'passer apres', 1],
+                                    ['\u2193', 'passer après', 1],
                                     ['\u2715', 'retirer de la liste', 0]]) {
       const b = document.createElement('button');
       b.className = 'ghost'; b.textContent = txt; b.title = titre;
@@ -2865,19 +3223,23 @@ function majFonds() {
   // plusieurs fichiers ; la duree d'une photo, qu'avec une suite
   $('#bdjeu').hidden = !(videos || n > 1);
   $('#bdphoto').hidden = !(n > 1 && fonds.some(f => !f.video));
-  $('#bdname').textContent = n ? 'Ajouter une image ou une video'
-                               : 'Deposer une ou plusieurs images ou videos';
+  $('#bdname').textContent = n ? 'Ajouter une image ou une vidéo'
+                               : 'Déposer une ou plusieurs images ou vidéos';
+  FRISE.chargerFonds();
+  majPoints();
 }
 function vitesseFond() { return Math.pow(2, +$('#fondVitesse').value); }
 $('#fondVitesse').oninput = () => {
   const v = vitesseFond();
-  $('#v-fv').textContent = v.toFixed(2) + ' \u00d7'
-    + (v < 0.97 ? ' (ralenti)' : v > 1.03 ? ' (accelere)' : '');
+  // le ralenti et l'accelere se disent au survol : la case est etroite
+  $('#v-fv').textContent = v.toFixed(2) + ' \u00d7';
+  $('#v-fv').parentNode.title = v < 0.97 ? 'ralenti' : v > 1.03 ? 'accéléré' : 'vitesse normale';
+  FRISE.chargerFonds();
   shot();
 };
-$('#fondBoucle').onchange = () => shot();
-$('#fondFondu').oninput = e => { $('#v-ff').textContent = (+e.target.value).toFixed(1) + ' s'; shot(); };
-$('#fondPhoto').oninput = e => { $('#v-fp').textContent = (+e.target.value).toFixed(1) + ' s'; shot(); };
+$('#fondBoucle').onchange = () => { FRISE.chargerFonds(); shot(); };
+$('#fondFondu').oninput = e => { $('#v-ff').textContent = (+e.target.value).toFixed(1) + ' s'; FRISE.chargerFonds(); shot(); };
+$('#fondPhoto').oninput = e => { $('#v-fp').textContent = (+e.target.value).toFixed(1) + ' s'; FRISE.chargerFonds(); shot(); };
 
 /* Un depot de fichier, avec sa progression.
 
@@ -2903,13 +3265,13 @@ function deposer(url, f, quoi) {
       let j = null;
       try { j = JSON.parse(x.responseText); } catch (e) { j = null; }
       if (j && j.error) mauvais(new Error(j.error));
-      else if (!j) mauvais(new Error('le studio a repondu ' + x.status
+      else if (!j) mauvais(new Error('le studio a répondu ' + x.status
                                      + ' sans explication'));
       else bon(j);
     };
     x.onerror = () => mauvais(new Error(
-      'le studio n\'a pas repondu pendant l\'envoi (' + poids(f.size) + '). '
-      + 'Le message exact est ecrit dans la fenetre noire du studio.'));
+      'le studio n\'a pas répondu pendant l\'envoi (' + poids(f.size) + '). '
+      + 'Le message exact est écrit dans la fenêtre noire du studio.'));
     x.onabort = () => mauvais(new Error('envoi interrompu'));
     x.send(f);
   });
@@ -2926,7 +3288,7 @@ async function sendBackdrop(f) {
     const j = await deposer('/backdrop', f, 'du fond');
     fonds.push({name: j.name, video: !!j.video, duree: j.duree || 0});
     majFonds();
-    setStatus(fonds.length > 1 ? 'fond ajoute a la suite (' + fonds.length
+    setStatus(fonds.length > 1 ? 'fond ajouté à la suite (' + fonds.length
                                  + ' fichiers)' : 'fond en place');
     shot();
   } catch (e) { setStatus('fond refuse : ' + e.message, true); }
@@ -2964,9 +3326,9 @@ function majOffset() {
   $('#v-mio').textContent = enSecMs(d, true);
   const sens = $('#midiSens');
   if (sens) sens.innerHTML = !Math.round(d * 1000)
-    ? "les touches s'allument a l'heure du fichier"
+    ? "les touches s'allument à l'heure du fichier"
     : "les touches s'allument <b>" + enSecMs(Math.abs(d)) + '</b> plus '
-      + (d > 0 ? 'tot' : 'tard') + ' que ne le dit le fichier';
+      + (d > 0 ? 'tôt' : 'tard') + ' que ne le dit le fichier';
   const ms = $('#midiMs');
   if (ms && document.activeElement !== ms) ms.value = Math.round(d * 1000);
   majImage();
@@ -2979,13 +3341,13 @@ function majOffset() {
   // rend tout, et le plan s'arrete alors a la fin du morceau
   const plan = +$('#dur').value || Math.max(0, (duration || 0) - depart);
   if (t < 0)
-    ou.innerHTML = 'premiere note <b>' + instant(-t)
-      + ' avant le debut du plan</b> : on ne la verra pas';
+    ou.innerHTML = 'première note <b>' + instant(-t)
+      + ' avant le début du plan</b> : on ne la verra pas';
   else if (plan > 0 && t > plan)
-    ou.innerHTML = 'premiere note a <b>' + instant(t)
-      + '</b>, soit apres la fin du plan : on ne la verra pas';
+    ou.innerHTML = 'première note à <b>' + instant(t)
+      + '</b>, soit après la fin du plan : on ne la verra pas';
   else
-    ou.innerHTML = 'premiere note a <b>' + instant(t) + '</b> dans la video';
+    ou.innerHTML = 'première note à <b>' + instant(t) + '</b> dans la vidéo';
   // la portee de la derive se compte depuis la premiere note : bouger le
   // calage la change
   majDerive();
@@ -2998,10 +3360,10 @@ function majImage() {
   const z = $('#midiImage');
   if (!z) return;
   const fps = +$('#fps').value || 30;
-  z.innerHTML = '1 image = <b>' + Math.round(1000 / fps) + ' ms</b> dans la video ('
+  z.innerHTML = '1 image = <b>' + Math.round(1000 / fps) + ' ms</b> dans la vidéo ('
     + fps + ' i/s) et <b>' + Math.round(1000 / FPS_APERCU)
-    + " ms</b> dans l'apercu anime (" + FPS_APERCU
-    + " i/s) : un ecart plus petit ne s'y voit pas";
+    + " ms</b> dans l'aperçu animé (" + FPS_APERCU
+    + " i/s) : un écart plus petit ne s'y voit pas";
 }
 function reglerDecalage(v) {
   const el = $('#midiOffset');
@@ -3035,9 +3397,10 @@ let TEMPS_MIDI = 0, BPM_PROPOSE = '', minuteurCalage = null;
 function majCalage() {
   clearTimeout(minuteurCalage);
   minuteurCalage = setTimeout(async () => {
+    FRISE.chargerNotes();
     const z = $('#midiGrille');
     if (!track || !$('#midi').value) {
-      z.innerHTML = track ? '&nbsp;' : 'deposez le morceau : la melodie se pose sur sa grille';
+      z.innerHTML = track ? '&nbsp;' : 'déposez le morceau : la mélodie se pose sur sa grille';
       TEMPS_MIDI = 0;
       return;
     }
@@ -3072,6 +3435,8 @@ for (const id of ['#midiBpm', '#midiTelQuel']) {
   $(id).addEventListener('change', () => { majCalage(); shot(); });
 }
 $('#midiBpm').addEventListener('input', majCalage);
+// chercher le decalage tout seul change le calage : l'apercu et la frise suivent
+$('#midiCale').onchange = () => { FRISE.chargerNotes(); shot(); };
 /* La derive, dite en secondes plutot qu'en pourcent : c'est sous cette forme
    qu'on la constate — la melodie est calee au debut du plan et fausse a la
    fin. Le pourcent reste affiche parce que lui ne change pas quand on change
@@ -3090,8 +3455,8 @@ function majDerive() {
   const t0 = MIDI_DEBUT - depart - (+$('#midiOffset').value || 0);
   const portee = Math.max(0, plan - Math.max(0, t0));
   const d = portee * p / 100;
-  ou.innerHTML = 'la melodie ' + (p > 0 ? 'retarde' : 'avance') + ' de <b>'
-    + Math.abs(d).toFixed(3) + ' s</b> a la fin du plan';
+  ou.innerHTML = 'la mélodie ' + (p > 0 ? 'retarde' : 'avance') + ' de <b>'
+    + Math.abs(d).toFixed(3) + ' s</b> à la fin du plan';
 }
 $('#midiTempo').oninput = () => { majDerive(); shot(); };
 $('#midiType').onchange = () => { midiAvis(); shot(); };
@@ -3101,8 +3466,8 @@ $('#midiType').onchange = () => { midiAvis(); shot(); };
    c'est seulement *laquelle* des mesures est la bonne qu'il ne dit pas. */
 $('#midiMesure').onclick = async () => {
   if (!track) return setStatus('chargez d abord un morceau', true);
-  if (!$('#midi').value) return setStatus('chargez d abord une melodie', true);
-  setStatus('mesure de la derive...');
+  if (!$('#midi').value) return setStatus('chargez d abord une mélodie', true);
+  setStatus('mesure de la dérive...');
   try {
     const j = await (await fetch('/derive?track=' + track + '&midi='
                      + encodeURIComponent($('#midi').value))).json();
@@ -3119,8 +3484,8 @@ $('#midiMesure').onclick = async () => {
       + j.bpm_morceau.toFixed(2) + ' BPM  ->  derive '
       + (j.pourcent >= 0 ? '+' : '') + j.pourcent.toFixed(3) + ' %'
       + (Math.abs(j.pourcent - v) > 0.0005
-         ? ' (curseur pose a ' + v.toFixed(3) + ' %)' : '')
-      + (j.nettete < 5 ? '  — mesure peu nette, verifiez a l oreille' : '')
+         ? ' (curseur posé à ' + v.toFixed(3) + ' %)' : '')
+      + (j.nettete < 5 ? '  — mesure peu nette, vérifiez à l oreille' : '')
       // la mesure est un ecart entre attaques : elle se moyenne, donc elle
       // vaut ce que vaut la longueur analysee
       + (j.duree < 60 ? '  — extrait court (' + Math.round(j.duree)
@@ -3129,8 +3494,11 @@ $('#midiMesure').onclick = async () => {
 };
 /* Le depart et la duree deplacent la fenetre rendue, donc l'instant ou la
    premiere note y tombe : le rappel se refait. */
-$('#start').oninput = () => { majOffset(); majDerive(); };
-$('#dur').oninput = () => { majOffset(); majDerive(); };
+$('#start').oninput = () => { majOffset(); majDerive(); FRISE.dessiner(); };
+$('#dur').oninput = () => { majOffset(); majDerive(); FRISE.dessiner(); };
+// les dedoublements se placent selon leur nombre et leur instrument
+$('#splitCount').addEventListener('change', () => FRISE.chargerDedo());
+$('#splitOn').addEventListener('change', () => FRISE.chargerDedo());
 /* Les boutons decalent d'un nombre entier de temps du morceau. La phase du
    fichier est presque toujours deja bonne — un MIDI exporte du meme projet
    tombe sur la grille — et ce qui manque est le nombre de temps. Bouger par
@@ -3154,7 +3522,7 @@ for (const b of document.querySelectorAll('#midiPas button')) {
 $('#title').oninput  = shot;
 $('#bgStrength').oninput = e => { $('#v-str').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#bgClear').oninput   = e => { $('#v-clr').textContent = (+e.target.value).toFixed(2); shot(); };
-$('#scrub').oninput     = e => { $('#v-t').textContent = (+e.target.value).toFixed(1) + ' s'; shot(); };
+$('#scrub').oninput     = () => { majTemps(); shot(); };
 
 /* Le dedoublement ne tombe que sur les 2 ou 3 plus gros coups de tout le
    morceau : sans ce bouton on peut chercher longtemps avant d'en voir un. */
@@ -3164,28 +3532,46 @@ $('#toSplit').onclick = async () => {
                                '&count=' + $('#splitCount').value +
                                '&on=' + encodeURIComponent($('#splitOn').value))).json();
   const ts = j.times || [];
-  if (!ts.length) return setStatus('aucun dedoublement sur ce morceau');
+  if (!ts.length) return setStatus('aucun dédoublement sur ce morceau');
   const t = +$('#scrub').value;
   const next = ts.find(d => d > t + 0.2) ?? ts[0];
-  $('#scrub').value = next + 0.08;
-  $('#v-t').textContent = (next + 0.08).toFixed(1) + ' s';
+  allerA(next + 0.08);
   setStatus('dedoublement a ' + next.toFixed(1) + ' s  (tous : ' +
             ts.map(x => x.toFixed(1) + ' s').join(', ') + ')');
   shot();
 };
 
 $('#toDrop').onclick = () => {
-  if (!drops.length) return setStatus('aucun paroxysme detecte sur ce morceau');
+  if (!drops.length) return setStatus('aucun paroxysme détecté sur ce morceau');
   const t = +$('#scrub').value;
   const next = drops.find(d => d > t + 0.2) ?? drops[0];
-  $('#scrub').value = next + 0.05;      // juste apres, dans la rafale
-  $('#v-t').textContent = (next + 0.05).toFixed(1) + ' s';
+  allerA(next + 0.05);                  // juste apres, dans la rafale
   setStatus('paroxysme a ' + next.toFixed(1) + ' s');
   shot();
 };
-$('#hi').onclick = () => {
-  $('#scrub').value = (Math.random() * Math.max(1, duration - 2)).toFixed(2);
-  $('#v-t').textContent = (+$('#scrub').value).toFixed(1) + ' s';
+$('#toPrev').onclick = () => {
+  if (!drops.length) return setStatus('aucun paroxysme détecté sur ce morceau');
+  const t = +$('#scrub').value;
+  const avant = drops.filter(d => d < t - 0.2);
+  const prec = avant.length ? avant[avant.length - 1] : drops[drops.length - 1];
+  allerA(prec + 0.05);
+  setStatus('paroxysme a ' + prec.toFixed(1) + ' s');
+  shot();
+};
+/* Un coup de grosse caisse pris au hasard : un instant tire au sort, puis le
+   coup le plus proche. Le serveur ecarte ceux qui dedoublent le trait, qui
+   blanchissent toute l'image. */
+$('#hi').onclick = async () => {
+  if (!track) return;
+  const t0 = Math.random() * Math.max(1, duration - 2);
+  let t = t0;
+  try {
+    const j = await (await fetch('/instant_vignette?track=' + track + '&t=' + t0.toFixed(2)
+      + '&splitOn=' + encodeURIComponent($('#splitOn').value)
+      + '&splitCount=' + $('#splitCount').value)).json();
+    if (typeof j.t === 'number') t = j.t;
+  } catch (e) { /* l'instant tire au sort fera l'affaire */ }
+  allerA(t);
   shot();
 };
 
@@ -3222,10 +3608,12 @@ $('#lire').onclick = async () => {
   $('#lire').disabled = true;
   $('#clipprog').hidden = false;
   $('#cbar').style.width = '0%';
-  $('#ctext').textContent = 'preparation\u2026';
+  $('#ctext').textContent = 'préparation\u2026';
+  const extrait = reglagesDuClip();
+  FRISE.clip(extrait.start, extrait.duration);
   try {
     const r = await fetch('/render', {method: 'POST',
-                                      body: JSON.stringify(reglagesDuClip())});
+                                      body: JSON.stringify(extrait)});
     const j = await r.json();
     if (j.error) throw new Error(j.error);
     clipId = j.id;
@@ -3234,6 +3622,7 @@ $('#lire').onclick = async () => {
   } catch (e) {
     setStatus('lecture impossible : ' + e.message, true);
     $('#lire').disabled = false; $('#clipprog').hidden = true;
+    FRISE.clip(null);
   }
 };
 
@@ -3252,11 +3641,13 @@ function suivreClip(id) {
     if (j.state === 'erreur') {
       setStatus('lecture impossible : ' + j.error, true);
       $('#lire').disabled = false; $('#clipprog').hidden = true;
+      FRISE.clip(null);
       return;
     }
     if (j.state === 'arrete') {
-      setStatus('apercu arrete');
+      setStatus('aperçu arrêté');
       $('#lire').disabled = false; $('#clipprog').hidden = true;
+      FRISE.clip(null);
       return;
     }
     if (j.state === 'fini') {
@@ -3267,7 +3658,8 @@ function suivreClip(id) {
       // le son demande parfois un geste de l'utilisateur : a defaut on joue
       // sans, plutot que de laisser une image arretee
       v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
-      setStatus('lecture en boucle — bougez un reglage pour revenir a l\'image');
+      FRISE.suivre(v);
+      setStatus('lecture en boucle — bougez un réglage pour revenir à l\'image');
       return;
     }
     const pc = j.total ? j.done / j.total * 100 : 0;
@@ -3284,6 +3676,11 @@ function rendreLImage() {
   const v = $('#clip');
   if (!v.hidden) { v.pause(); v.hidden = true; v.removeAttribute('src'); }
   $('#shot').hidden = false;
+  if (FRISE) {
+    FRISE.suivre(null);
+    // l'extrait encore en calcul reste marque sur la frise
+    if ($('#clipprog').hidden) FRISE.clip(null);
+  }
 }
 
 /* ---------- exemples ----------
@@ -3317,7 +3714,9 @@ function figureExemple(id) {
   f.hidden = true;
   f.innerHTML = '<img alt="exemple" loading="lazy">'
     + '<figcaption>survoler pour voir bouger</figcaption>';
-  a.insertAdjacentElement('afterend', f);
+  // dans la ligne du reglage : la bulle du « i » le montre
+  const ctl = el.closest('.ctl');
+  if (ctl) ctl.appendChild(f); else a.insertAdjacentElement('afterend', f);
   const img = f.querySelector('img');
   const jouer = oui => {
     f.classList.toggle('joue', oui);
@@ -3373,7 +3772,7 @@ $('#go').onclick = async () => {
     curve: $('#curve').checked,      // '0' serait vrai cote python
   });
   $('#go').disabled = true; $('#done').hidden = true; $('#prog').hidden = false;
-  $('#pbar').style.width = '0%'; $('#ptext').textContent = 'preparation…';
+  $('#pbar').style.width = '0%'; $('#ptext').textContent = 'préparation…';
   const r = await fetch('/render', {method:'POST', body: JSON.stringify(body)});
   const j = await r.json();
   if (j.error) { setStatus('echec : ' + j.error, true); $('#go').disabled = false; return; }
@@ -3387,7 +3786,7 @@ let renduId = null;
 $('#stop').onclick = async () => {
   if (!renduId) return;
   $('#stop').disabled = true;
-  $('#ptext').textContent = 'arret en cours\u2026';
+  $('#ptext').textContent = 'arrêt en cours\u2026';
   try { await fetch('/stop?id=' + renduId); }
   catch (e) { $('#stop').disabled = false; }
 };
@@ -3395,14 +3794,19 @@ $('#stop').onclick = async () => {
 /* L'avancement du rendu se lit aussi dans le titre de l'onglet : on le suit
    depuis une autre fenetre, ou la colonne de droite defilee plus bas. */
 const TITRE = document.title;
-function titreRendu(t) { document.title = t ? t + ' \u2014 ' + TITRE : TITRE; }
+function titreRendu(t) {
+  document.title = t ? t + ' \u2014 ' + TITRE : TITRE;
+  const e = $('#exporter span');
+  if (e) e.textContent = !t || /termin/.test(t) ? 'Exporter'
+                                                : t.charAt(0).toUpperCase() + t.slice(1);
+}
 function watch(id) {
   clearInterval(jobTimer);
   jobTimer = setInterval(async () => {
     const j = await (await fetch('/job?id=' + id)).json();
     if (j.state === 'erreur') {
       clearInterval(jobTimer); $('#prog').hidden = true; titreRendu('');
-      setStatus('echec du rendu : ' + j.error, true); $('#go').disabled = false;
+      setStatus('échec du rendu : ' + j.error, true); $('#go').disabled = false;
       return;
     }
     if (j.state === 'fini') {
@@ -3410,17 +3814,17 @@ function watch(id) {
       clearInterval(jobTimer); $('#prog').hidden = true;
       $('#dl').href = '/download?id=' + id;
       $('#dl').setAttribute('download', j.name);
-      $('#donepath').textContent = 'ecrit dans out/studio/' + j.name +
+      $('#donepath').textContent = 'écrit dans out/studio/' + j.name +
         ' (' + (j.size / 1048576).toFixed(1) + ' Mo)';
       $('#done').hidden = false; $('#go').disabled = false;
-      titreRendu('rendu termine');
-      setStatus('rendu termine — d\'autres allures a essayer dans l\'onglet Styles');
+      titreRendu('rendu terminé');
+      setStatus('rendu terminé — d\'autres allures à essayer dans l\'onglet Styles');
       return;
     }
     if (j.state === 'arrete') {
       clearInterval(jobTimer); $('#prog').hidden = true; $('#go').disabled = false;
       titreRendu('');
-      setStatus('rendu arrete : le fichier commence a ete efface');
+      setStatus('rendu arrêté : le fichier commencé a été effacé');
       return;
     }
     const pc = j.total ? j.done / j.total * 100 : 0;
@@ -3428,7 +3832,7 @@ function watch(id) {
     titreRendu(j.state === 'rendu' ? 'rendu ' + Math.floor(pc) + ' %' : 'rendu');
     $('#ptext').textContent = j.state === 'rendu'
       ? j.done + '/' + j.total + ' images — encore ' + fmt(j.eta)
-      : j.state === 'arret' ? 'arret en cours\u2026' : j.state + '…';
+      : j.state === 'arret' ? 'arrêt en cours\u2026' : j.state + '…';
   }, 700);
 }
 
@@ -3438,14 +3842,21 @@ function watch(id) {
 fetch('/config').then(r => r.json())
   .then(c => {
     if (c.version) $('#ver').textContent = c.version;
-    if (c.perime) setStatus('mise a jour installee : fermez la fenetre noire '
+    if (c.perime) setStatus('mise à jour installée : fermez la fenêtre noire '
       + 'du studio, relancez-le, puis rechargez cette page', true);
     // Les instruments et les sens de travelling viennent du moteur : la page
     // n'en garde pas sa propre copie, qui finirait par diverger.
+    // Les noms que le moteur compare restent sans accent ; la page les
+    // affiche accentues.
+    const AFFICHE = {'arriere': 'arrière', 'medium': 'médium',
+                     'bas medium': 'bas médium', 'haut medium': 'haut médium',
+                     'tres aigus': 'très aigus'};
+    const affiche = v => AFFICHE[v] || v;
     const remplir = (sel, liste, choisi) => {
       $(sel).innerHTML = liste.map(
         v => '<option value="' + v + '"' + (v === choisi ? ' selected' : '')
-             + '>' + (sel === '#travelMode' ? v : 'sur : ' + v) + '</option>'
+             + '>' + (sel === '#travelMode' ? affiche(v) : 'sur : ' + affiche(v))
+             + '</option>'
       ).join('');
     };
     /* Les declencheurs arrivent groupes : instruments, bandes de frequences,
@@ -3457,7 +3868,7 @@ fetch('/config').then(r => r.json())
       $(sel).innerHTML = groupes.map(g =>
         '<optgroup label="' + echap(g.titre) + '">' + g.noms.map(
           v => '<option value="' + echap(v) + '"'
-               + (v === choisi ? ' selected' : '') + '>sur : ' + echap(v)
+               + (v === choisi ? ' selected' : '') + '>sur : ' + echap(affiche(v))
                + '</option>').join('') + '</optgroup>').join('');
     };
     for (const [sel, def] of [['#splitOn', 'grosse caisse'],
@@ -3510,7 +3921,9 @@ fetch('/config').then(r => r.json())
         const d = document.createElement('div');
         d.className = 'aide';
         d.innerHTML = '<b class="freq" id="f-' + id + '"></b>';
-        el.parentNode.insertBefore(d, el.nextSibling);
+        // la ligne de la qualite tient toute la largeur de la carte
+        if (id === 'quality') $('#carteRendu').appendChild(d);
+        else el.parentNode.insertBefore(d, el.nextSibling);
         continue;
       }
       // Le texte se pose apres le selecteur d'instrument quand celui-ci suit
@@ -3527,10 +3940,14 @@ fetch('/config').then(r => r.json())
       const d = document.createElement('div');
       d.className = 'aide';
       d.innerHTML = phrase + '<b class="freq" id="f-' + id + '"></b>';
+      // dans la ligne du reglage, derriere son « i »
+      const ctl = el.closest('.ctl');
+      if (ctl) { ctl.appendChild(d); boutonAide(ctl); continue; }
       apres.parentNode.insertBefore(d, apres.nextSibling);
     }
     majFrequences();
     majExemples();
+    FRISE.noms(Object.fromEntries((c.machines || []).map(m => [m.cle, m.nom])));
 
     /* ---- prereglages : ils reposent tous les curseurs d'un coup ---- */
     PRESETS = c.presets || {};
@@ -3540,6 +3957,9 @@ fetch('/config').then(r => r.json())
     for (const el of document.querySelectorAll('input[type=range], select'))
       if (el.id) USINE[el.id] = el.value;
     listeDesPrereglages();
+    // les points du rail se comptent depuis ces valeurs-la
+    ORIGINE = valeursPage();
+    majPoints();
     $('#preset').onchange = () => {
       appliquerPrereglage($('#preset').value);
       majBoutonsPreset();
@@ -3564,7 +3984,7 @@ function listeDesPrereglages() {
            + '</option>').join('') + '</optgroup>';
   const choisi = $('#preset').value;
   $('#preset').innerHTML = groupe("Fournis", Object.keys(PRESETS))
-                         + groupe("Mes reglages", Object.keys(MES).sort());
+                         + groupe("Mes réglages", Object.keys(MES).sort());
   if (choisi) $('#preset').value = choisi;
   majBoutonsPreset();
 }
@@ -3617,7 +4037,7 @@ function appliquerStyle(nom) {
   }
   majFrequences();
   shot();
-  setStatus('style « ' + nom + ' » pose par-dessus tes reglages');
+  setStatus('style « ' + nom + ' » posé par-dessus tes réglages');
 }
 
 /* L'instant des vignettes, choisi par le serveur : un coup de grosse caisse
@@ -3652,7 +4072,7 @@ async function ouvrirStyles() {
     if (im.dataset.blob) URL.revokeObjectURL(im.dataset.blob);
   g.innerHTML = '';
   if (!track || !Object.keys(STYLES).length) {
-    g.innerHTML = '<p class="hint">Deposez d\'abord un morceau dans l\'onglet '
+    g.innerHTML = '<p class="hint">Déposez d\'abord un morceau dans l\'onglet '
       + 'Studio : les vignettes des styles sont prises sur lui.</p>';
     return;
   }
@@ -3695,7 +4115,6 @@ async function ouvrirStyles() {
   }
 }
 function fermerStyles() { montrerVue('studio'); stylesGen++; }
-$('#stylesOuvre').onclick = ouvrirStyles;
 $('#stylesFerme').onclick = fermerStyles;
 for (const b of document.querySelectorAll('#vues button'))
   b.onclick = () => b.dataset.vue === 'styles' ? ouvrirStyles() : fermerStyles();
@@ -3734,7 +4153,7 @@ async function ecrireReglages(corps) {
 
 $('#presetSave').onclick = async () => {
   const nom = ($('#presetNom').value || '').trim();
-  if (!nom) { setStatus('donnez un nom a ce reglage', true); return; }
+  if (!nom) { setStatus('donnez un nom à ce réglage', true); return; }
   try {
     await ecrireReglages({nom: nom, valeurs: reglagesActuels()});
     $('#preset').value = nom;
@@ -3750,7 +4169,7 @@ $('#presetDel').onclick = async () => {
   try {
     await ecrireReglages({action: 'supprimer', nom: nom});
     setStatus('« ' + nom + ' » efface');
-  } catch (e) { setStatus('pas efface : ' + e.message, true); }
+  } catch (e) { setStatus('pas effacé : ' + e.message, true); }
 };
 
 /* ---------- divers ---------- */
@@ -3761,7 +4180,806 @@ function fmt(s) {
 }
 function setStatus(t, bad) {
   const el = $('#status'); el.textContent = t; el.className = bad ? 'err' : '';
+  el.title = t;
 }
+
+/* ---------- l'habillage : icones, sections, bulles, puces ---------- */
+
+/* Les icones de la page, dessinees au trait : des chemins SVG plutot que des
+   fichiers, la page reste d'un seul tenant. */
+var ICONES = {
+  logo: '<path d="M2 12h3l2-5 3 10 3-13 3 10 2-4h4"/>',
+  prereglage: '<path d="M6 3h12v18l-6-4-6 4z"/>',
+  machine: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="8" cy="12" r="2"/><path d="M13 10h5M13 14h5"/>',
+  lumiere: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  couleur: '<path d="M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11z"/>',
+  dalle: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+  fonds: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/>',
+  trait: '<path d="M3 17c4-9 7-9 9-3s5 7 9-5"/>',
+  reactions: '<path d="M2 12h4l2-6 4 12 3-9 2 3h5"/>',
+  avaries: '<path d="M4 6h9M9 10h11M4 14h7M11 18h9"/>',
+  echo: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+  texture: '<path d="M5 5h.01M10 5h.01M15 5h.01M19 5h.01M7 9h.01M12 9h.01M17 9h.01M5 13h.01M10 13h.01M15 13h.01M19 13h.01M7 17h.01M12 17h.01M17 17h.01M5 20h.01M15 20h.01" stroke-width="2.6"/>',
+  rendu: '<path d="M12 3v12M7 10l5 5 5-5M4 20h16"/>',
+  morceau: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  melodie: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v9M12 4v16M16 4v9"/>',
+  play: '<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>',
+  precedent: '<path d="M19 5 9 12l10 7zM5 5v14"/>',
+  suivant: '<path d="m5 5 10 7-10 7zM19 5v14"/>',
+  dedoublement: '<path d="M3 13c3-6 6-6 8-2s5 4 8-2"/><path d="M5 18c3-6 6-6 8-2s5 4 8-2" opacity=".55"/>',
+  hasard: '<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2" fill="currentColor"/><circle cx="15" cy="9" r="1.2" fill="currentColor"/><circle cx="9" cy="15" r="1.2" fill="currentColor"/><circle cx="15" cy="15" r="1.2" fill="currentColor"/>',
+};
+function icone(k) {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"'
+    + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + (ICONES[k] || '') + '</svg>';
+}
+for (const i of document.querySelectorAll('i.ic[data-ic]')) i.innerHTML = icone(i.dataset.ic);
+
+/* ---- les sections : une seule ouverte a la fois, retrouvee a la
+   prochaine ouverture ---- */
+var CLE_SECTION = 'omnipotard.section';
+function montrerSection(k) {
+  if (!document.querySelector('#panneau .section[data-section="' + k + '"]'))
+    k = 'prereglage';
+  for (const s of document.querySelectorAll('#panneau .section'))
+    s.classList.toggle('actif', s.dataset.section === k);
+  for (const b of document.querySelectorAll('#rail button'))
+    b.classList.toggle('actif', b.dataset.section === k);
+  $('#panneau').scrollTop = 0;
+  BULLE.fermer();
+  try { localStorage.setItem(CLE_SECTION, k); } catch (e) {}
+}
+for (const b of document.querySelectorAll('#rail button'))
+  b.onclick = () => montrerSection(b.dataset.section);
+// le « ? » d'une section deplie ses explications
+for (const q of document.querySelectorAll('.section .q')) {
+  q.onclick = () => {
+    const ex = q.closest('.section').querySelector('.explications');
+    if (!ex) return;
+    ex.hidden = !ex.hidden;
+    q.classList.toggle('ouvert', !ex.hidden);
+  };
+}
+
+/* ---- les curseurs : la part deja parcourue, peinte en bleu ---- */
+function remplir(inp) {
+  const lo = +inp.min || 0, hi = inp.max === '' ? 100 : +inp.max;
+  const p = Math.max(0, Math.min(1, (+inp.value - lo) / ((hi - lo) || 1)));
+  inp.style.setProperty('--p', (p * 100).toFixed(2) + '%');
+}
+function remplirCurseurs() {
+  for (const inp of document.querySelectorAll('input[type=range]')) remplir(inp);
+}
+// en capture : les evenements que posent les prereglages ne remontent pas
+document.addEventListener('input', e => {
+  if (e.target.type === 'range') remplir(e.target);
+}, true);
+remplirCurseurs();
+
+/* ---- un point sur les sections qui s'ecartent de l'usine ----
+   On voit d'un coup d'oeil ou il se passe quelque chose : une avarie
+   allumee, un fond, une melodie. */
+var ORIGINE = null, minuteurPoints = 0;
+function valeursPage() {
+  const v = {};
+  for (const el of document.querySelectorAll('#panneau input, #panneau select'))
+    if (el.id) v[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+  return v;
+}
+function majPoints() {
+  if (minuteurPoints) return;
+  minuteurPoints = requestAnimationFrame(() => {
+    minuteurPoints = 0;
+    for (const s of document.querySelectorAll('#panneau .section')) {
+      const k = s.dataset.section;
+      let mod = false;
+      if (k === 'fonds') mod = fonds.length > 0;
+      else if (k === 'melodie') mod = !!$('#midi').value;
+      else if (ORIGINE) {
+        for (const el of s.querySelectorAll('input, select')) {
+          if (!el.id || !(el.id in ORIGINE) || el.type === 'text'
+              || el.type === 'number' || el.type === 'file') continue;
+          const v = el.type === 'checkbox' ? el.checked : el.value;
+          mod = el.type === 'range' ? Math.abs(+v - +ORIGINE[el.id]) > 1e-9
+                                    : v !== ORIGINE[el.id];
+          if (mod) break;
+        }
+      }
+      const b = document.querySelector('#rail button[data-section="' + k + '"]');
+      if (b) b.classList.toggle('modif', mod);
+    }
+  });
+}
+
+/* ---- la bulle d'explication ----
+   Une seule pour toute la page, posee au-dessus de tout : rangee dans le
+   panneau, elle y aurait ete coupee par son defilement. Elle s'ouvre au
+   survol du « i » et reste ouverte au clic (au doigt sur un ecran tactile). */
+var BULLE = (() => {
+  const b = $('#bulle');
+  let ancre = null, fige = false;
+  function placer() {
+    if (!ancre || b.hidden) return;
+    const r = ancre.getBoundingClientRect(), W = b.offsetWidth, H = b.offsetHeight;
+    let x = r.right + 12, y = r.top - 12;
+    if (x + W > innerWidth - 8) x = r.left - W - 12;
+    if (x < 8) { x = Math.max(8, Math.min(r.left, innerWidth - W - 8)); y = r.bottom + 8; }
+    y = Math.max(8, Math.min(y, innerHeight - H - 8));
+    b.style.left = Math.round(x) + 'px';
+    b.style.top = Math.round(y) + 'px';
+  }
+  function ouvrir(el, html, image, figer) {
+    if (ancre && ancre !== el) ancre.classList.remove('ouvert');
+    ancre = el; fige = !!figer;
+    b.innerHTML = html + (image ? '<img alt="exemple" src="' + image + '">' : '');
+    b.classList.toggle('fige', fige);
+    b.hidden = false;
+    el.classList.add('ouvert');
+    placer();
+    const im = b.querySelector('img');
+    if (im) im.onload = placer;
+  }
+  function fermer() {
+    if (ancre) ancre.classList.remove('ouvert');
+    ancre = null; fige = false;
+    b.hidden = true; b.innerHTML = '';
+  }
+  function attacher(el, contenu) {
+    const montrer = figer => {
+      const c = contenu();
+      if (c) ouvrir(el, c[0], c[1], figer);
+    };
+    el.addEventListener('mouseenter', () => { if (!fige) montrer(false); });
+    el.addEventListener('mouseleave', () => { if (!fige && ancre === el) fermer(); });
+    el.addEventListener('focus', () => { if (!fige) montrer(false); });
+    el.addEventListener('blur', () => { if (!fige && ancre === el) fermer(); });
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      if (fige && ancre === el) fermer(); else montrer(true);
+    });
+  }
+  document.addEventListener('click', e => { if (fige && !b.contains(e.target)) fermer(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !b.hidden) fermer(); });
+  window.addEventListener('resize', placer);
+  $('#panneau').addEventListener('scroll', () => { if (fige) placer(); else fermer(); });
+  return {ouvrir, fermer, attacher};
+})();
+
+/* Le « i » d'un reglage : sa phrase, sa frequence sur ce morceau, et
+   l'exemple anime quand il est pret. */
+function boutonAide(ctl) {
+  if (ctl.querySelector('.ctl-i')) return;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'ctl-i'; b.textContent = 'i';
+  b.setAttribute('aria-label', 'explication');
+  ctl.appendChild(b);
+  BULLE.attacher(b, () => {
+    const aide = ctl.querySelector('.aide');
+    if (!aide) return null;
+    const lab = ctl.querySelector('label');
+    const f = ctl.querySelector('figure.ex');
+    const img = f && !f.hidden && f.dataset.cle
+      ? '/exemple?anim=1&cle=' + encodeURIComponent(f.dataset.cle) : '';
+    return ['<p class="titre">' + echapHtml(lab ? lab.textContent.trim() : '')
+            + '</p>' + aide.innerHTML, img];
+  });
+}
+BULLE.attacher($('#apercuAide'), () => [$('#aideApercu').innerHTML, '']);
+
+/* ---- les fichiers charges : une puce a la place de la zone de depot ---- */
+function puceFichier(el, ic, nom, action) {
+  el.classList.add('charge');
+  el.innerHTML = '<i class="ic">' + icone(ic) + '</i><b></b><span class="rempl"></span>';
+  el.querySelector('b').textContent = nom;
+  el.querySelector('.rempl').textContent = action;
+  el.title = nom;
+}
+function majPuce(j) {
+  $('#puce').classList.remove('vide');
+  $('#puce').title = 'changer de morceau';
+  $('#puceNom').textContent = j.name;
+  $('#puceDet').textContent = j.bpm.toFixed(1) + ' BPM · ' + fmt(j.duration);
+}
+$('#puce').onclick = () => $('#file').click();
+$('#midiCaler').onclick = () => montrerSection('melodie');
+$('#midiChoisir').onclick = () => $('#midifile').click();
+
+/* ---- l'export, depuis l'en-tete : le meme bouton que la carte ---- */
+$('#exporter').onclick = () => $('#go').click();
+new MutationObserver(() => { $('#exporter').disabled = $('#go').disabled; })
+  .observe($('#go'), {attributes: true, attributeFilter: ['disabled']});
+
+/* ---- l'instant regarde ---- */
+function tc(s) {
+  const d = Math.max(0, Math.round((+s || 0) * 10));
+  const m = Math.floor(d / 600), r = (d - m * 600) / 10;
+  return m + ':' + r.toFixed(1).padStart(4, '0');
+}
+function majTemps() {
+  const t = +$('#scrub').value || 0;
+  $('#v-t').textContent = tc(t);
+  $('#v-fin').textContent = tc(duration);
+  $('#frise').setAttribute('aria-valuenow', String(Math.round(t)));
+  $('#frise').setAttribute('aria-valuetext', tc(t));
+  FRISE.tetes();
+}
+// un saut vers un instant : la frise le garde en vue
+function allerA(t) {
+  const s = $('#scrub');
+  s.value = Math.max(0, Math.min(+s.max, t));
+  majTemps();
+  FRISE.montrer(+s.value);
+}
+
+/* ---------- la frise : le morceau d'un coup d'oeil ----------
+
+   Une seule toile sous l'apercu : la regle, le son en trois bandes de
+   frequences avec les paroxysmes et les dedoublements, le plan des
+   machines, les notes de la melodie la ou le moteur les jouera, et la suite
+   des fonds. Un clic ou un glisser y place l'apercu. Ctrl + molette zoome
+   autour du pointeur, Maj + molette fait defiler ; au clavier, les fleches
+   avancent d'une seconde (Maj : dix), + et - zooment.
+
+   Le decor (pistes, son, notes) est peint une fois dans une toile cachee ;
+   seules les tetes de lecture et le survol se repeignent a chaque image,
+   ce qui permet de suivre la lecture de l'apercu anime sans rien couter. */
+var FRISE = (() => {
+  const zone = $('#frise'), toile = $('#friseToile'), info = $('#friseInfo');
+  const ctx = toile.getContext('2d');
+  const couche = document.createElement('canvas'), cctx = couche.getContext('2d');
+  const ETI = 88, MARGE = 10, VIDE = 96;
+  const HAUT = {regle: 22, son: 58, machines: 26, melodie: 40, fonds: 26};
+  const css = getComputedStyle(document.documentElement);
+  const C = k => css.getPropertyValue(k).trim();
+  const COUL = {
+    fond: C('--bg2'), eti: '#0b0e12', lig: C('--lig'), tx: C('--tx'), tx2: C('--tx2'),
+    tx3: C('--tx3'), acc: C('--acc'), parox: C('--parox'), dedo: C('--dedo'),
+    note: C('--note'), fondC: C('--fond'),
+    // les trois bandes du son, des graves aux aigus
+    bandes: [['rgba(37,99,235,.9)', 1.0], ['rgba(56,189,248,.85)', .78],
+             ['rgba(224,242,254,.85)', .5]],
+  };
+  // chaque machine sa teinte : fond, bord, texte
+  const MACH = {mpc: ['#16324a', '#2b5878', '#dbeafe'],
+                minifreak: ['#143425', '#2a6a4a', '#d1fae5'],
+                sp404: ['#2a1f45', '#5b3f8a', '#ede9fe'],
+                digitakt: ['#3a2a12', '#7a5a22', '#fef3c7']};
+  const NOTES = ['do', 'do♯', 'ré', 'ré♯', 'mi', 'fa', 'fa♯', 'sol', 'sol♯', 'la', 'la♯', 'si'];
+  let onde = null, dedo = [], notes = null, noteAuto = 0, noteGrille = true, plan = null;
+  let noms = {}, v0 = 0, v1 = 1, largeur = 0, haut = VIDE, dpr = 1, pistes = [];
+  let prise = false, survol = null, clip = null, video = null, rafVideo = 0;
+  let attente = 0, sale = true;
+  let mDedo = 0, mNotes = 0, mFonds = 0, nNotes = 0, nFonds = 0;
+
+  const total = () => duration || 0;
+  const utile = () => Math.max(1, largeur - ETI - MARGE);
+  const x = t => ETI + (t - v0) / ((v1 - v0) || 1) * utile();
+  const t = px => v0 + (px - ETI) / utile() * (v1 - v0);
+  const piste = cle => pistes.find(p => p.cle === cle);
+  const nomNote = h => NOTES[((h % 12) + 12) % 12] + (Math.floor(h / 12) - 1);
+
+  function dessiner() { sale = true; demander(); }
+  // la vue a bouge sous la souris immobile : la bulle de la frise suit
+  function resurvoler() {
+    if (survol) { survol.t = Math.max(0, Math.min(total(), t(survol.px))); majInfo(); }
+  }
+  function tetes() { demander(); }
+  function demander() { if (!attente) attente = requestAnimationFrame(peindre); }
+
+  // les pistes du moment, et la taille de la toile
+  function mesurer() {
+    pistes = [{cle: 'regle', h: HAUT.regle}];
+    if (track) {
+      pistes.push({cle: 'son', nom: 'Son', h: HAUT.son});
+      pistes.push({cle: 'machines', nom: 'Machines', h: HAUT.machines});
+      if ($('#midi').value && notes && notes.length)
+        pistes.push({cle: 'melodie', nom: 'Mélodie', h: HAUT.melodie});
+      if (fonds.length && plan && plan.blocs.length)
+        pistes.push({cle: 'fonds', nom: 'Fonds', h: HAUT.fonds});
+    }
+    let y = 0;
+    for (const p of pistes) { p.y = y; y += p.h; }
+    const h = track ? y : VIDE;
+    if (h !== haut) { haut = h; zone.style.height = h + 'px'; }
+    const w = zone.clientWidth, d = window.devicePixelRatio || 1;
+    if (w !== largeur || d !== dpr || toile.height !== Math.round(h * d)) {
+      largeur = w; dpr = d;
+      toile.width = couche.width = Math.max(1, Math.round(w * d));
+      toile.height = couche.height = Math.max(1, Math.round(h * d));
+      sale = true;
+    }
+    const T = total();
+    if (T > 0 && (v1 <= v0 || v1 - v0 > T)) { v0 = 0; v1 = T; }
+  }
+
+  function peindre() {
+    attente = 0;
+    mesurer();
+    $('#friseVide').hidden = !!track;
+    if (sale) { peindreDecor(cctx); sale = false; }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, toile.width, toile.height);
+    ctx.drawImage(couche, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (track && total()) peindreTetes(ctx);
+  }
+
+  // ---- le decor : tout ce qui ne bouge pas avec la tete de lecture
+  function peindreDecor(c) {
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, couche.width, couche.height);
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!track || !total()) return;
+    c.fillStyle = COUL.eti;
+    c.fillRect(0, 0, ETI, haut);
+    c.fillStyle = COUL.lig;
+    c.fillRect(ETI - 1, 0, 1, haut);
+    for (const p of pistes) {
+      c.fillStyle = p.cle === 'regle' ? COUL.lig : 'rgba(255,255,255,.045)';
+      c.fillRect(0, p.y + p.h - 1, largeur, 1);
+    }
+    c.save();
+    c.beginPath(); c.rect(ETI, 0, largeur - ETI, haut); c.clip();
+    peindreRegle(c, piste('regle'));
+    peindreSon(c, piste('son'));
+    peindreMachines(c, piste('machines'));
+    if (piste('melodie')) peindreNotes(c, piste('melodie'));
+    if (piste('fonds')) peindreFonds(c, piste('fonds'));
+    peindreExport(c);
+    c.restore();
+    // les noms des pistes, et la legende des trois bandes
+    c.font = '500 10.5px ' + C('--f');
+    c.textBaseline = 'middle';
+    for (const p of pistes) {
+      if (!p.nom) continue;
+      c.fillStyle = COUL.tx2;
+      c.fillText(p.nom, 12, p.cle === 'son' ? p.y + 13 : p.y + p.h / 2);
+    }
+    const son = piste('son');
+    if (son) {
+      c.font = '400 9.5px ' + C('--f');
+      ['graves', 'médiums', 'aigus'].forEach((n, i) => {
+        const y = son.y + 27 + i * 11;
+        c.fillStyle = COUL.bandes[i][0];
+        c.fillRect(12, y - 3, 6, 6);
+        c.fillStyle = COUL.tx3;
+        c.fillText(n, 23, y);
+      });
+    }
+  }
+
+  function pasDeRegle() {
+    const parS = utile() / ((v1 - v0) || 1);
+    for (const p of [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600])
+      if (p * parS >= 64) return p;
+    return 1200;
+  }
+  function etiquette(s, p) {
+    const m = Math.floor(s / 60), r = s - 60 * m;
+    return m + ':' + (p < 1 ? r.toFixed(1).padStart(4, '0') : String(Math.round(r)).padStart(2, '0'));
+  }
+  function peindreRegle(c, p) {
+    const pas = pasDeRegle(), fin = Math.min(total(), v1);
+    c.font = '400 10px ' + C('--m');
+    c.textBaseline = 'middle';
+    const fin2 = fin + 1e-6;
+    for (let s = Math.ceil(v0 / (pas / 5)) * (pas / 5); s <= fin2; s += pas / 5) {
+      const majeur = Math.abs(s / pas - Math.round(s / pas)) < 1e-6;
+      const xx = Math.round(x(s)) + 0.5;
+      c.fillStyle = majeur ? COUL.lig : 'rgba(255,255,255,.06)';
+      c.fillRect(xx, p.y + (majeur ? 12 : 16), 1, majeur ? p.h - 12 : p.h - 16);
+      if (majeur) {
+        c.fillStyle = COUL.tx3;
+        c.fillText(etiquette(Math.round(s * 10) / 10, pas), xx + 4, p.y + 8);
+      }
+    }
+  }
+
+  function peindreSon(c, p) {
+    const mid = p.y + p.h / 2, demi = p.h / 2 - 5;
+    if (!onde) {
+      c.fillStyle = COUL.tx3; c.font = '400 11px ' + C('--f');
+      c.fillText('lecture du son…', ETI + 12, mid);
+      return;
+    }
+    const n = onde.n, ps = onde.par_s, x0 = ETI, x1 = Math.min(largeur - MARGE, x(total()));
+    // la ligne du silence
+    c.fillStyle = 'rgba(56,189,248,.25)';
+    c.fillRect(x0, mid, x1 - x0, 1);
+    for (let b = 0; b < 3; b++) {
+      const v = onde.bandes[b], [coul, ech] = COUL.bandes[b], h = [];
+      for (let px = x0; px < x1; px++) {
+        const i0 = Math.max(0, Math.floor(t(px) * ps));
+        const i1 = Math.min(n, Math.max(i0 + 1, Math.floor(t(px + 1) * ps)));
+        // la moyenne quadratique des colonnes du pixel : le maximum ne
+        // gardait que les coups de charley, et tout le morceau faisait un mur
+        let m = 0;
+        for (let i = i0; i < i1; i++) m += v[i] * v[i];
+        h.push(Math.sqrt(m / Math.max(1, i1 - i0)) / 255 * demi * ech);
+      }
+      c.beginPath();
+      c.moveTo(x0, mid);
+      h.forEach((a, k) => c.lineTo(x0 + k + 0.5, mid - a));
+      for (let k = h.length - 1; k >= 0; k--) c.lineTo(x0 + k + 0.5, mid + h[k]);
+      c.closePath();
+      c.fillStyle = coul;
+      c.fill();
+    }
+    // les paroxysmes : la ou tombent les glitchs
+    c.fillStyle = COUL.parox;
+    for (const d of drops) {
+      if (d < v0 - 1 || d > v1 + 1) continue;
+      const xx = Math.round(x(d));
+      c.globalAlpha = .9;
+      c.fillRect(xx - 1, p.y + 3, 2, p.h - 6);
+      c.globalAlpha = 1;
+      c.beginPath(); c.moveTo(xx - 4, p.y + 2); c.lineTo(xx + 4, p.y + 2); c.lineTo(xx, p.y + 7);
+      c.fill();
+    }
+    // les dedoublements du trait : un losange en haut
+    c.fillStyle = COUL.dedo;
+    for (const s of dedo) {
+      if (s < v0 - 1 || s > v1 + 1) continue;
+      const xx = x(s), yy = p.y + p.h - 7;
+      c.beginPath(); c.moveTo(xx, yy - 5); c.lineTo(xx + 4, yy); c.lineTo(xx, yy + 5);
+      c.lineTo(xx - 4, yy); c.closePath(); c.fill();
+    }
+  }
+
+  // le plan des machines, tel que le sequenceur l'ecrit
+  function planMachines() {
+    const p = seqLire($('#machines').value);
+    if (!p.length || p[0].t > 0) p.unshift({t: 0, m: $('#machine').value});
+    return p;
+  }
+  function bloc(c, a, b, y, h, f, bord) {
+    const xa = Math.max(ETI - 4, x(a)) + 1, xb = Math.min(largeur + 4, x(b)) - 1;
+    if (xb - xa < 1) return null;
+    c.beginPath();
+    if (c.roundRect) c.roundRect(xa, y, xb - xa, h, 5); else c.rect(xa, y, xb - xa, h);
+    c.fillStyle = f; c.fill();
+    c.strokeStyle = bord; c.lineWidth = 1; c.stroke();
+    return [xa, xb];
+  }
+  function texte(c, s, xa, xb, y, coul) {
+    if (xb - xa < 24) return;
+    c.save();
+    c.beginPath(); c.rect(xa + 6, y - 8, xb - xa - 12, 16); c.clip();
+    c.fillStyle = coul; c.fillText(s, Math.max(xa, ETI) + 8, y);
+    c.restore();
+  }
+  function peindreMachines(c, p) {
+    const plan = planMachines(), T = total(), pas = +$('#passage').value || 0;
+    c.font = '500 11px ' + C('--f');
+    c.textBaseline = 'middle';
+    plan.forEach((e, i) => {
+      const a = e.t, b = i + 1 < plan.length ? plan[i + 1].t : T;
+      const m = MACH[e.m] || MACH.mpc;
+      const r = bloc(c, a, b, p.y + 4, p.h - 8, m[0], m[1]);
+      if (r) texte(c, noms[e.m] || e.m, r[0], r[1], p.y + p.h / 2, m[2]);
+    });
+    // la deformation d'une machine a l'autre precede l'instant inscrit
+    for (let i = 1; i < plan.length; i++) {
+      const a = Math.max(0, plan[i].t - pas), b = plan[i].t;
+      const xa = x(a), xb = x(b);
+      if (xb - xa < 1) continue;
+      const g = c.createLinearGradient(xa, 0, xb, 0);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(1, 'rgba(255,255,255,.22)');
+      c.fillStyle = g;
+      c.fillRect(xa, p.y + 4, xb - xa, p.h - 8);
+    }
+  }
+
+  // les notes telles que le moteur les jouera : posees par le serveur, puis
+  // decalees et etirees comme les curseurs de la page le demandent
+  function notesPosees() {
+    if (!notes || !notes.length) return [];
+    const off = noteAuto + (+$('#midiOffset').value || 0);
+    const tempo = noteGrille ? 1 : 1 + (+$('#midiTempo').value || 0) / 100;
+    let d0 = Infinity;
+    for (const n of notes) if (n[0] < d0) d0 = n[0];
+    return notes.map(n => {
+      const deb = d0 + (n[0] - d0) * tempo, fin = d0 + (n[1] - d0) * tempo;
+      return [deb - off, Math.min(fin, deb + 1.2) - off, n[2], n[3]];
+    });
+  }
+  function peindreNotes(c, p) {
+    const ns = notesPosees();
+    let lo = 127, hi = 0;
+    for (const n of ns) { if (n[2] < lo) lo = n[2]; if (n[2] > hi) hi = n[2]; }
+    const ecart = Math.max(1, hi - lo), h = p.h - 10;
+    c.fillStyle = COUL.note;
+    for (const n of ns) {
+      if (n[1] < v0 || n[0] > v1) continue;
+      const xa = x(n[0]), xb = Math.max(xa + 1.5, x(n[1]));
+      const yy = p.y + 4 + (1 - (n[2] - lo) / ecart) * h;
+      c.globalAlpha = .4 + .6 * Math.max(0, Math.min(1, n[3]));
+      c.fillRect(xa, yy, xb - xa, 2);
+    }
+    c.globalAlpha = 1;
+    p.notes = ns; p.lo = lo; p.ecart = ecart;
+  }
+
+  function peindreFonds(c, p) {
+    c.font = '500 11px ' + C('--f');
+    c.textBaseline = 'middle';
+    for (const [a, b, k, sens] of plan.blocs) {
+      const r = bloc(c, a, b, p.y + 4, p.h - 8, k % 2 ? '#2a2246' : '#231d3b', '#4c3f7a');
+      const f = fonds[k];
+      if (r && f) texte(c, (sens < 0 ? '◂ ' : '') + f.name, r[0], r[1], p.y + p.h / 2, '#e9e3ff');
+    }
+    for (const [a, b] of plan.fondus) {
+      const xa = x(a), xb = x(b);
+      if (xb - xa < 1) continue;
+      const g = c.createLinearGradient(xa, 0, xb, 0);
+      g.addColorStop(0, 'rgba(196,181,253,.05)');
+      g.addColorStop(.5, 'rgba(196,181,253,.35)');
+      g.addColorStop(1, 'rgba(196,181,253,.05)');
+      c.fillStyle = g;
+      c.fillRect(xa, p.y + 4, xb - xa, p.h - 8);
+    }
+  }
+
+  // la part du morceau que le rendu couvrira, quand elle n'est pas le tout
+  function fenetreExport() {
+    const dep = Math.max(0, +$('#start').value || 0), d = +$('#dur').value || 0;
+    if (dep <= 0 && d <= 0) return null;
+    return [dep, d > 0 ? Math.min(total(), dep + d) : total()];
+  }
+  function peindreExport(c) {
+    const f = fenetreExport();
+    if (!f) return;
+    const y = HAUT.regle, h = haut - y, xa = x(f[0]), xb = x(f[1]);
+    c.fillStyle = 'rgba(5,7,9,.62)';
+    if (xa > ETI) c.fillRect(ETI, y, xa - ETI, h);
+    if (xb < largeur) c.fillRect(xb, y, largeur - xb, h);
+    c.fillStyle = COUL.acc;
+    c.globalAlpha = .55;
+    c.fillRect(xa, 0, Math.max(1, xb - xa), 3);
+    c.globalAlpha = 1;
+  }
+
+  // ---- ce qui bouge : la tete de lecture, l'apercu anime, le survol
+  function peindreTetes(c) {
+    if (clip) {
+      const xa = x(clip[0]), xb = x(clip[1]);
+      c.fillStyle = 'rgba(56,189,248,.22)';
+      c.fillRect(xa, 0, xb - xa, HAUT.regle - 1);
+      c.fillStyle = 'rgba(56,189,248,.06)';
+      c.fillRect(xa, HAUT.regle, xb - xa, haut - HAUT.regle);
+    }
+    if (survol !== null && !prise) {
+      c.fillStyle = 'rgba(255,255,255,.28)';
+      c.fillRect(Math.round(x(survol.t)), 0, 1, haut);
+    }
+    if (video && clip && !video.paused) {
+      const xv = Math.round(x(clip[0] + video.currentTime));
+      c.fillStyle = COUL.acc;
+      c.fillRect(xv - 1, 0, 2, haut);
+    }
+    const ts = +$('#scrub').value || 0, xs = Math.round(x(ts));
+    if (xs >= ETI - 2 && xs <= largeur) {
+      c.fillStyle = '#fff';
+      c.shadowColor = 'rgba(255,255,255,.5)'; c.shadowBlur = 6;
+      c.fillRect(xs - 1, HAUT.regle - 6, 2, haut - HAUT.regle + 6);
+      c.shadowBlur = 0;
+      c.beginPath(); c.moveTo(xs - 6, HAUT.regle - 8); c.lineTo(xs + 6, HAUT.regle - 8);
+      c.lineTo(xs, HAUT.regle - 1); c.closePath(); c.fill();
+    }
+  }
+
+  // ---- ce que dit la bulle de la frise, au survol
+  function majInfo() {
+    if (!survol || !track) { info.hidden = true; return; }
+    const tt = survol.t, p = pistes.find(q => survol.py >= q.y && survol.py < q.y + q.h);
+    let txt = tc(tt);
+    const pres = (liste, px) => liste.find(s => Math.abs(x(s) - survol.px) <= px);
+    if (p && p.cle === 'son') {
+      const d = pres(drops, 5), s = pres(dedo, 6);
+      if (d !== undefined) txt = 'paroxysme · ' + tc(d);
+      else if (s !== undefined) txt = 'dédoublement · ' + tc(s);
+    } else if (p && p.cle === 'machines') {
+      const pl = planMachines(), pas = +$('#passage').value || 0;
+      let i = 0;
+      while (i + 1 < pl.length && pl[i + 1].t <= tt) i++;
+      const suiv = pl[i + 1];
+      txt = (noms[pl[i].m] || pl[i].m) + ' · ' + tc(tt);
+      if (suiv && tt >= suiv.t - pas) txt = 'déformation → ' + (noms[suiv.m] || suiv.m);
+    } else if (p && p.cle === 'melodie' && p.notes) {
+      const yv = q => p.y + 4 + (1 - (q[2] - p.lo) / p.ecart) * (p.h - 10);
+      let best = null, bd = 6;
+      for (const n of p.notes) {
+        if (tt < n[0] - (v1 - v0) / utile() * 3 || tt > n[1] + (v1 - v0) / utile() * 3) continue;
+        const d = Math.abs(yv(n) + 1 - survol.py);
+        if (d < bd) { bd = d; best = n; }
+      }
+      if (best) txt = nomNote(best[2]) + ' · ' + tc(best[0]);
+    } else if (p && p.cle === 'fonds' && plan) {
+      const fd = plan.fondus.find(f => tt >= f[0] && tt < f[1]);
+      const b = plan.blocs.find(q => tt >= q[0] && tt < q[1]);
+      if (fd) txt = 'fondu enchaîné · ' + tc(tt);
+      else if (b && fonds[b[2]]) txt = fonds[b[2]].name + (b[3] < 0 ? ' (à l\'envers)' : '');
+    }
+    info.textContent = txt;
+    info.hidden = false;
+    const w = info.offsetWidth;
+    info.style.left = Math.round(Math.max(ETI, Math.min(survol.px - w / 2, largeur - w - 4))) + 'px';
+  }
+
+  // ---- la vue : tout le morceau, ou un zoom
+  function borner() {
+    const T = total(), s = Math.min(v1 - v0, T);
+    if (v0 < 0) { v0 = 0; v1 = s; }
+    if (v1 > T) { v1 = T; v0 = Math.max(0, T - s); }
+  }
+  function majZoom() {
+    const T = total(), z = T ? T / ((v1 - v0) || T) : 1;
+    $('#zoomTxt').textContent = z < 1.05 ? 'tout' : '×' + (z < 10 ? z.toFixed(1) : Math.round(z));
+  }
+  function zoomer(f, centre) {
+    const T = total();
+    if (!T) return;
+    const s = Math.max(Math.min(6, T), Math.min(T, (v1 - v0) * f));
+    const k = (centre - v0) / ((v1 - v0) || 1);
+    v0 = centre - k * s; v1 = v0 + s;
+    borner(); majZoom(); resurvoler(); dessiner();
+  }
+  function montrer(tt) {
+    if (tt >= v0 && tt <= v1) return;
+    const s = v1 - v0;
+    v0 = tt - s / 2; v1 = v0 + s;
+    borner(); dessiner();
+  }
+  function chercher(tt) {
+    const s = $('#scrub');
+    if (s.disabled) return;
+    s.value = Math.max(0, Math.min(+s.max, tt)).toFixed(2);
+    s.dispatchEvent(new Event('input'));
+  }
+
+  // ---- les gestes
+  const pos = e => { const r = zone.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  zone.addEventListener('pointerdown', e => {
+    if (!track || e.button !== 0) return;
+    const [px, py] = pos(e);
+    if (px < ETI) return;
+    prise = true;
+    zone.setPointerCapture(e.pointerId);
+    zone.focus({preventScroll: true});
+    chercher(t(px));
+    e.preventDefault();
+  });
+  zone.addEventListener('pointermove', e => {
+    const [px, py] = pos(e);
+    if (prise) chercher(t(Math.max(ETI, Math.min(largeur - MARGE, px))));
+    survol = track && px >= ETI ? {t: Math.max(0, Math.min(total(), t(px))), px, py} : null;
+    majInfo(); tetes();
+  });
+  const lacher = () => { prise = false; tetes(); };
+  zone.addEventListener('pointerup', lacher);
+  zone.addEventListener('pointercancel', lacher);
+  zone.addEventListener('pointerleave', () => { survol = null; info.hidden = true; tetes(); });
+  zone.addEventListener('dblclick', e => {
+    if (pos(e)[1] < HAUT.regle && track) { v0 = 0; v1 = total(); majZoom(); dessiner(); }
+  });
+  zone.addEventListener('wheel', e => {
+    if (!track) return;
+    const [px] = pos(e), T = total(), s = v1 - v0;
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      zoomer(Math.exp(e.deltaY * 0.0025), px >= ETI ? t(px) : (v0 + v1) / 2);
+    } else if (s < T - 1e-6 && (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY))) {
+      e.preventDefault();
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      v0 += d / utile() * s; v1 += d / utile() * s;
+      borner(); resurvoler(); dessiner();
+    }
+  }, {passive: false});
+  zone.addEventListener('keydown', e => {
+    if (!track) return;
+    const s = +$('#scrub').value || 0, pas = e.shiftKey ? 10 : 1;
+    let n = null;
+    if (e.key === 'ArrowRight') n = s + pas;
+    else if (e.key === 'ArrowLeft') n = s - pas;
+    else if (e.key === 'Home') n = 0;
+    else if (e.key === 'End') n = total();
+    else if (e.key === '+' || e.key === '=') { e.preventDefault(); return zoomer(0.5, s); }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); return zoomer(2, s); }
+    if (n === null) return;
+    e.preventDefault();
+    chercher(n);
+    montrer(+$('#scrub').value);
+  });
+  $('#zPlus').onclick = () => zoomer(0.5, +$('#scrub').value || 0);
+  $('#zMoins').onclick = () => zoomer(2, (v0 + v1) / 2);
+  new ResizeObserver(() => dessiner()).observe(zone);
+
+  // ---- ce que la frise demande au studio
+  async function morceau() {
+    const tid = track;
+    onde = null; dedo = []; notes = null; plan = null;
+    v0 = 0; v1 = total();
+    zone.setAttribute('aria-valuemax', String(Math.round(total())));
+    majZoom(); dessiner();
+    try {
+      const j = await (await fetch('/onde?track=' + tid)).json();
+      if (j.error) throw new Error(j.error);
+      if (tid !== track) return;
+      onde = {n: j.n, par_s: j.par_s, bandes: j.bandes.map(
+        b => Uint8Array.from(atob(b), ch => ch.charCodeAt(0)))};
+    } catch (e) { onde = null; }
+    dessiner();
+    chargerDedo(); chargerNotes(); chargerFonds();
+  }
+  function chargerDedo() {
+    clearTimeout(mDedo);
+    mDedo = setTimeout(async () => {
+      const tid = track;
+      if (!tid) return;
+      try {
+        const j = await (await fetch('/splits?track=' + tid + '&count='
+          + $('#splitCount').value + '&on=' + encodeURIComponent($('#splitOn').value))).json();
+        if (tid === track) { dedo = j.times || []; dessiner(); }
+      } catch (e) { /* la frise s'en passe */ }
+    }, 250);
+  }
+  function chargerNotes() {
+    clearTimeout(mNotes);
+    mNotes = setTimeout(async () => {
+      const n = ++nNotes;
+      if (!track || !$('#midi').value) { notes = null; dessiner(); return; }
+      const q = new URLSearchParams({
+        track, midi: $('#midi').value, bpm: $('#midiBpm').value,
+        telQuel: $('#midiTelQuel').checked ? '1' : '0',
+        cale: $('#midiCale').checked ? '1' : '0'});
+      let j = null;
+      try { j = await (await fetch('/notes?' + q)).json(); } catch (e) { j = null; }
+      if (n !== nNotes) return;
+      if (j && !j.error) { notes = j.notes; noteAuto = +j.auto || 0; noteGrille = !!j.grille; }
+      else notes = null;
+      dessiner();
+    }, 200);
+  }
+  function chargerFonds() {
+    clearTimeout(mFonds);
+    mFonds = setTimeout(async () => {
+      const n = ++nFonds;
+      if (!track || !fonds.length) { plan = null; dessiner(); return; }
+      const q = new URLSearchParams({
+        noms: fonds.map(f => f.name).join('|'), vitesse: vitesseFond(),
+        boucle: $('#fondBoucle').value, fondu: $('#fondFondu').value,
+        photo: $('#fondPhoto').value, total: duration});
+      let j = null;
+      try { j = await (await fetch('/plan_fonds?' + q)).json(); } catch (e) { j = null; }
+      if (n !== nFonds) return;
+      plan = j && !j.error ? j : null;
+      dessiner();
+    }, 250);
+  }
+  function poserClip(debut, duree) {
+    clip = debut === null || debut === undefined ? null : [debut, debut + duree];
+    tetes();
+  }
+  function suivre(v) {
+    video = v;
+    cancelAnimationFrame(rafVideo);
+    const pas = () => { if (!video) return; tetes(); rafVideo = requestAnimationFrame(pas); };
+    if (v) rafVideo = requestAnimationFrame(pas); else tetes();
+  }
+  return {dessiner, tetes, morceau, chargerDedo, chargerNotes, chargerFonds,
+          montrer, zoomer, clip: poserClip, suivre,
+          noms: m => { noms = m || {}; dessiner(); },
+          enLecture: () => !!clip};
+})();
+
+(function () {
+  let k = null;
+  try { k = localStorage.getItem(CLE_SECTION); } catch (e) {}
+  montrerSection(k || 'prereglage');
+})();
+majTemps();
 </script>
 </body></html>
 """

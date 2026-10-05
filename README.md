@@ -583,7 +583,7 @@ touchés. Fermez la fenêtre du studio avant, et relancez-la après : Python lit
 les modules au démarrage, un studio resté ouvert continue de servir l'ancien
 moteur.
 
-Le studio affiche en bas de page la version qu'il exécute réellement, et la
+Le studio affiche en haut de la page la version qu'il exécute réellement, et la
 rappelle dans ses messages d'erreur — c'est ce qui permet de dire en un coup
 d'œil si une correction est bien arrivée jusqu'à la machine.
 
@@ -609,8 +609,8 @@ python3 tools/studio.py
 **Après un `git pull`, il faut relancer le studio.** Python lit les modules au
 démarrage : un studio laissé ouvert continue de servir l'ancien moteur, et on
 cherche longtemps pourquoi une nouveauté « n'est pas là ». La version
-réellement chargée est affichée en haut de la page, à côté du titre — c'est
-elle qui fait foi.
+réellement chargée est affichée en haut à droite de la page — c'est elle qui
+fait foi.
 
 L'adresse est **locale** : elle ne marche que sur la machine qui fait tourner
 la commande. Il n'y a pas de version en ligne, et c'est voulu — le studio
@@ -635,11 +635,10 @@ Le rendu se lance depuis la même page, en 1080p, 4K, 720p, carré ou vertical,
 avec une barre de progression et un bouton de téléchargement. Tout ce que le studio fabrique (morceaux déposés et
 vidéos) reste dans `out/studio/`.
 
-La page est **orange** — curseurs, valeurs, boutons. C'est la couleur de
+La page est **bleue** — curseurs, valeurs, boutons. C'est la couleur de
 l'outil, pas celle des vidéos : le trait de la machine se règle à part, dans la
-carte *Couleur du trait* (vert par défaut, orange, bleu ou une couleur libre).
-L'orange de la page est celui de la palette *orange* du moteur ; il se change
-en tête du style de `tools/studio.py` (`--acc`), en deux lignes.
+section *Couleur* (vert par défaut, orange, bleu ou une couleur libre). Le bleu
+se change en tête du style de `tools/studio.py` (`--acc`).
 
 Rien ne sort de la machine : le serveur n'écoute que sur `127.0.0.1`, il n'y a
 ni bibliothèque web ni CDN — la page est servie telle quelle, et les seules
@@ -1982,56 +1981,112 @@ le BPM du morceau ni la case « tel quel »** au moteur — la v2 seule le
 faisait. `tools/verifier_studio.py` ne contrôlait que les curseurs et les
 listes ; il contrôle maintenant aussi les cases, les nombres et les couleurs.
 
-## Deux fenêtres : les réglages à gauche, l'aperçu à droite
+## La console : les sections, l'aperçu, la frise du morceau
 
-La page est coupée en deux. **À gauche, tous les réglages** — préréglage,
-machine, lumière des coups, couleur, fond, trait, réactions au son, avaries,
-écho, texture —, sur deux colonnes qui défilent. **À droite, l'aperçu, qui
-ne bouge pas** : on descend jusqu'à la dernière avarie sans le perdre de vue,
-et on voit ce que donne le réglage qu'on est en train de toucher. Quand tout
-défilait d'un bloc, l'image partait en haut de la page dès qu'on descendait
-dans les effets.
+La page tient en trois colonnes, et rien n'y défile qui ne doive défiler.
 
-Sous l'aperçu, ce qui entre et ce qui sort, dans une partie qui défile seule :
+**À gauche, le rail des sections** — Préréglage ; Machine, Lumière, Couleur,
+Dalle, Fonds, Trait ; Réactions, Avaries, Écho, Texture ; Mélodie. Un clic
+ouvre la section dans le panneau voisin, une seule à la fois : on ne cherche
+plus un curseur parmi cent. Le studio rouvre la dernière section choisie. Un
+**point bleu** sur une section dit qu'elle s'écarte des valeurs d'usine — une
+avarie allumée, un fond déposé, une mélodie chargée : on voit d'un coup d'œil
+où il se passe quelque chose.
 
-- **Rendu.** Le bouton *Lancer le rendu* et son avancement viennent en tête,
-  juste sous l'image : ils restent en vue sans rien faire défiler, même sur un
-  écran de 1280×800. Suivent le départ, la durée, la définition, les images
-  par seconde, la qualité du fichier et le bombé de l'écran. Le titre de
-  l'onglet du navigateur suit lui aussi l'avancement (« rendu 42 % ») : on le
-  voit depuis une autre fenêtre.
-- **Morceau** et **Mélodie (fichier MIDI)**, avec tous les outils de calage.
-  Caler une mélodie en gardant l'image sous les yeux, c'est précisément ce
-  que la page ne permettait plus.
+**Au milieu, les réglages de la section**, une ligne par réglage : son nom, le
+curseur, la valeur, et un **i**. Au survol du *i*, une bulle donne la phrase
+qui l'explique, combien de fois il partira sur ce morceau (« ~ 254 fois dans
+le morceau, soit 38 par minute »), et l'exemple animé du moteur quand il est
+prêt ; un clic garde la bulle ouverte, *Échap* la ferme. L'instrument qui
+déclenche un effet se choisit juste sous son curseur. Les longues sections
+sont rangées en groupes (« Le tracé », « Dédoublement sur les gros coups »,
+« La courbe du son »…). Le **?** en tête de section déplie ses explications
+détaillées ; repliées, elles laissent la place aux réglages. La barre entre le
+panneau et l'aperçu se tire pour l'élargir ; un double-clic la remet à sa
+largeur.
 
-**L'aperçu suit le geste.** Pendant qu'on fait glisser un curseur —
-épaisseur du trait, néon, couleur… —, l'image se recalcule en continu : une
-seule image en calcul à la fois, et dès qu'elle arrive, la suivante part avec
-les réglages du moment. Avant, chaque mouvement relançait l'attente, et tant
-que le curseur bougeait l'image ne changeait pas. Mesuré en 960×540 : un
-curseur qu'on fait glisser pendant deux secondes affiche **18 images**. Les
-99 réglages de la colonne de gauche relancent l'aperçu, contrôlé un par un.
+**À droite, la scène** : l'aperçu, la frise du morceau, et ce qui entre et
+sort — l'export, le morceau, la mélodie. Sur un écran large et bas (un
+portable, un 1080p dans un navigateur), l'export et les sources passent à
+droite de l'aperçu, qui y gagne la moitié de sa taille ; sinon ils vont
+dessous, et la frise reste toujours en vue. Sur un écran étroit, tout se
+remet en une colonne, l'aperçu d'abord.
+
+**En haut**, le morceau chargé (son tempo, sa durée — un clic pour en changer),
+la dernière nouvelle du studio, la version qui tourne, et le bouton
+**Exporter**, qui lance le rendu avec les réglages de la carte *Export* et en
+suit l'avancement (« Rendu 42 % »).
+
+### La frise du morceau
+
+Sous l'aperçu, tout le morceau d'un coup d'œil, pistes superposées :
+
+- **Son** — la forme d'onde en trois bandes de fréquences, des graves aux
+  aigus. Chaque bande est ramenée à son propre maximum (sinon les aigus,
+  cent fois moins énergiques que la basse, ne se verraient pas), sans être
+  gonflée plus de cinq fois : un morceau sans basse ne s'en invente pas une.
+  Les **paroxysmes**, là où tombent les glitchs, sont marqués en rose ; les
+  **dédoublements** du trait, en losanges jaunes.
+- **Machines** — le plan du séquenceur, une couleur par machine, avec la
+  déformation qui précède chaque changement.
+- **Mélodie** — les notes du fichier MIDI **là où le moteur les jouera** :
+  posées sur la grille du morceau par le même calcul que l'aperçu, puis
+  décalées et étirées comme le disent les curseurs de calage. Déplacer
+  l'avance ou la dérive déplace les notes sur la frise, en direct.
+- **Fonds** — la suite des images et des vidéos, telle que le rendu la
+  jouera : chaque passage, les fondus enchaînés, et les allers à l'envers en
+  aller-retour.
+
+La part du morceau que le rendu couvrira, quand on n'exporte pas le tout, est
+éclairée, le reste assombri ; l'extrait de l'aperçu animé est marqué en bleu
+pendant son calcul, puis une tête bleue suit sa lecture.
+
+Un clic ou un glisser sur la frise y place l'aperçu ; au survol, une
+étiquette dit l'instant, le paroxysme, la note ou le fond sous la souris.
+*Ctrl + molette* zoome autour du pointeur (jusqu'à quelques secondes sur
+toute la largeur), *Maj + molette* fait défiler ; au clavier, les flèches
+avancent d'une seconde (*Maj* : dix), *+* et *−* zooment. Au-dessus, la barre
+de lecture : *Lire en mouvement* et la durée de l'extrait, l'instant
+regardé, le paroxysme précédent ou suivant, le prochain dédoublement, et
+**un kick** — un vrai coup de grosse caisse pris au hasard (le bouton
+*chercher un kick* tirait un instant quelconque).
+
+La forme d'onde se calcule une fois par morceau, en quatre dixièmes de
+seconde pour six minutes ; elle pèse 30 Ko.
+
+### Ce qui va avec
+
+**L'aperçu suit le geste.** Pendant qu'on fait glisser un curseur, l'image se
+recalcule en continu : une seule image en calcul à la fois, et dès qu'elle
+arrive, la suivante part avec les réglages du moment. Mesuré en 960×540 : un
+curseur qu'on fait glisser pendant deux secondes affiche **18 images**.
 
 **Déposer sur l'aperçu.** Un morceau, un MIDI, une image ou une vidéo lâchés
 sur l'image vont chacun à leur place. Tant qu'aucun morceau n'est chargé, un
 clic sur l'écran ouvre le choix du fichier.
 
-**La taille de l'aperçu se règle.** La fine barre entre les deux fenêtres se
-tire à la souris ; le studio garde la largeur choisie pour la prochaine
-ouverture, et un double-clic sur la barre revient à celle d'origine — un
-tiers de la fenêtre, entre 380 et 560 px.
+**La page est bleue.** C'est la couleur de l'outil, pas celle des vidéos : le
+trait de la machine se règle à part, dans la section *Couleur*. Le bleu se
+change en tête du style de `tools/studio.py` (`--acc`). Les polices — Inter
+pour le texte, JetBrains Mono pour les nombres — sont livrées avec le studio
+(`tools/polices/`, sous licence libre SIL OFL) : la page ne télécharge
+toujours rien, elle tourne sans réseau.
 
-**Un écran bas** — moins de 760 px de haut, celui d'un petit portable : sous
-un aperçu fixe, il ne resterait qu'une lucarne pour le rendu. La colonne de
-droite défile alors d'un bloc ; l'aperçu reste en vue tant qu'on règle à
-gauche. Sur un écran étroit, tout se remet en une seule colonne, l'aperçu en
-premier.
+**Les accents sont revenus** — dans la page, les explications, les messages
+du studio et les noms des styles (*néon de nuit*, *rêve*, *épure*). Les noms
+que le moteur compare (« arriere », « tres aigus »…) restent écrits sans,
+seule la page les accentue.
 
-Les explications du rendu (définition, images par seconde, qualité) et du
-curseur d'instant passent **en bulle, au survol**, pour laisser la place à
-l'image ; la qualité garde une ligne, qui dit ce que donne celle qui est
-choisie. Un rendu terminé ne laisse plus traîner le bouton *Arrêter* à côté
-de *Télécharger*.
+Corrigé au passage :
+
+- le **patinage de bande** écrivait sa valeur sous *taille de la machine*, et
+  la **longueur d'une tranche** sous *lignes de tube* — deux valeurs portaient
+  le même nom dans la page ;
+- **coins assombris**, **lignes de tube** et **frange d'objectif** étaient
+  cachés tant que la texture de la dalle restait sur *noir*, alors qu'ils
+  valent pour toutes : ils ont leur groupe, « L'écran », toujours visible ;
+- cocher **chercher le décalage tout seul** ne relançait pas l'aperçu ;
+- le séquenceur affichait `sp404` au lieu de *SP-404 MKII*.
 
 ## La lueur du néon : propre, et la même de l'aperçu à la 4K
 

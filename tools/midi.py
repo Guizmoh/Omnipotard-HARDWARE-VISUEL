@@ -753,29 +753,29 @@ def raconter(cr):
         ecart = abs(cr["bpm_fichier"] - cr["bpm_morceau"]) / cr["bpm_morceau"]
         if not cr["tempo_annonce"]:
             debut = ("le fichier n'annonce pas de tempo : ses notes sont "
-                     "relues a celui du morceau (%s BPM)" % bpm)
+                     "relues à celui du morceau (%s BPM)" % bpm)
         elif ecart > 0.0005:
             debut = ("le fichier annonce %s BPM, le morceau en fait %s : ses "
                      "notes sont relues au tempo du morceau"
                      % (nb(cr["bpm_fichier"]), bpm))
         else:
-            debut = ("le fichier est au tempo du morceau (%s BPM) mais pas a "
+            debut = ("le fichier est au tempo du morceau (%s BPM) mais pas à "
                      "sa place : ses notes sont" % bpm)
-            return debut + (" posees sur sa grille, premier temps a %s s"
+            return debut + (" posées sur sa grille, premier temps à %s s"
                             % nb(cr["phase"], "%.3f"))
-        return debut + (" et posees sur sa grille, premier temps a %s s"
+        return debut + (" et posées sur sa grille, premier temps à %s s"
                         % nb(cr["phase"], "%.3f"))
     if cr["mode"] == "tel quel":
         return ("ses notes ne tombent sur aucune grille : le fichier est pris "
-                "tel quel — verifiez le BPM du morceau")
+                "tel quel — vérifiez le BPM du morceau")
     if abs(cr.get("recale", 0.0)) > 1e-4:
-        txt = ("le fichier est date en secondes, a cote de la grille du "
-               "morceau (%s BPM) : il est remis sur ses traits, decale de %s ms"
+        txt = ("le fichier est daté en secondes, à côté de la grille du "
+               "morceau (%s BPM) : il est remis sur ses traits, décalé de %s ms"
                % (bpm, nb(cr["recale"] * 1000.0, "%+.0f")))
     else:
-        txt = ("le fichier tombe deja sur la grille du morceau (%s BPM) : il "
+        txt = ("le fichier tombe déjà sur la grille du morceau (%s BPM) : il "
                "est pris tel quel" % bpm)
     if abs(cr["etirement"] - 1.0) > 1e-5:
-        txt += (", et etire de %s %% pour en suivre le tempo exact"
+        txt += (", et étiré de %s %% pour en suivre le tempo exact"
                 % nb((cr["etirement"] - 1.0) * 100.0, "%+.3f"))
     return txt
