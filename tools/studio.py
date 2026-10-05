@@ -40,12 +40,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mpc_performance import (  # noqa: E402
     analyze, frame_performance, probe_duration, render_video, _renderer,
     compute_spectro, preparer_midi, grille_du_morceau, RenduArrete,
+    lire_effets, poser_effets, retablir_effets, EFFETS_PLACABLES, FONDU_EFFET,
 )
 import midi                                                   # noqa: E402
 from omnipotard_intro import (  # noqa: E402
     BACKGROUNDS, PALETTES, hex_to_rgb, rgb_to_hex, load_backdrop, is_video,
     menage_fonds, apercu_fonds, genre_fond, BOUCLES_FOND, plan_fonds,
-    _durees_fonds,
+    _durees_fonds, _image_fond, LecteurFond,
     VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs, MACHINES,
     NOMS_MACHINES, COULEURS_COUPS, TEXTURES_TOUCHES, MODES_TRAIT,
     compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
@@ -97,7 +98,10 @@ BLOC = 1 * MO                           # on lit et on ecrit par blocs
 # --------------------------------------------------------------------------
 
 def png_bytes(img):
-    """Encode un tableau (h, w, 3) uint8 en PNG, sans dependance."""
+    """Encode un tableau (h, w, 3) uint8 en PNG, sans dependance.
+
+    Compression au plus rapide : l'image ne quitte pas la machine, sa taille
+    ne compte pas, et le niveau 6 coutait autant que le dessin lui-meme."""
     h, w, _ = img.shape
     rows = np.hstack([np.zeros((h, 1), np.uint8), img.reshape(h, w * 3)])
     def chunk(tag, data):
@@ -105,8 +109,51 @@ def png_bytes(img):
         return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c))
     return (b"\x89PNG\r\n\x1a\n"
             + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(rows.tobytes(), 6))
+            + chunk(b"IDAT", zlib.compress(rows.tobytes(), 1))
             + chunk(b"IEND", b""))
+
+
+def jpeg_bytes(img, qualite=82):
+    """Une image en JPEG, pour l'ecoute en direct : cinq fois plus vite
+    encodee qu'en PNG. Sans pillow, on retombe sur le PNG."""
+    try:
+        import io
+        from PIL import Image
+    except ImportError:
+        return png_bytes(img), "image/png"
+    tampon = io.BytesIO()
+    Image.fromarray(img).save(tampon, "JPEG", quality=qualite)
+    return tampon.getvalue(), "image/jpeg"
+
+
+# le son du morceau, tel que le navigateur le lit
+GENRES_AUDIO = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".flac": "audio/flac",
+                ".m4a": "audio/mp4", ".mp4": "audio/mp4", ".aac": "audio/aac",
+                ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg",
+                ".webm": "audio/webm"}
+
+
+def wav_du_morceau(tr):
+    """Le morceau decode, en WAV, pour un navigateur qui ne lit pas le
+    fichier d'origine (un aiff, un wma) : ecrit une fois, a cote des morceaux."""
+    a = tr["info"]["_audio"]
+    chemin = os.path.join(WORKDIR, "ecoute", "%s.wav" % tr["id"])
+    if not os.path.exists(chemin):
+        os.makedirs(os.path.dirname(chemin), exist_ok=True)
+        st = np.asarray(a["stereo"], dtype="<i2")
+        donnees = st.tobytes()
+        canaux = st.shape[1] if st.ndim == 2 else 1
+        sr = int(a["sr"])
+        tete = (b"RIFF" + struct.pack("<I", 36 + len(donnees)) + b"WAVEfmt "
+                + struct.pack("<IHHIIHH", 16, 1, canaux, sr, sr * canaux * 2,
+                              canaux * 2, 16)
+                + b"data" + struct.pack("<I", len(donnees)))
+        provisoire = chemin + ".part"
+        with open(provisoire, "wb") as f:
+            f.write(tete)
+            f.write(donnees)
+        os.replace(provisoire, chemin)
+    return chemin
 
 
 def derive_palette(hexcol):
@@ -231,6 +278,8 @@ def look_from(q):
         "midi_tempo": 1.0 + float(q.get("midiTempo", 0.0)) / 100.0,
         "midi_type": "batterie" if q.get("midiType") == "batterie" else "piano",
         "midi_cale": _coche(q.get("midiCale")),
+        # les effets places sur la frise : des blocs de temps, en JSON
+        "effets": lire_effets(q.get("effets"), DECLENCHEURS),
         "nettete": float(q.get("nettete", 1.0)),
         "taille": float(q.get("taille", 1.0)),
         "presence": float(q.get("presence", 1.0)),
@@ -537,6 +586,44 @@ class Depasse(Exception):
     """Un apercu demande puis remplace par un autre avant d'etre dessine."""
 
 
+class FondsDirect:
+    """Les fonds de l'ecoute en direct : une video se lit a la suite, par un
+    lecteur qui reste ouvert (LecteurFond), une photo se garde telle quelle.
+    Sans cela chaque image du direct relancait ffmpeg sur le fond, et la
+    video de fond divisait la cadence par trois. Un lecteur qui n'a pas servi
+    depuis quelques secondes est ferme."""
+
+    OUBLI = 4.0
+
+    def __init__(self):
+        self.lecteurs = {}            # (chemin, l, h, flou) -> [lecteur, vu]
+        self.photos = {}              # (chemin, l, h, flou) -> [image, vu]
+
+    def lire(self, path, aw, ah, seek, blur):
+        cle = (path, aw, ah, round(float(blur), 3))
+        maintenant = time.time()
+        g = genre_fond(path)
+        if g[0] != "video":
+            if cle not in self.photos:
+                self.photos[cle] = [_image_fond(path, aw, ah, 0.0, blur), 0.0]
+            self.photos[cle][1] = maintenant
+            return self.photos[cle][0].copy()
+        if cle not in self.lecteurs:
+            self.lecteurs[cle] = [LecteurFond(path, aw, ah, blur, g[1], g[2]), 0.0]
+        self.lecteurs[cle][1] = maintenant
+        return self.lecteurs[cle][0].image(seek)
+
+    def menage(self, tout=False):
+        limite = float("inf") if tout else time.time() - self.OUBLI
+        for cle, (lect, vu) in list(self.lecteurs.items()):
+            if vu < limite:
+                lect.fermer()
+                del self.lecteurs[cle]
+        for cle, (_, vu) in list(self.photos.items()):
+            if vu < limite:
+                del self.photos[cle]
+
+
 class Studio:
     """Garde en memoire ce qui coute cher a recalculer.
 
@@ -557,6 +644,7 @@ class Studio:
         # dessus : on n'en dessine qu'un a la fois.
         self.draw = threading.Lock()
         self.shot_seq = 0         # numero du dernier apercu demande
+        self.direct = FondsDirect()   # les fonds de l'ecoute en direct
 
     @staticmethod
     def frappes(info):
@@ -574,7 +662,8 @@ class Studio:
         tid = "%x" % (abs(hash((path, os.path.getsize(path)))) & 0xFFFFFFFF)
         info = analyze(path, 0.0, None)
         with self.lock:
-            self.tracks[tid] = {"path": path, "name": name, "info": info}
+            self.tracks[tid] = {"id": tid, "path": path, "name": name,
+                                "info": info}
         return tid, info
 
     def track(self, tid):
@@ -721,7 +810,9 @@ class Studio:
                         # main : l'un se relit, l'autre se lit dans un fichier
                         "machines", "midi", "midi_offset", "midi_cale",
                         "midi_tempo", "midi_type", "midi_bpm",
-                        "midi_tel_quel")
+                        "midi_tel_quel",
+                        # les blocs de la frise se posent apres tout le reste
+                        "effets")
         # La taille se pose avant l'allure : c'est elle qui decide du creux
         # que la texture garde derriere la machine, et set_look le recalcule.
         r.taille = float(kw["taille"])
@@ -764,7 +855,9 @@ class Studio:
 
         # Le spectrogramme est calcule a partir du son, pas repose comme une
         # couleur : on ne le refait que lorsqu'on l'allume pour la premiere fois.
-        if kw["spectro"] > 0.01 and getattr(r, "spec", None) is None:
+        if (kw["spectro"] > 0.01 or any(e["e"] == "spectro" and e["v"] > 0.01
+                                        for e in kw["effets"])) \
+                and getattr(r, "spec", None) is None:
             r.spec, r.spec_fps = compute_spectro(
                 tr["info"]["_audio"]["mono"], tr["info"]["_audio"]["sr"])
         r.spectro = kw["spectro"]
@@ -776,8 +869,12 @@ class Studio:
         # plutot que de detailler tout le fichier, ce que le rendu fera.
         r._split_t = None            # le classement depend de split_count
         bd = kw["backdrop"]
+        # L'ecoute en direct demande des images a la suite : ses videos de
+        # fond se lisent d'un trait, et suivent au centieme de seconde
+        direct = q.get("rapide") == "1"
         stamp = (tuple(bd or ()), w, h, kw["backdrop_strength"],
-                 kw["backdrop_clear"], kw["screen_dim"], round(float(t), 1),
+                 kw["backdrop_clear"], kw["screen_dim"],
+                 round(float(t), 2 if direct else 1),
                  kw["travel"], kw["travel_mode"], kw["backdrop_sharp"],
                  kw["taille"], kw["machine"], kw["fond_vitesse"],
                  kw["fond_boucle"], kw["fond_fondu"], kw["fond_photo"])
@@ -799,15 +896,25 @@ class Studio:
                     strength=kw["backdrop_strength"],
                     clear=kw["backdrop_clear"], scale=r.scale * r.taille,
                     screen_dim=kw["screen_dim"], ecran=r.ecran,
-                    travel=kw["travel"], travel_mode=kw["travel_mode"])
+                    travel=kw["travel"], travel_mode=kw["travel_mode"],
+                    lire=self.direct.lire if direct else None)
                 r._bd_stamp = stamp
             r.backdrop = r._bd
         else:
             r.backdrop, r._bd, r._bd_stamp = None, None, None
+        # les lecteurs que l'ecoute n'a plus demandes depuis un moment
+        self.direct.menage()
         dur = tr["info"]["duration"]
         # l'apercu montre le morceau tel qu'il joue, sans les fondus des bords
         t = max(0.6, min(float(t), dur - 0.8))
-        return frame_performance(r, t, dur + 10.0)
+        # les effets places sur la frise, une fois tous les reglages poses :
+        # le moteur est garde d'un apercu a l'autre, on le rend tel qu'on l'a
+        # trouve
+        poser_effets(r, kw["effets"])
+        try:
+            return frame_performance(r, t, dur + 10.0)
+        finally:
+            retablir_effets(r)
 
     # ---- rendu
     def start_job(self, q):
@@ -968,6 +1075,11 @@ class Handler(BaseHTTPRequestHandler):
     # connexion au nez. C'est ce qui transformait « fichier trop gros » en
     # « Failed to fetch », un message qui ne dit rien a personne.
     protocol_version = "HTTP/1.1"
+    # Chaque reponse part tout de suite. Sinon le systeme retient la fin
+    # d'une image le temps que le navigateur accuse reception du debut, ce
+    # qu'il fait avec 40 ms de retard : l'ecoute en direct perdait ainsi la
+    # moitie de ses images.
+    disable_nagle_algorithm = True
 
     def handle_one_request(self):
         self._begun = False          # une connexion peut servir plusieurs fois
@@ -1062,8 +1174,10 @@ class Handler(BaseHTTPRequestHandler):
         self._begun = True
         try:
             self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
+            # une reponse vide (204) n'annonce ni genre ni longueur
+            if code != 204:
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
             if "Cache-Control" not in (extra or {}):
                 self.send_header("Cache-Control", "no-store")
             for k, v in (extra or {}).items():
@@ -1200,11 +1314,21 @@ class Handler(BaseHTTPRequestHandler):
                                for k, v in STYLES.items()},
                     "mes": lire_mes_reglages(),
                     "aide": AIDE, "compte": COMPTE,
+                    # les effets qu'on peut limiter a un passage de la frise :
+                    # s'ils partent sur un instrument, s'ils vont par crans
+                    "placables": {k: {"inst": bool(v[1]), "entier": bool(v[2])}
+                                  for k, v in EFFETS_PLACABLES.items()},
+                    "fondu_effet": FONDU_EFFET,
                 })
             if u.path == "/still":
                 q["curve"] = q.get("curve", "1") == "1"
                 img = STUDIO.still(q["track"], float(q.get("t", 0.0)), q,
                                    int(q.get("w", 640)), int(q.get("h", 360)))
+                # l'ecoute en direct demande des images a la chaine : en JPEG,
+                # cinq fois plus vite encodees
+                if q.get("rapide") == "1":
+                    corps, genre = jpeg_bytes(img)
+                    return self._send(200, genre, corps)
                 return self._send(200, "image/png", png_bytes(img))
             if u.path == "/instant_vignette":
                 # L'instant ou prendre les vignettes des styles : un coup de
@@ -1299,8 +1423,22 @@ class Handler(BaseHTTPRequestHandler):
             # ---- la frise sous l'apercu
             if u.path == "/onde":
                 tr = STUDIO.track(q["track"])
-                return self._json(dict(STUDIO.onde(tr),
-                                       duree=float(tr["info"]["total"])))
+                g = STUDIO.grille(tr)
+                return self._json(dict(
+                    STUDIO.onde(tr), duree=float(tr["info"]["total"]),
+                    # les temps du morceau : les blocs d'effets s'y aimantent
+                    grille={"temps": float(g["temps"]),
+                            "phase": float(g["phase"]),
+                            "sure": bool(g.get("phase_sure"))}))
+            if u.path == "/audio":
+                # Le son du morceau, pour l'ecouter dans la page : le fichier
+                # depose, par tranches (le lecteur saute ou on clique), ou sa
+                # version decodee si le navigateur ne lit pas l'original.
+                tr = STUDIO.track(q["track"])
+                ext = os.path.splitext(tr["path"])[1].lower()
+                if q.get("wav") == "1" or ext not in GENRES_AUDIO:
+                    return self._fichier(wav_du_morceau(tr), "audio/wav")
+                return self._fichier(tr["path"], GENRES_AUDIO[ext])
             if u.path == "/notes":
                 # Les notes telles que le moteur les jouera : posees sur la
                 # grille du morceau par le meme calcul que l'apercu. La page
@@ -1381,8 +1519,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._fichier(job["out"], genre, entete)
             self._fail("page inconnue", 404)
         except Depasse:
-            # l'apercu suivant est deja en route : celui-ci n'a plus lieu d'etre
-            self._send(409, "text/plain; charset=utf-8", b"apercu depasse")
+            # L'apercu suivant est deja en route : celui-ci n'a plus lieu
+            # d'etre. Une reponse vide plutot qu'une erreur (409) : le
+            # navigateur notait chacune dans sa console, et l'ecoute en
+            # direct en laisse passer a chaque arret.
+            self._send(204, "text/plain; charset=utf-8", b"")
         except Exception as e:                            # noqa: BLE001
             traceback.print_exc()
             self._fail(e, 500)
@@ -2005,8 +2146,12 @@ PAGE = r"""<!doctype html>
     border-radius:var(--r);overflow:hidden}
   #lecture{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 10px;
     border-bottom:1px solid var(--lig)}
-  #lire{display:flex;align-items:center;gap:8px;height:32px;padding:0 14px}
-  #lire .ic{width:12px;height:12px}
+  /* ecouter : le bouton rond, le seul en bleu de la barre */
+  #ecoute{width:34px;height:34px;padding:0;border-radius:50%;display:grid;place-items:center}
+  #ecoute .ic{width:13px;height:13px}
+  #ecoute.on{background:var(--ok);box-shadow:0 0 0 3px rgba(61,220,151,.18)}
+  #lire{display:flex;align-items:center;gap:8px;height:32px;padding:0 12px}
+  #lire .ic{width:14px;height:14px}
   #clipDur{width:70px;height:32px}
   #clipprog{display:flex;align-items:center;gap:8px}
   #clipprog .bar{width:110px;margin:0}
@@ -2030,6 +2175,79 @@ PAGE = r"""<!doctype html>
   #friseVide{position:absolute;inset:0;margin:0;display:flex;align-items:center;
     justify-content:center;padding:0 20px;text-align:center;color:var(--tx3);
     font-size:12px;pointer-events:none}
+  #effetsVider{position:absolute;left:7px;z-index:2;height:18px;padding:0 5px;
+    border-radius:4px;background:transparent;border:1px solid transparent;box-shadow:none;
+    color:var(--tx3);font-size:10px;font-weight:500}
+  #effetsVider:hover{background:transparent;color:var(--err);border-color:var(--lig2)}
+
+  /* l'apercu en direct, ses masques et ce qu'ils disent */
+  #ecranDirect{position:absolute;inset:0;width:100%;height:100%;display:block;background:#000}
+  #masques{position:absolute;top:8px;right:8px;z-index:3;display:flex;gap:4px;
+    opacity:.55;transition:opacity .15s}
+  .ecran:hover #masques,#masques:focus-within,#masques.actif{opacity:1}
+  #ecran.vide #masques{display:none}
+  #masques button{display:flex;align-items:center;gap:5px;height:24px;padding:0 8px;
+    border-radius:6px;background:rgba(10,12,15,.8);border:1px solid var(--lig2);
+    box-shadow:none;color:var(--tx2);font-size:11px;font-weight:500}
+  #masques button .ic{width:13px;height:13px}
+  #masques button:hover{color:var(--tx);border-color:var(--lig3)}
+  #masques button.on{background:var(--acc);border-color:var(--acc);color:var(--acc-tx)}
+  #masques button:disabled{opacity:.45;color:var(--tx3);cursor:default}
+  #direct,#masqueAvis{position:absolute;left:8px;z-index:3;display:flex;align-items:center;
+    gap:6px;height:24px;padding:0 9px;border-radius:6px;background:rgba(10,12,15,.8);
+    border:1px solid var(--lig2);color:var(--tx2);pointer-events:none;white-space:nowrap}
+  #direct{top:8px;font:500 11px var(--m)}
+  #direct::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 8px var(--ok)}
+  #masqueAvis{bottom:8px;font-size:11px;max-width:calc(100% - 16px);overflow:hidden;
+    text-overflow:ellipsis}
+
+  /* la poignee d'un effet : on l'attrape pour le poser sur la frise */
+  .ctl-glisse{position:absolute;left:-16px;top:9px;width:14px;height:20px;padding:0;
+    display:grid;place-items:center;border-radius:4px;background:transparent;border:none;
+    box-shadow:none;color:var(--tx3);opacity:.4;cursor:grab;touch-action:none}
+  .ctl-glisse .ic{width:12px;height:12px}
+  .ctl:hover .ctl-glisse,.ctl-glisse:focus-visible{opacity:1}
+  .ctl-glisse:hover{background:var(--pan3);color:var(--acc)}
+  /* l'effet est deja pose quelque part sur la frise */
+  .ctl-glisse.pose{color:var(--acc);opacity:.85}
+  body.glisse,body.glisse *{cursor:grabbing!important;user-select:none}
+  #glisse{position:fixed;z-index:120;pointer-events:none;display:flex;align-items:center;
+    gap:8px;padding:5px 10px;border-radius:7px;background:#1a2028;border:1px solid var(--lig3);
+    box-shadow:var(--ombre);font-size:12px;color:var(--tx);white-space:nowrap;
+    transform:translate(14px,-50%)}
+  #glisse i{width:9px;height:9px;border-radius:3px;flex:none}
+  #glisse b{font-weight:500}
+  #glisse span{font:400 11px var(--m);color:var(--tx3)}
+  #glisse.sur{border-color:var(--acc)}
+  #glisse.sur span{color:var(--acc)}
+
+  /* le bloc choisi sur la frise : son intensite, son instrument, ses bornes */
+  #blocInsp{position:fixed;z-index:95;width:316px;padding:12px 12px 10px;
+    border-radius:var(--r);background:#1a2028;border:1px solid var(--lig2);
+    box-shadow:var(--ombre);font-size:12px;color:var(--tx2)}
+  #blocInsp::after{content:"";position:absolute;left:var(--fl,50%);bottom:-6px;width:10px;
+    height:10px;margin-left:-5px;background:#1a2028;border:1px solid var(--lig2);
+    border-top:none;border-left:none;transform:rotate(45deg)}
+  #blocInsp.dessous::after{bottom:auto;top:-6px;transform:rotate(-135deg)}
+  #blocInsp .tete{display:flex;align-items:center;gap:8px}
+  #blocInsp .tete i{width:9px;height:9px;border-radius:3px;flex:none}
+  #blocInsp .tete b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    color:var(--tx);font-weight:600}
+  #blocInsp .ferme{flex:none;margin-left:auto;width:22px;height:22px;padding:0;
+    border-radius:50%;background:transparent;border:1px solid var(--lig2);box-shadow:none;
+    color:var(--tx3);font-size:12px;line-height:1}
+  #blocInsp .ferme:hover{border-color:var(--acc);color:var(--acc)}
+  #blocInsp .quand{margin:3px 0 4px 17px;font:400 11px var(--m);color:var(--tx3)}
+  #blocInsp .ctl{grid-template-columns:minmax(0,32%) minmax(0,1fr) 58px;min-height:34px}
+  #blocInsp .ctl.liste>select{grid-column:2/4}
+  #blocInsp .bornes{display:grid;grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr) auto;
+    gap:6px;align-items:center;margin-top:8px;font-size:11.5px;color:var(--tx3)}
+  #blocInsp .bornes input{height:26px;font:400 11.5px var(--m)}
+  #blocInsp .boutons{margin-top:10px}
+  #blocInsp .boutons button{flex:1}
+  #blocInsp button.danger:hover{border-color:var(--err);color:var(--err)}
+  #blocInsp .note{margin:8px 0 0;font-size:11px;line-height:1.45;color:var(--tx3)}
 
   /* l'export et les sources */
   #bas{grid-area:bas;display:grid;gap:12px;align-items:start;
@@ -2459,6 +2677,7 @@ PAGE = r"""<!doctype html>
     <div class="explications" hidden>
       <p>Les listes proposent quatre sortes de déclencheurs. <b>Instruments</b> : la batterie est reconnue à l'analyse, « caisse claire » veut donc vraiment dire caisse claire. <b>Bandes de fréquences</b> : une hauteur et non un instrument — elles attrapent aussi ce qui n'est pas percussif, une nappe qui monte, une voix, un souffle de cymbale. <b>Hasard</b> : tiré au sort, mais posé sur la grille du morceau, donc jamais à contretemps. <b>Un coup sur deux</b> : deux effets posés l'un sur « 1 sur 2 » et l'autre sur « l'autre sur 2 » ne peuvent jamais partir ensemble — c'est la réponse quand tout tombe en même temps.</p>
       <p>Pour une vraie explosion d'étincelles, montez le nombre, la vitesse et la durée ensemble. Au-delà de quelques centaines de braises, le tracé de chacune est écourté pour tenir un budget de points par image : c'est ce qui permet d'en lancer des dizaines de milliers sans que le rendu s'effondre.</p>
+      <p>Chacun peut aussi n'agir que sur un passage : attrapez-le par sa poignée ⠿, à gauche de son nom, et lâchez-le sur la frise sous l'aperçu. Le curseur ci-dessous vaut alors pour le reste du morceau — à zéro, l'effet n'existe que dans ses blocs.</p>
     </div>
     <div class="groupe">L'image</div>
     <div class="ctl"><label for="punch">zoom d'impact</label>
@@ -2497,6 +2716,7 @@ PAGE = r"""<!doctype html>
       <p>Les mêmes pannes que sur les paroxysmes, mais déclenchées par ce qui est joué. Elles s'appliquent à l'image finie, juste avant la déformation du tube : d'où leur air de signal cassé plutôt que d'effet dessiné.</p>
       <p>Le <b>bégaiement</b> décroche l'image du son : elle rejoue en boucle un bout très court pris à l'instant du coup. Une boucle plus courte qu'une image donne un gel pur ; deux ou trois images donnent un sursaut répété, bien plus visible.</p>
       <p>Les <b>tranches brassées</b> ne dépendent d'aucun instrument : elles découpent le temps en blocs réguliers et les rejouent dans le désordre, pendant que le son continue tout droit. Des tranches courtes hachent, des longues désorientent.</p>
+      <p>Chacun peut aussi n'agir que sur un passage : attrapez-le par sa poignée ⠿, à gauche de son nom, et lâchez-le sur la frise sous l'aperçu. Le curseur ci-dessous vaut alors pour le reste du morceau — à zéro, l'effet n'existe que dans ses blocs.</p>
     </div>
     <div class="groupe">Coupures et décalages</div>
     <div class="ctl"><label for="tranches">bandes arrachées</label>
@@ -2554,6 +2774,7 @@ PAGE = r"""<!doctype html>
     <p class="desc">Échos d'images, teinte par instrument, spectrogramme sur la dalle.</p>
     <div class="explications" hidden>
       <p>L'<b>écho</b> redessine la machine telle qu'elle était il y a quelques centièmes, de plus en plus pâle. Les <b>couleurs par instrument</b> donnent au trait la teinte du dernier coup : rouge la grosse caisse, jaune la caisse claire, cyan le charley, violet la basse. Le <b>spectrogramme</b> déroule les trois dernières secondes du morceau sur la dalle, une ligne par bande de fréquences — baissez l'amplitude de la courbe pour bien le voir.</p>
+      <p>Chacun peut aussi n'agir que sur un passage : attrapez-le par sa poignée ⠿, à gauche de son nom, et lâchez-le sur la frise sous l'aperçu. Le curseur ci-dessous vaut alors pour le reste du morceau — à zéro, l'effet n'existe que dans ses blocs.</p>
     </div>
     <div class="ctl"><label for="echo">écho d'images</label>
       <input type="range" id="echo" min="0" max="0.85" step="0.05" value="0"><output><span id="v-ec">0.00</span></output></div>
@@ -2574,6 +2795,7 @@ PAGE = r"""<!doctype html>
     <div class="explications" hidden>
       <p>Celles-ci ne frappent sur rien : elles sont là du début à la fin. C'est ce qui sépare un accident d'une matière — un grain de pellicule qui n'apparaîtrait que sur la caisse claire ne ressemblerait à rien.</p>
       <p>La <b>cadence tenue</b> garde chaque image deux, trois ou quatre fois : la vidéo passe à 15, 10 ou 7 images par seconde sans rien ralentir. C'est le geste qui donne son air d'animation à un clip lo-fi. Le <b>halo laiteux</b> relève les noirs et étale la lumière, à l'opposé du contraste franc de l'oscilloscope.</p>
+      <p>Chacun peut aussi n'agir que sur un passage : attrapez-le par sa poignée ⠿, à gauche de son nom, et lâchez-le sur la frise sous l'aperçu. Le curseur ci-dessous vaut alors pour le reste du morceau — à zéro, l'effet n'existe que dans ses blocs.</p>
     </div>
     <div class="ctl"><label for="cadence">cadence tenue</label>
       <input type="range" id="cadence" min="0" max="5" step="1" value="0"><output><span id="v-ca">fluide</span></output></div>
@@ -2652,14 +2874,23 @@ PAGE = r"""<!doctype html>
     <div class="ecran vide" id="ecran">
       <img id="shot" alt="">
       <video id="clip" hidden loop controls playsinline></video>
+      <canvas id="ecranDirect" width="480" height="270" hidden></canvas>
       <div id="ecranVide"><i class="ic" data-ic="morceau"></i><b>Déposez un morceau ici</b>ou cliquez pour le choisir. Un MIDI, une image, une vidéo déposés ici vont aussi à leur place.</div>
+      <div id="masques">
+        <button type="button" id="masqueFond" aria-pressed="false"><i class="ic" data-ic="fonds"></i><span>fond</span></button>
+        <button type="button" id="masqueMachine" aria-pressed="false"><i class="ic" data-ic="machine"></i><span>machine</span></button>
+      </div>
+      <div id="direct" hidden>direct</div>
+      <div id="masqueAvis" hidden></div>
     </div>
     <div id="shoterr"></div>
+    <audio id="son" preload="auto"></audio>
   </div>
 
   <div id="chrono">
     <div id="lecture">
-      <button id="lire" disabled><i class="ic" data-ic="play"></i><span>Lire en mouvement</span></button>
+      <button id="ecoute" disabled title="écouter le morceau : l'aperçu suit le son (barre d'espace)" aria-label="écouter le morceau"><i class="ic" data-ic="play"></i></button>
+      <button class="ghost" id="lire" disabled title="calculer pour de bon quelques secondes, avec le son, et les jouer en boucle"><i class="ic" data-ic="film"></i><span>Lire en mouvement</span></button>
       <select id="clipDur" title="durée de l'aperçu animé"
         aria-label="durée de l'aperçu animé">
         <option value="2">2 s</option>
@@ -2692,15 +2923,20 @@ PAGE = r"""<!doctype html>
          aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
       <canvas id="friseToile"></canvas>
       <div id="friseInfo" hidden></div>
-      <p id="friseVide">La frise du morceau apparaîtra ici : le son en trois bandes, les paroxysmes, les machines, la mélodie et les fonds. Un clic y place l'aperçu.</p>
+      <button type="button" id="effetsVider" hidden title="retirer de la frise tous les effets placés (Ctrl + Z les remet)">tout retirer</button>
+      <p id="friseVide">La frise du morceau apparaîtra ici : le son en trois bandes, les paroxysmes, les effets placés, les machines, la mélodie et les fonds. Un clic y place l'aperçu.</p>
     </div>
+    <!-- les effets places sur la frise, tels que le moteur les lit -->
+    <input type="hidden" id="effets" value="[]">
   </div>
   <input type="range" id="scrub" min="0" max="100" step="0.1" value="0" disabled hidden>
   <div id="aideApercu" hidden>
     <p class="titre">L'aperçu</p>
     <p>L'aperçu est une vraie image du rendu, calculée avec vos réglages : ce que vous voyez ici est ce que vous obtiendrez.</p>
-    <p><b>Lire en mouvement</b> calcule pour de bon quelques secondes à partir de l'instant regardé, avec le son, et les joue en boucle. C'est la seule façon de juger ce qui bouge — bégaiement, travelling, étincelles, spectrogramme. La lecture est en 15 images par seconde pour ne pas faire attendre : le rendu final, lui, en fera 30 ou 60.</p>
-    <p><b>La frise</b> montre tout le morceau : le son en trois bandes (graves, médiums, aigus), les paroxysmes en rose, les dédoublements en jaune, le plan des machines, les notes de la mélodie et la suite des fonds. Un clic ou un glisser y place l'aperçu ; Ctrl + molette zoome, Maj + molette fait défiler ; les flèches du clavier avancent d'une seconde.</p>
+    <p><b>Écouter</b> (barre d'espace) joue le morceau dans la page, et l'aperçu le suit en plus petit, aussi vite que l'ordinateur le permet. Une vidéo de fond est ce qui coûte le plus : les boutons en haut à droite de l'aperçu masquent le fond et la machine le temps de régler. Ils ne touchent que l'aperçu, jamais l'export.</p>
+    <p><b>Lire en mouvement</b> calcule pour de bon quelques secondes à partir de l'instant regardé, avec le son, et les joue en boucle : c'est la vidéo exacte, en 15 images par seconde. Le rendu final, lui, en fera 30 ou 60.</p>
+    <p><b>Placer un effet</b> : attrapez-le dans le panneau par sa poignée ⠿, à gauche de son nom, et lâchez-le sur la frise. Il n'agit alors que sur la durée de son bloc ; ailleurs, c'est le curseur du panneau qui compte. Un bloc s'aimante aux temps du morceau (Alt : librement), se déplace, s'étire par ses bords ; un clic l'ouvre pour régler son intensité et son instrument. Suppr l'efface, Ctrl + Z annule.</p>
+    <p><b>La frise</b> montre tout le morceau : le son en trois bandes (graves, médiums, aigus), les paroxysmes en rose, les dédoublements en jaune, les effets placés, le plan des machines, les notes de la mélodie et la suite des fonds. Un clic ou un glisser y place l'aperçu ; Ctrl + molette zoome, Maj + molette fait défiler ; les flèches du clavier avancent d'une seconde.</p>
   </div>
 
   <div id="bas">
@@ -2793,6 +3029,31 @@ PAGE = r"""<!doctype html>
 
 <div id="bulle" role="tooltip" hidden></div>
 
+<!-- l'effet qu'on emporte du panneau vers la frise -->
+<div id="glisse" hidden></div>
+
+<!-- le bloc d'effet choisi sur la frise : pas d'identifiant sur ses champs,
+     les prereglages et les reglages enregistres ne doivent pas les voir -->
+<div id="blocInsp" role="dialog" aria-label="effet placé sur la frise" hidden>
+  <div class="tete"><i class="bi-pt"></i><b class="bi-nom"></b>
+    <button type="button" class="ferme bi-ferme" aria-label="fermer">✕</button></div>
+  <p class="quand bi-quand"></p>
+  <div class="ctl"><label>intensité</label>
+    <input type="range" class="bi-v" aria-label="intensité sur ce passage"><output class="bi-vo"></output></div>
+  <div class="ctl liste bi-inst"><label>déclenché par</label>
+    <select class="bi-on" aria-label="instrument qui déclenche l'effet sur ce passage"></select></div>
+  <div class="bornes">
+    <span>de</span><input type="number" class="bi-a" min="0" step="0.1" aria-label="début du bloc, en secondes">
+    <span>à</span><input type="number" class="bi-b" min="0" step="0.1" aria-label="fin du bloc, en secondes">
+    <span>s</span></div>
+  <p class="note bi-note" hidden>À zéro, l'effet est coupé sur ce passage, même si son curseur du panneau est monté.</p>
+  <div class="boutons">
+    <button type="button" class="ghost bi-aller">Aller au début</button>
+    <button type="button" class="ghost bi-dup">Dupliquer</button>
+    <button type="button" class="ghost danger bi-sup">Supprimer</button>
+  </div>
+</div>
+
 <script>
 const $ = s => document.querySelector(s);
 let track = null, drops = [], duration = 0, jobTimer = null, shotSeq = 0;
@@ -2810,6 +3071,8 @@ file.onchange = () => file.files[0] && upload(file.files[0]);
 
 async function upload(f) {
   $('#go').disabled = true;
+  // l'ecoute du morceau d'avant s'arrete la
+  ECOUTE.arreter(false);
   try {
     const j = await deposer('/upload', f, 'du morceau');
     track = j.track; drops = j.drops || []; duration = j.duration;
@@ -2835,13 +3098,19 @@ async function upload(f) {
     $('#go').disabled = false;
     $('#lire').disabled = false;
     for (const id of ['#toPrev', '#toDrop', '#toSplit', '#hi']) $(id).disabled = false;
+    // les effets places sur ce morceau la derniere fois, et son ecoute
+    // (par nom et par duree : deux « mix.wav » differents ne se melangent pas)
+    const retrouves = EFFETS.morceau(j.name + '|' + Math.round(j.duration));
+    ECOUTE.morceau();
     FRISE.morceau();
     majTemps();
     proposerBpm(j.bpm);
     majCalage();
     majOffset();          // le tempo et la longueur viennent d'arriver
     setStatus(j.name + ' — ' + j.bpm.toFixed(1) + ' BPM, ' + drops.length +
-      ' paroxysme(s) : les glitchs tomberont là.');
+      ' paroxysme(s) : les glitchs tomberont là.' + (retrouves > 1
+        ? ' Les ' + retrouves + ' effets placés la dernière fois sur ce morceau sont revenus.'
+        : retrouves ? " L'effet placé la dernière fois sur ce morceau est revenu." : ''));
     shot();
   } catch (e) { setStatus('echec : ' + e.message, true); }
 }
@@ -2917,6 +3186,8 @@ function params() {
     taille: $('#taille').value, presence: $('#presence').value,
     neon: $('#neon').value, reflet: $('#reflet').value,
     tube: $('#tube').value, bgAnim: $('#bgAnim').value,
+    // les effets places sur la frise, en blocs de temps
+    effets: $('#effets').value,
     curve: $('#curve').checked ? '1' : '0', w: 960, h: 540,
   });
   return p;
@@ -2991,6 +3262,9 @@ function shot() {
   // la couleur de l'encre ne sert qu'hors du neon
   if ($('#encreBloc')) $('#encreBloc').hidden = $('#modeTrait').value === 'neon';
   if (!track) return;
+  // pendant l'ecoute, chaque image demandee relit les reglages du moment :
+  // une image fixe en plus ne ferait que lui disputer le moteur
+  if (ECOUTE && ECOUTE.actif()) return;
   rendreLImage();
   apercuARefaire = true;
   if (!apercuEnVol) { clearTimeout(pending); pending = setTimeout(calculerApercu, 25); }
@@ -3014,8 +3288,9 @@ function calculerApercu() {
   minuteurCalcul = setTimeout(() => $('#shot').classList.add('calcul'), 450);
   // On passe par fetch plutot que par img.src : quand le serveur refuse,
   // une balise <img> ne donne qu'une image cassee, sans dire pourquoi.
-  fetch('/still?' + params().toString()).then(async r => {
-    if (r.status === 409) return;          // apercu abandonne, un autre arrive
+  // les masques de l'apercu : la video de fond, la machine
+  fetch('/still?' + MASQUES.appliquer(params()).toString()).then(async r => {
+    if (r.status === 204) return;          // apercu abandonne, un autre arrive
     if (!r.ok) {
       let m = 'erreur ' + r.status;
       try { m = (await r.json()).error || m; } catch (e) { /* pas du JSON */ }
@@ -3026,6 +3301,8 @@ function calculerApercu() {
     if (vieux) URL.revokeObjectURL(vieux);
     $('#shot').dataset.blob = url;
     $('#shot').src = url;
+    // la derniere image de l'ecoute restait affichee jusqu'a celle-ci
+    if (!ECOUTE.actif()) ECOUTE.cacher();
     $('#ecranVide').hidden = true;
     $('#ecran').classList.remove('vide');
     $('#shoterr').classList.remove('on');
@@ -3227,6 +3504,8 @@ function majFonds() {
                                : 'Déposer une ou plusieurs images ou vidéos';
   FRISE.chargerFonds();
   majPoints();
+  // sans fond, le bouton qui le masque n'a rien a masquer
+  MASQUES.maj();
 }
 function vitesseFond() { return Math.pow(2, +$('#fondVitesse').value); }
 $('#fondVitesse').oninput = () => {
@@ -3522,7 +3801,8 @@ for (const b of document.querySelectorAll('#midiPas button')) {
 $('#title').oninput  = shot;
 $('#bgStrength').oninput = e => { $('#v-str').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#bgClear').oninput   = e => { $('#v-clr').textContent = (+e.target.value).toFixed(2); shot(); };
-$('#scrub').oninput     = () => { majTemps(); shot(); };
+// pendant l'ecoute, le son saute avec : un clic sur la frise y mene aussi
+$('#scrub').oninput     = () => { majTemps(); ECOUTE.chercher(+$('#scrub').value); shot(); };
 
 /* Le dedoublement ne tombe que sur les 2 ou 3 plus gros coups de tout le
    morceau : sans ce bouton on peut chercher longtemps avant d'en voir un. */
@@ -3588,7 +3868,8 @@ function reglagesDuClip() {
   const secondes = +$('#clipDur').value;
   const depart = Math.max(0, Math.min(+$('#scrub').value,
                                       Math.max(0, duration - secondes)));
-  const body = Object.fromEntries(params());
+  // les masques valent aussi pour l'extrait : c'est un apercu
+  const body = Object.fromEntries(MASQUES.appliquer(params()));
   delete body.t; delete body.w; delete body.h;
   Object.assign(body, {
     track, start: depart, duration: secondes,
@@ -3601,6 +3882,8 @@ function reglagesDuClip() {
 
 $('#lire').onclick = async () => {
   if (!track) return;
+  // l'extrait a son propre son : l'ecoute s'efface devant lui
+  ECOUTE.arreter(false);
   clearTimeout(clipTimer);
   // on rend la main a l'image fixe pendant le calcul : laisser l'ancien
   // extrait tourner ferait croire que rien ne se passe
@@ -3654,6 +3937,7 @@ function suivreClip(id) {
       const v = $('#clip');
       v.src = '/download?inline=1&id=' + id;
       v.hidden = false; $('#shot').hidden = true;
+      ECOUTE.cacher();
       $('#clipprog').hidden = true; $('#lire').disabled = false;
       // le son demande parfois un geste de l'utilisateur : a defaut on joue
       // sans, plutot que de laisser une image arretee
@@ -3948,6 +4232,8 @@ fetch('/config').then(r => r.json())
     majFrequences();
     majExemples();
     FRISE.noms(Object.fromEntries((c.machines || []).map(m => [m.cle, m.nom])));
+    // les effets que le moteur sait limiter a un passage : chacun sa poignee
+    EFFETS.placables(c.placables || {}, c.fondu_effet);
 
     /* ---- prereglages : ils reposent tous les curseurs d'un coup ---- */
     PRESETS = c.presets || {};
@@ -4204,6 +4490,9 @@ var ICONES = {
   morceau: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
   melodie: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v9M12 4v16M16 4v9"/>',
   play: '<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>',
+  pause: '<rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/>',
+  film: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7.5 5v14M16.5 5v14M3 9.7h4.5M3 14.3h4.5M16.5 9.7H21M16.5 14.3H21"/>',
+  poignee: '<g fill="currentColor" stroke="none"><circle cx="9" cy="5.5" r="1.8"/><circle cx="15" cy="5.5" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18.5" r="1.8"/><circle cx="15" cy="18.5" r="1.8"/></g>',
   precedent: '<path d="M19 5 9 12l10 7zM5 5v14"/>',
   suivant: '<path d="m5 5 10 7-10 7zM19 5v14"/>',
   dedoublement: '<path d="M3 13c3-6 6-6 8-2s5 4 8-2"/><path d="M5 18c3-6 6-6 8-2s5 4 8-2" opacity=".55"/>',
@@ -4404,12 +4693,14 @@ function majTemps() {
   $('#frise').setAttribute('aria-valuetext', tc(t));
   FRISE.tetes();
 }
-// un saut vers un instant : la frise le garde en vue
+// un saut vers un instant : la frise le garde en vue, et le son y saute
+// pendant l'ecoute
 function allerA(t) {
   const s = $('#scrub');
   s.value = Math.max(0, Math.min(+s.max, t));
   majTemps();
   FRISE.montrer(+s.value);
+  ECOUTE.chercher(+s.value);
 }
 
 /* ---------- la frise : le morceau d'un coup d'oeil ----------
@@ -4450,6 +4741,9 @@ var FRISE = (() => {
   let noms = {}, v0 = 0, v1 = 1, largeur = 0, haut = VIDE, dpr = 1, pistes = [];
   let prise = false, survol = null, clip = null, video = null, rafVideo = 0;
   let attente = 0, sale = true;
+  // la grille des temps (les blocs d'effets s'y aimantent), le bloc fantome
+  // d'un effet qu'on apporte du panneau, le bloc qu'on deplace ou etire
+  let grille = null, fantome = null, geste = null;
   let mDedo = 0, mNotes = 0, mFonds = 0, nNotes = 0, nFonds = 0;
 
   const total = () => duration || 0;
@@ -4467,11 +4761,18 @@ var FRISE = (() => {
   function tetes() { demander(); }
   function demander() { if (!attente) attente = requestAnimationFrame(peindre); }
 
+  // la piste des effets places : une rangee par chevauchement ; seule, une
+  // rangee prend toute la hauteur, et y ecrit deux lignes
+  function hautEffets() {
+    const n = EFFETS.rangs();
+    return n <= 2 ? 44 : Math.min(6 + n * 19, 120);
+  }
   // les pistes du moment, et la taille de la toile
   function mesurer() {
     pistes = [{cle: 'regle', h: HAUT.regle}];
     if (track) {
       pistes.push({cle: 'son', nom: 'Son', h: HAUT.son});
+      pistes.push({cle: 'effets', nom: 'Effets', h: hautEffets()});
       pistes.push({cle: 'machines', nom: 'Machines', h: HAUT.machines});
       if ($('#midi').value && notes && notes.length)
         pistes.push({cle: 'melodie', nom: 'Mélodie', h: HAUT.melodie});
@@ -4503,6 +4804,12 @@ var FRISE = (() => {
     ctx.drawImage(couche, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (track && total()) peindreTetes(ctx);
+    // « tout retirer », sous le nom de la piste des effets
+    const pe = piste('effets'), vider = $('#effetsVider');
+    vider.hidden = !pe || !EFFETS.liste().length;
+    if (pe) vider.style.top = (pe.y + 23) + 'px';
+    // le panneau du bloc choisi suit son bloc quand la vue bouge
+    EFFETS.placerInsp();
   }
 
   // ---- le decor : tout ce qui ne bouge pas avec la tete de lecture
@@ -4523,6 +4830,7 @@ var FRISE = (() => {
     c.beginPath(); c.rect(ETI, 0, largeur - ETI, haut); c.clip();
     peindreRegle(c, piste('regle'));
     peindreSon(c, piste('son'));
+    peindreFondEffets(c, piste('effets'));
     peindreMachines(c, piste('machines'));
     if (piste('melodie')) peindreNotes(c, piste('melodie'));
     if (piste('fonds')) peindreFonds(c, piste('fonds'));
@@ -4534,7 +4842,7 @@ var FRISE = (() => {
     for (const p of pistes) {
       if (!p.nom) continue;
       c.fillStyle = COUL.tx2;
-      c.fillText(p.nom, 12, p.cle === 'son' ? p.y + 13 : p.y + p.h / 2);
+      c.fillText(p.nom, 12, p.cle === 'son' || p.cle === 'effets' ? p.y + 13 : p.y + p.h / 2);
     }
     const son = piste('son');
     if (son) {
@@ -4722,6 +5030,181 @@ var FRISE = (() => {
     }
   }
 
+  // ---- la piste des effets places
+  // l'unite d'aimantation : le temps, ou une fraction de temps quand on a
+  // zoome (90 px au plus entre deux crans), ou plusieurs temps — une mesure,
+  // deux — quand on voit tout le morceau (6 px au moins)
+  function unite() {
+    const parS = utile() / ((v1 - v0) || 1);
+    let u = grille.temps;
+    while (u * parS > 90 && u > grille.temps / 4 + 1e-9) u /= 2;
+    while (u * parS < 6 && u < grille.temps * 64) u *= 2;
+    return u;
+  }
+  // Un instant pose sur la grille du morceau ; sans grille sure, au dixieme.
+  // Alt (libre) le laisse ou il est, au centieme ; `auTemps` le pose sur le
+  // temps le plus proche, quel que soit le zoom.
+  function aimanter(tt, libre, auTemps) {
+    if (libre) return Math.round(tt * 100) / 100;
+    if (!grille || !grille.sure || !(grille.temps > 0.05)) return Math.round(tt * 10) / 10;
+    const u = auTemps ? grille.temps : unite();
+    return grille.phase + Math.round((tt - grille.phase) / u) * u;
+  }
+  // le decor de la piste : un fond a peine plus clair, la grille des temps
+  // (une barre plus marquee toutes les quatre), et l'invite quand elle est vide
+  function peindreFondEffets(c, p) {
+    if (!p) return;
+    c.fillStyle = 'rgba(255,255,255,.018)';
+    c.fillRect(ETI, p.y, largeur - ETI, p.h - 1);
+    if (grille && grille.sure && grille.temps > 0.05) {
+      const u = unite(), fin = Math.min(v1, total());
+      const k0 = Math.ceil((v0 - grille.phase) / u), k1 = Math.floor((fin - grille.phase) / u);
+      for (let k = k0; k <= k1 && k - k0 < 4000; k++) {
+        const s = grille.phase + k * u, temps = Math.round((s - grille.phase) / grille.temps);
+        c.fillStyle = temps % 4 === 0 ? 'rgba(255,255,255,.075)' : 'rgba(255,255,255,.03)';
+        c.fillRect(Math.round(x(s)), p.y, 1, p.h - 1);
+      }
+    }
+    if (!EFFETS.liste().length) {
+      c.font = '400 11px ' + C('--f');
+      c.textBaseline = 'middle';
+      c.fillStyle = COUL.tx3;
+      c.fillText('glissez ici un effet du panneau par sa poignée ⠿ : il n\'agira que sur ce passage',
+                 ETI + 12, p.y + p.h / 2);
+    }
+  }
+  // les blocs, peints avec les tetes : ils bougent sous la souris, et ceux que
+  // la tete de lecture traverse s'allument
+  function peindreEffets(c) {
+    const p = piste('effets');
+    if (!p) return;
+    const liste = EFFETS.liste(), sel = EFFETS.choisi(), ts = +$('#scrub').value || 0;
+    const hr = (p.h - 6) / EFFETS.rangs(), fondu = EFFETS.fondu();
+    c.save();
+    c.beginPath(); c.rect(ETI, p.y, largeur - ETI, p.h - 1); c.clip();
+    c.textBaseline = 'middle';
+    for (const b of liste) {
+      const xa = x(b.a), xb = x(b.b);
+      if (xb < ETI - 2 || xa > largeur + 2) continue;
+      const y = p.y + 3 + b.rang * hr, h = hr - 2;
+      const [f, bord, coul] = EFFETS.teinte(b.e);
+      const actif = ts >= b.a && ts < b.b, choisi = b.id === sel;
+      const xg = Math.max(ETI - 4, xa) + .5, w = Math.max(2, Math.min(largeur + 4, xb) - xg - .5);
+      c.beginPath();
+      if (c.roundRect) c.roundRect(xg, y, w, h, 4); else c.rect(xg, y, w, h);
+      c.globalAlpha = b.v > 0 ? 1 : .5;
+      c.fillStyle = f; c.fill();
+      if (actif) { c.fillStyle = 'rgba(255,255,255,.1)'; c.fill(); }
+      c.globalAlpha = 1;
+      // un effet continu entre et sort en fondu : on le montre
+      const lf = x(b.a + fondu) - xa;
+      if (!EFFETS.net(b.e) && lf > 3 && xb - xa > 2 * lf) {
+        for (const [g0, g1] of [[xa, xa + lf], [xb, xb - lf]]) {
+          const g = c.createLinearGradient(g0, 0, g1, 0);
+          g.addColorStop(0, 'rgba(0,0,0,.5)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+          c.fillStyle = g;
+          c.fillRect(Math.min(g0, g1), y + 1, Math.abs(g1 - g0), h - 2);
+        }
+      }
+      c.beginPath();
+      if (c.roundRect) c.roundRect(xg, y, w, h, 4); else c.rect(xg, y, w, h);
+      c.setLineDash(b.v > 0 ? [] : [3, 3]);
+      c.lineWidth = choisi ? 1.6 : 1;
+      c.strokeStyle = choisi ? '#ffffff' : bord;
+      if (actif && !choisi) { c.shadowColor = bord; c.shadowBlur = 9; }
+      c.stroke();
+      c.shadowBlur = 0; c.setLineDash([]);
+      // le nom, puis la valeur et l'instrument : sur deux lignes s'il y a la
+      // place, sinon a la suite
+      if (w > 28) {
+        c.save();
+        c.beginPath(); c.rect(xg + 5, y, w - 10, h); c.clip();
+        const x0 = Math.max(xg, ETI) + 7, det = EFFETS.detail(b);
+        c.fillStyle = coul;
+        if (h >= 30) {
+          c.font = '600 11px ' + C('--f');
+          c.fillText(EFFETS.nom(b.e), x0, y + h / 2 - 6.5);
+          c.font = '400 10px ' + C('--m');
+          c.globalAlpha = .8;
+          c.fillText(det, x0, y + h / 2 + 7);
+          c.globalAlpha = 1;
+        } else {
+          c.font = '500 10.5px ' + C('--f');
+          c.fillText(EFFETS.nom(b.e) + '  ·  ' + det, x0, y + h / 2 + .5);
+        }
+        c.restore();
+      }
+      // les poignees du bloc choisi : c'est par ses bords qu'on l'etire
+      if (choisi && w > 16) {
+        c.fillStyle = '#ffffff';
+        c.fillRect(xg + 2.5, y + h / 2 - 5, 2, 10);
+        c.fillRect(xg + w - 4.5, y + h / 2 - 5, 2, 10);
+      }
+    }
+    if (fantome) {
+      const xa = x(fantome.a), xb = x(fantome.b);
+      c.setLineDash([4, 3]);
+      c.fillStyle = 'rgba(56,189,248,.16)';
+      c.strokeStyle = COUL.acc;
+      c.beginPath(); c.rect(xa + .5, p.y + 3.5, Math.max(2, xb - xa - 1), p.h - 8);
+      c.fill(); c.stroke();
+      c.setLineDash([]);
+    }
+    c.restore();
+    // le debut du bloc qu'on apporte, sur toute la hauteur : on voit sur quel
+    // coup du son il tombe
+    if (fantome) {
+      c.fillStyle = 'rgba(56,189,248,.55)';
+      c.fillRect(Math.round(x(fantome.a)), HAUT.regle, 1, haut - HAUT.regle);
+    }
+  }
+
+  // le bloc sous le pointeur, et la partie prise : le corps, ou un bord
+  function blocSous(px, py) {
+    const p = piste('effets');
+    if (!p || py < p.y || py >= p.y + p.h) return null;
+    const hr = (p.h - 6) / EFFETS.rangs(), liste = EFFETS.liste();
+    for (let i = liste.length - 1; i >= 0; i--) {
+      const b = liste[i], y = p.y + 3 + b.rang * hr;
+      if (py < y - 1 || py > y + hr - 1) continue;
+      const xa = x(b.a), xb = x(b.b), w = xb - xa;
+      if (px < xa - 3 || px > xb + 3) continue;
+      let ou = 'corps';
+      if (w >= 16) {
+        if (px - xa < 6) ou = 'debut';
+        else if (xb - px < 6) ou = 'fin';
+      } else if (w >= 6) {
+        if (px < xa) ou = 'debut';
+        else if (px > xb) ou = 'fin';
+      }
+      return {b, ou};
+    }
+    return null;
+  }
+  // deplacer ou etirer le bloc pris, aimante sur la grille
+  function bougerBloc(px, libre) {
+    const g = geste;
+    if (!g.bouge && Math.abs(px - g.x0) < 3) return;
+    if (!g.bouge) { g.bouge = true; EFFETS.memoriser(); }
+    const T = total(), dt = (px - g.x0) / utile() * (v1 - v0), MIN = 0.1;
+    let a = g.a0, b = g.b0;
+    if (g.ou === 'corps') {
+      const L = g.b0 - g.a0;
+      a = Math.max(0, Math.min(aimanter(g.a0 + dt, libre), T - L));
+      b = a + L;
+    } else if (g.ou === 'debut') {
+      a = Math.max(0, Math.min(aimanter(g.a0 + dt, libre), g.b0 - MIN));
+    } else {
+      b = Math.min(T, Math.max(aimanter(g.b0 + dt, libre), g.a0 + MIN));
+    }
+    EFFETS.deplacer(g.id, a, b);
+    info.textContent = tc(a) + ' → ' + tc(b) + '  (' + (b - a).toFixed(1) + ' s)';
+    info.hidden = false;
+    const w = info.offsetWidth, xm = (x(a) + x(b)) / 2;
+    info.style.left = Math.round(Math.max(ETI, Math.min(xm - w / 2, largeur - w - 4))) + 'px';
+    tetes();
+  }
+
   // la part du morceau que le rendu couvrira, quand elle n'est pas le tout
   function fenetreExport() {
     const dep = Math.max(0, +$('#start').value || 0), d = +$('#dur').value || 0;
@@ -4750,7 +5233,8 @@ var FRISE = (() => {
       c.fillStyle = 'rgba(56,189,248,.06)';
       c.fillRect(xa, HAUT.regle, xb - xa, haut - HAUT.regle);
     }
-    if (survol !== null && !prise) {
+    peindreEffets(c);
+    if (survol !== null && !prise && !geste) {
       c.fillStyle = 'rgba(255,255,255,.28)';
       c.fillRect(Math.round(x(survol.t)), 0, 1, haut);
     }
@@ -4780,6 +5264,11 @@ var FRISE = (() => {
       const d = pres(drops, 5), s = pres(dedo, 6);
       if (d !== undefined) txt = 'paroxysme · ' + tc(d);
       else if (s !== undefined) txt = 'dédoublement · ' + tc(s);
+    } else if (p && p.cle === 'effets') {
+      const h = blocSous(survol.px, survol.py);
+      txt = h ? EFFETS.decrire(h.b)
+              : EFFETS.liste().length ? tc(tt)
+              : 'glissez un effet du panneau jusqu\'ici · ' + tc(tt);
     } else if (p && p.cle === 'machines') {
       const pl = planMachines(), pas = +$('#passage').value || 0;
       let i = 0;
@@ -4845,19 +5334,47 @@ var FRISE = (() => {
     if (!track || e.button !== 0) return;
     const [px, py] = pos(e);
     if (px < ETI) return;
-    prise = true;
     zone.setPointerCapture(e.pointerId);
     zone.focus({preventScroll: true});
-    chercher(t(px));
     e.preventDefault();
+    // un bloc d'effet : on le choisit, et on peut le deplacer ou l'etirer.
+    // La tete de lecture ne bouge pas.
+    const h = blocSous(px, py);
+    if (h) {
+      EFFETS.choisir(h.b.id);
+      geste = {id: h.b.id, ou: h.ou, x0: px, a0: h.b.a, b0: h.b.b, bouge: false};
+      zone.style.cursor = h.ou === 'corps' ? 'grabbing' : 'ew-resize';
+      tetes();
+      return;
+    }
+    // ailleurs dans la piste des effets : on lache le bloc choisi
+    const p = pistes.find(q => py >= q.y && py < q.y + q.h);
+    if (p && p.cle === 'effets') EFFETS.choisir(null);
+    prise = true;
+    chercher(t(px));
   });
   zone.addEventListener('pointermove', e => {
     const [px, py] = pos(e);
+    if (geste) return bougerBloc(px, e.altKey);
     if (prise) chercher(t(Math.max(ETI, Math.min(largeur - MARGE, px))));
     survol = track && px >= ETI ? {t: Math.max(0, Math.min(total(), t(px))), px, py} : null;
+    // ce que la souris prendrait : un bloc a deplacer, un bord a etirer
+    if (!prise) {
+      const h = survol ? blocSous(px, py) : null;
+      zone.style.cursor = !h ? '' : h.ou === 'corps' ? 'grab' : 'ew-resize';
+    }
     majInfo(); tetes();
   });
-  const lacher = () => { prise = false; tetes(); };
+  const lacher = () => {
+    if (geste) {
+      const g = geste;
+      geste = null;
+      zone.style.cursor = '';
+      if (g.bouge) EFFETS.fini();
+      majInfo();
+    }
+    prise = false; tetes();
+  };
   zone.addEventListener('pointerup', lacher);
   zone.addEventListener('pointercancel', lacher);
   zone.addEventListener('pointerleave', () => { survol = null; info.hidden = true; tetes(); });
@@ -4899,7 +5416,7 @@ var FRISE = (() => {
   // ---- ce que la frise demande au studio
   async function morceau() {
     const tid = track;
-    onde = null; dedo = []; notes = null; plan = null;
+    onde = null; dedo = []; notes = null; plan = null; grille = null;
     v0 = 0; v1 = total();
     zone.setAttribute('aria-valuemax', String(Math.round(total())));
     majZoom(); dessiner();
@@ -4909,6 +5426,7 @@ var FRISE = (() => {
       if (tid !== track) return;
       onde = {n: j.n, par_s: j.par_s, bandes: j.bandes.map(
         b => Uint8Array.from(atob(b), ch => ch.charCodeAt(0)))};
+      grille = j.grille || null;
     } catch (e) { onde = null; }
     dessiner();
     chargerDedo(); chargerNotes(); chargerFonds();
@@ -4968,10 +5486,695 @@ var FRISE = (() => {
     const pas = () => { if (!video) return; tetes(); rafVideo = requestAnimationFrame(pas); };
     if (v) rafVideo = requestAnimationFrame(pas); else tetes();
   }
+  // l'instant sous un point de l'ecran, s'il tombe sur la frise (un peu
+  // au-dessus ou au-dessous compte encore : on lache vite), ou null
+  function sous(cx, cy) {
+    if (!track || !total()) return null;
+    const r = zone.getBoundingClientRect();
+    if (cx < r.left + ETI - 4 || cx > r.right || cy < r.top - 16 || cy > r.bottom + 16) return null;
+    return Math.max(0, Math.min(total(), t(Math.max(ETI, cx - r.left))));
+  }
+  // ou est un bloc a l'ecran, pour y accrocher son panneau
+  function rectBloc(id) {
+    const p = piste('effets'), b = EFFETS.trouver(id);
+    if (!p || !b) return null;
+    const r = zone.getBoundingClientRect(), hr = (p.h - 6) / EFFETS.rangs();
+    const xa = Math.max(ETI, Math.min(largeur, x(b.a))), xb = Math.max(ETI, Math.min(largeur, x(b.b)));
+    const y = r.top + p.y + 3 + b.rang * hr;
+    return {left: r.left + xa, right: r.left + xb, top: y, bottom: y + hr - 2,
+            haut: r.top, bas: r.bottom};
+  }
   return {dessiner, tetes, morceau, chargerDedo, chargerNotes, chargerFonds,
           montrer, zoomer, clip: poserClip, suivre,
           noms: m => { noms = m || {}; dessiner(); },
-          enLecture: () => !!clip};
+          enLecture: () => !!clip,
+          grille: () => grille, aimanter, sous, rectBloc,
+          fantome: f => { fantome = f || null; tetes(); }};
+})();
+
+/* ---------- les effets places sur la frise ----------
+
+   Un effet du panneau, glisse sur la frise par sa poignee, n'agit que sur la
+   duree de son bloc : sa valeur y remplace celle du curseur, et son
+   instrument celui de la liste. Hors des blocs, c'est le curseur qui compte
+   — a zero, l'effet n'existe que dans ses blocs. Le moteur recoit les blocs
+   en JSON (le champ cache #effets) et les relit a chaque image.
+
+   Les blocs sont gardes dans ce navigateur, par nom de morceau : on retrouve
+   les siens en redeposant le meme fichier. */
+var EFFETS = (() => {
+  const MAX = 300;
+  // une teinte par famille, comme les sections du panneau : fond, bord, texte
+  const TEINTES = {
+    reactions: ['#3b2b0d', '#c58b25', '#fde68a'],
+    avaries: ['#3d1727', '#c4587d', '#fecdd3'],
+    echo: ['#0f3431', '#31a597', '#a7f3d0'],
+    matiere: ['#1e2734', '#6d7c92', '#e2e8f0'],
+  };
+  // deux listes ne portent pas le nom de leur curseur suivi de « On »
+  const AUTRE_INST = {gridPulse: 'gridOn', bgFlash: 'flashOn'};
+  const insp = $('#blocInsp'), q = s => insp.querySelector(s);
+  let PLAC = {}, FONDU = 0.25;
+  let blocs = [], choisi = null, histo = [], refait = [], nId = 1, nRangs = 1, cle = '';
+  let prise = null;           // l'effet qu'on emporte du panneau vers la frise
+  const noms = {};
+
+  // ---- ce qu'on sait d'un effet
+  const curseur = e => $('#' + e);
+  function nom(e) {
+    if (!(e in noms)) {
+      const l = document.querySelector('label[for="' + e + '"]');
+      noms[e] = l ? l.textContent.trim() : e;
+    }
+    return noms[e];
+  }
+  function teinte(e) {
+    const s = curseur(e) && curseur(e).closest('.section');
+    return TEINTES[s ? s.dataset.section : ''] || TEINTES.matiere;
+  }
+  // la liste « sur : ... » de l'effet, s'il part sur un instrument
+  function liste(e) {
+    return PLAC[e] && PLAC[e].inst ? $('#' + (AUTRE_INST[e] || e + 'On')) : null;
+  }
+  // un instrument ou une cadence basculent net ; le reste entre en fondu
+  const net = e => !!(PLAC[e] && (PLAC[e].inst || PLAC[e].entier));
+  function texte(e, v) {
+    if (e === 'cadence') return v < 2 ? 'fluide' : Math.round(30 / v) + ' i/s';
+    const st = +(curseur(e) || {}).step || 0.01;
+    return (+v).toFixed(st < 0.01 ? 3 : st >= 1 ? 0 : 2);
+  }
+  function detail(b) {
+    if (!(b.v > 0)) return 'coupé';
+    return texte(b.e, b.v) + (b.on ? ' · ' + b.on : '');
+  }
+  function decrire(b) {
+    return nom(b.e) + ' · ' + detail(b) + ' · ' + tc(b.a) + ' → ' + tc(b.b);
+  }
+  // La valeur d'un bloc neuf : celle du curseur s'il est monte, sinon un peu
+  // moins de la moitie de sa course — assez pour se voir.
+  function valeurNeuve(e) {
+    const el = curseur(e), v = +el.value;
+    if (v > 0) return v;
+    if (e === 'cadence') return 3;
+    const lo = +el.min || 0, hi = +el.max || 1, st = +el.step || 0.01;
+    return +(Math.round((lo + 0.4 * (hi - lo)) / st) * st).toFixed(4);
+  }
+
+  // ---- les blocs
+  const trouver = id => blocs.find(b => b.id === id) || null;
+  // les rangees : un bloc va dans la premiere ou il ne chevauche personne
+  function ranger() {
+    const fins = [];
+    for (const b of [...blocs].sort((p, r) => p.a - r.a || r.b - p.b)) {
+      let k = fins.findIndex(f => f <= b.a + 1e-6);
+      if (k < 0) { k = fins.length; fins.push(0); }
+      fins[k] = b.b;
+      b.rang = k;
+    }
+    nRangs = Math.max(1, fins.length);
+  }
+  // le champ que lit le moteur, et la copie gardee pour ce morceau
+  function ecrire(garder) {
+    $('#effets').value = JSON.stringify(blocs.map(b => {
+      const o = {e: b.e, a: +b.a.toFixed(3), b: +b.b.toFixed(3), v: +(+b.v).toPrecision(4)};
+      if (b.on) o.on = b.on;
+      return o;
+    }));
+    if (garder && cle) {
+      try {
+        if (blocs.length) localStorage.setItem(cle, $('#effets').value);
+        else localStorage.removeItem(cle);
+      } catch (e) { /* la page s'en passe */ }
+    }
+    // la poignee d'un effet deja pose se voit dans le panneau
+    for (const p of document.querySelectorAll('.ctl-glisse'))
+      p.classList.toggle('pose', blocs.some(b => b.e === p.dataset.e));
+  }
+  function memoriser() {
+    histo.push(JSON.stringify(blocs));
+    if (histo.length > 100) histo.shift();
+    refait = [];
+  }
+  // apres chaque changement : les rangees, le champ, la frise et l'apercu
+  function changer() {
+    ranger();
+    ecrire(true);
+    FRISE.dessiner();
+    majInsp();
+    shot();
+  }
+  function ajouter(e, a, b) {
+    if (!PLAC[e] || !track) return null;
+    if (blocs.length >= MAX) {
+      setStatus('au plus ' + MAX + ' effets placés sur un morceau', true);
+      return null;
+    }
+    memoriser();
+    const s = liste(e);
+    const bl = {id: nId++, e, a, b, v: valeurNeuve(e), on: s ? s.value : null, rang: 0};
+    blocs.push(bl);
+    choisi = bl.id;
+    changer();
+    ouvrirInsp();
+    setStatus('« ' + nom(e) + ' » posé de ' + tc(a) + ' à ' + tc(b)
+              + ' — son intensité se règle dans la bulle, Suppr l\'enlève');
+    return bl;
+  }
+  // pendant un geste : ni rangees ni copie ; la frise et l'apercu suivent
+  function deplacer(id, a, b) {
+    const bl = trouver(id);
+    if (!bl) return;
+    bl.a = a; bl.b = b;
+    ecrire(false);
+    majInsp();
+    placerInsp();
+    shot();
+  }
+  function modifier(id, champs) {
+    const bl = trouver(id);
+    if (!bl) return;
+    Object.assign(bl, champs);
+    changer();
+  }
+  function supprimer(id) {
+    const bl = trouver(id);
+    if (!bl) return;
+    memoriser();
+    blocs = blocs.filter(b => b !== bl);
+    if (choisi === id) { choisi = null; fermerInsp(); }
+    changer();
+    setStatus('« ' + nom(bl.e) + ' » retiré de la frise — Ctrl + Z le remet');
+  }
+  function dupliquer(id) {
+    const bl = trouver(id), T = duration;
+    if (!bl) return;
+    const L = bl.b - bl.a;
+    // juste apres lui ; au bout du morceau, juste avant
+    let a = bl.b;
+    if (a + 0.1 > T) a = Math.max(0, bl.a - L);
+    memoriser();
+    const n = Object.assign({}, bl, {id: nId++, a, b: Math.min(T, a + L)});
+    blocs.push(n);
+    choisi = n.id;
+    changer();
+    ouvrirInsp();
+  }
+  function vider() {
+    if (!blocs.length) return;
+    memoriser();
+    const n = blocs.length;
+    blocs = [];
+    choisi = null; fermerInsp();
+    changer();
+    setStatus(n > 1 ? n + ' effets retirés de la frise — Ctrl + Z les remet'
+                    : 'effet retiré de la frise — Ctrl + Z le remet');
+  }
+  function retablir(json) {
+    blocs = JSON.parse(json);
+    if (!trouver(choisi)) { choisi = null; fermerInsp(); }
+    changer();
+  }
+  function annuler() {
+    if (!histo.length) return setStatus('rien à annuler sur la frise');
+    refait.push(JSON.stringify(blocs));
+    retablir(histo.pop());
+    setStatus('effets placés : retour en arrière (Ctrl + Maj + Z pour refaire)');
+  }
+  function refaire() {
+    if (!refait.length) return;
+    histo.push(JSON.stringify(blocs));
+    retablir(refait.pop());
+  }
+  // un nouveau morceau : ses blocs de la derniere fois, s'il y en a
+  function morceau(n) {
+    cle = 'omnipotard.effets.' + n;
+    blocs = []; histo = []; refait = [];
+    choisi = null; fermerInsp();
+    try {
+      const l = JSON.parse(localStorage.getItem(cle) || '[]');
+      for (const o of Array.isArray(l) ? l : []) {
+        if (!o || (Object.keys(PLAC).length && !PLAC[o.e])) continue;
+        const a = Math.max(0, +o.a), b = Math.min(duration, +o.b);
+        if (!(b - a > 0.05) || !Number.isFinite(+o.v)) continue;
+        blocs.push({id: nId++, e: o.e, a, b, v: +o.v, on: o.on || null, rang: 0});
+      }
+    } catch (e) { blocs = []; }
+    ranger();
+    ecrire(false);
+    FRISE.dessiner();
+    return blocs.length;
+  }
+
+  // ---- la bulle du bloc choisi
+  function choisir(id) {
+    choisi = trouver(id) ? id : null;
+    if (choisi) ouvrirInsp(); else fermerInsp();
+    FRISE.tetes();
+  }
+  function ouvrirInsp() {
+    const bl = trouver(choisi);
+    if (!bl) return fermerInsp();
+    const el = curseur(bl.e), r = q('.bi-v'), s = liste(bl.e);
+    q('.bi-nom').textContent = nom(bl.e);
+    q('.bi-pt').style.background = teinte(bl.e)[1];
+    r.min = el.min; r.max = el.max; r.step = el.step;
+    q('.bi-inst').hidden = !s;
+    if (s) q('.bi-on').innerHTML = s.innerHTML;
+    BULLE.fermer();
+    insp.hidden = false;
+    majInsp();
+    placerInsp();
+  }
+  function fermerInsp() { insp.hidden = true; }
+  function majInsp() {
+    const bl = trouver(choisi);
+    if (!bl || insp.hidden) return;
+    const r = q('.bi-v');
+    r.value = bl.v;
+    remplir(r);
+    q('.bi-vo').textContent = bl.v > 0 ? texte(bl.e, bl.v) : 'coupé';
+    q('.bi-note').hidden = bl.v > 0;
+    if (liste(bl.e)) q('.bi-on').value = bl.on || liste(bl.e).value;
+    let quand = tc(bl.a) + ' → ' + tc(bl.b) + '  ·  ' + (bl.b - bl.a).toFixed(1) + ' s';
+    // en temps du morceau, quand le bloc en fait un compte rond
+    const g = FRISE.grille();
+    if (g && g.sure && g.temps > 0.05) {
+      const n = (bl.b - bl.a) / g.temps;
+      if (Math.abs(n - Math.round(n)) < 0.02 && Math.round(n) > 0)
+        quand += '  ·  ' + Math.round(n) + ' temps';
+    }
+    q('.bi-quand').textContent = quand;
+    for (const [k, v] of [['.bi-a', bl.a], ['.bi-b', bl.b]])
+      if (document.activeElement !== q(k)) q(k).value = v.toFixed(2);
+  }
+  // Au-dessus de la barre de lecture, a l'aplomb du bloc : elle cache le bas
+  // de l'apercu, pas la frise ni les boutons de lecture.
+  function placerInsp() {
+    if (insp.hidden || !choisi) return;
+    const r = FRISE.rectBloc(choisi);
+    if (!r) return;
+    const W = insp.offsetWidth, H = insp.offsetHeight, cx = (r.left + r.right) / 2;
+    const x = Math.max(8, Math.min(cx - W / 2, innerWidth - W - 8));
+    let y = $('#chrono').getBoundingClientRect().top - H - 10, dessous = false;
+    if (y < 8) { y = Math.min(r.bas + 10, innerHeight - H - 8); dessous = true; }
+    insp.style.left = Math.round(x) + 'px';
+    insp.style.top = Math.round(y) + 'px';
+    insp.style.setProperty('--fl', Math.round(Math.max(14, Math.min(W - 14, cx - x))) + 'px');
+    insp.classList.toggle('dessous', dessous);
+  }
+  // l'intensite : un pas de retour en arriere par geste, pas par cran
+  q('.bi-v').addEventListener('pointerdown', memoriser);
+  q('.bi-v').addEventListener('keydown', e => {
+    if (!e.repeat && /^(Arrow|Page|Home|End)/.test(e.key)) memoriser();
+  });
+  q('.bi-v').addEventListener('input', () => {
+    const bl = trouver(choisi);
+    if (!bl) return;
+    bl.v = +q('.bi-v').value;
+    ecrire(true);
+    majInsp();
+    FRISE.tetes();
+    shot();
+  });
+  q('.bi-on').addEventListener('change', () => {
+    memoriser();
+    modifier(choisi, {on: q('.bi-on').value});
+  });
+  for (const k of ['.bi-a', '.bi-b']) {
+    q(k).addEventListener('change', () => {
+      const bl = trouver(choisi);
+      if (!bl) return;
+      let a = +q('.bi-a').value, b = +q('.bi-b').value;
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return majInsp();
+      a = Math.max(0, Math.min(a, duration));
+      b = Math.max(0, Math.min(b, duration));
+      if (b - a < 0.1) {
+        if (k === '.bi-a') a = Math.max(0, b - 0.1); else b = Math.min(duration, a + 0.1);
+      }
+      memoriser();
+      modifier(choisi, {a, b});
+    });
+  }
+  q('.bi-ferme').onclick = () => choisir(null);
+  q('.bi-sup').onclick = () => supprimer(choisi);
+  q('.bi-dup').onclick = () => dupliquer(choisi);
+  q('.bi-aller').onclick = () => {
+    const bl = trouver(choisi);
+    if (bl) { allerA(bl.a + 0.05); shot(); }
+  };
+  $('#effetsVider').onclick = vider;
+  // un clic ailleurs referme la bulle ; la frise, la barre de lecture et les
+  // masques la laissent ouverte : on ecoute et on regle en meme temps
+  document.addEventListener('pointerdown', e => {
+    if (insp.hidden || !e.target.closest) return;
+    if (e.target.closest('#blocInsp, #frise, #lecture, #masques, .ctl-glisse')) return;
+    choisir(null);
+  }, true);
+  window.addEventListener('resize', placerInsp);
+  document.addEventListener('scroll', placerInsp, true);
+  // Suppr, Echap, Ctrl + Z — sauf dans un champ de saisie, ou ces touches
+  // appartiennent au texte
+  document.addEventListener('keydown', e => {
+    if (!$('#styles').hidden) return;
+    const c = e.target;
+    if (prise && e.key === 'Escape') { finirGlisse(); prise = null; return; }
+    if (c.matches && c.matches('input[type=text], input[type=number], textarea, select')) return;
+    const dedans = c === document.body
+             || (c.closest && c.closest('#frise, #blocInsp, #chrono, #carteApercu, .ctl-glisse'));
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && /^[zZyY]$/.test(e.key)) {
+      if (!dedans) return;
+      e.preventDefault();
+      if (/^[yY]$/.test(e.key) || e.shiftKey) refaire(); else annuler();
+      return;
+    }
+    if (!choisi) return;
+    if ((e.key === 'Delete' || e.key === 'Backspace') && dedans) {
+      e.preventDefault();
+      supprimer(choisi);
+    } else if (e.key === 'Escape') choisir(null);
+  });
+
+  // ---- les poignees du panneau : on emporte un effet vers la frise
+  // le bloc qu'un depot donnerait : il commence la ou l'on lache, et dure
+  // deux mesures (huit temps), ou quatre secondes sans grille
+  function bornesDepot(tt, libre, auTemps) {
+    const T = duration, g = FRISE.grille();
+    const L = Math.min(T, g && g.sure && g.temps > 0.05 ? 8 * g.temps : 4);
+    const a = Math.max(0, Math.min(FRISE.aimanter(tt, libre, auTemps), T - L));
+    return [a, a + L];
+  }
+  function commencer(e) {
+    const g = $('#glisse');
+    g.innerHTML = '<i></i><b></b><span></span>';
+    g.querySelector('i').style.background = teinte(e)[1];
+    g.querySelector('b').textContent = nom(e);
+    g.hidden = false;
+    document.body.classList.add('glisse');
+    BULLE.fermer();
+  }
+  function suivreGlisse(cx, cy, libre) {
+    const g = $('#glisse');
+    g.style.left = cx + 'px';
+    g.style.top = cy + 'px';
+    const tt = FRISE.sous(cx, cy);
+    g.classList.toggle('sur', tt !== null);
+    if (tt === null) {
+      FRISE.fantome(null);
+      g.querySelector('span').textContent = 'lâchez-le sur la frise';
+      return;
+    }
+    const [a, b] = bornesDepot(tt, libre);
+    FRISE.fantome({a, b});
+    g.querySelector('span').textContent = tc(a) + ' → ' + tc(b);
+  }
+  function finirGlisse() {
+    $('#glisse').hidden = true;
+    document.body.classList.remove('glisse');
+    FRISE.fantome(null);
+  }
+  function deposer(e, a, b) {
+    const bl = ajouter(e, a, b);
+    // on va voir : la tete de lecture se pose au debut du bloc — sauf pendant
+    // l'ecoute, qui continue sans sauter
+    if (bl && !ECOUTE.actif()) { allerA(a + 0.05); shot(); }
+  }
+  // sans glisser (un clic, ou Entree au clavier) : sur le temps le plus
+  // proche de l'instant regarde
+  function ici(e) {
+    if (!track) return;
+    const [a, b] = bornesDepot(+$('#scrub').value || 0, false, true);
+    deposer(e, a, b);
+  }
+  function poignee(e, ctl) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ctl-glisse';
+    b.dataset.e = e;
+    b.innerHTML = '<i class="ic">' + icone('poignee') + '</i>';
+    b.title = 'glisser sur la frise : l\'effet n\'agira que sur ce passage'
+            + ' (un clic le pose à l\'instant regardé)';
+    b.setAttribute('aria-label', 'placer « ' + nom(e) + ' » sur la frise');
+    ctl.appendChild(b);
+    b.addEventListener('pointerdown', ev => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      if (!track) {
+        setStatus('déposez d\'abord un morceau : les effets se placent sur sa frise', true);
+        return;
+      }
+      prise = {e, x: ev.clientX, y: ev.clientY, glisse: false};
+      b.setPointerCapture(ev.pointerId);
+    });
+    b.addEventListener('pointermove', ev => {
+      if (!prise || prise.e !== e) return;
+      if (!prise.glisse) {
+        if (Math.hypot(ev.clientX - prise.x, ev.clientY - prise.y) < 5) return;
+        prise.glisse = true;
+        commencer(e);
+      }
+      suivreGlisse(ev.clientX, ev.clientY, ev.altKey);
+    });
+    b.addEventListener('pointerup', ev => {
+      if (!prise || prise.e !== e) return;
+      const p = prise;
+      prise = null;
+      if (!p.glisse) return ici(e);
+      const tt = FRISE.sous(ev.clientX, ev.clientY);
+      finirGlisse();
+      if (tt !== null) {
+        const [a, c] = bornesDepot(tt, ev.altKey);
+        deposer(e, a, c);
+      }
+    });
+    b.addEventListener('pointercancel', () => {
+      if (prise && prise.glisse) finirGlisse();
+      prise = null;
+    });
+    b.addEventListener('click', ev => { if (ev.detail === 0) ici(e); });
+  }
+  // la liste vient du moteur : chaque effet qu'il sait limiter a un bloc
+  function placables(p, fondu) {
+    PLAC = p || {};
+    if (fondu > 0) FONDU = fondu;
+    for (const e of Object.keys(PLAC)) {
+      const el = curseur(e), ctl = el && el.closest('.ctl');
+      if (ctl && !ctl.querySelector('.ctl-glisse')) poignee(e, ctl);
+    }
+    ecrire(false);
+  }
+  return {placables, morceau, liste: () => blocs, rangs: () => nRangs,
+          choisi: () => choisi, trouver, choisir, memoriser, deplacer,
+          fini: changer, teinte, nom, net, detail, decrire,
+          fondu: () => FONDU, placerInsp};
+})();
+
+/* ---------- les masques de l'apercu ----------
+
+   La video de fond est ce qui coute le plus a chaque image (~180 ms, contre
+   ~35 sans elle, en 480 x 270) : la masquer le temps de regler les effets et
+   d'ecouter rend l'apercu fluide. La machine ne coute presque rien ; la
+   masquer degage la vue sur ce qui se passe autour. Ni l'un ni l'autre ne
+   touche l'export : les masques ne passent que par les apercus. */
+var MASQUES = (() => {
+  const CLE = 'omnipotard.masques';
+  const m = {fond: false, machine: false};
+  try { Object.assign(m, JSON.parse(localStorage.getItem(CLE) || '{}')); } catch (e) {}
+  const bf = $('#masqueFond'), bm = $('#masqueMachine');
+  const fond = () => !!m.fond && fonds.length > 0;
+  function maj() {
+    bf.disabled = !fonds.length;
+    bf.classList.toggle('on', fond());
+    bm.classList.toggle('on', !!m.machine);
+    bf.setAttribute('aria-pressed', String(fond()));
+    bm.setAttribute('aria-pressed', String(!!m.machine));
+    bf.querySelector('span').textContent = fond() ? 'fond masqué' : 'fond';
+    bm.querySelector('span').textContent = m.machine ? 'machine masquée' : 'machine';
+    bf.title = !fonds.length ? 'pas de vidéo ni de photo de fond à masquer'
+      : fond() ? 'remontrer le fond dans l\'aperçu'
+      : 'masquer la vidéo ou la photo de fond dans l\'aperçu, pour qu\'il suive mieux le son (l\'export la garde)';
+    bm.title = m.machine ? 'remontrer la machine dans l\'aperçu'
+      : 'masquer la machine dans l\'aperçu (l\'export la garde)';
+    $('#masques').classList.toggle('actif', fond() || !!m.machine);
+    const avis = $('#masqueAvis');
+    avis.hidden = !(fond() || m.machine);
+    avis.textContent = fond() && m.machine
+      ? 'fond et machine masqués dans l\'aperçu — l\'export les garde'
+      : fond() ? 'fond masqué dans l\'aperçu — l\'export le garde'
+      : 'machine masquée dans l\'aperçu — l\'export la garde';
+  }
+  for (const [b, k] of [[bf, 'fond'], [bm, 'machine']]) {
+    // l'ecran prend les clics (choisir un morceau) : pas ceux-ci
+    b.addEventListener('pointerdown', e => e.stopPropagation());
+    b.addEventListener('click', e => {
+      e.stopPropagation();
+      m[k] = !m[k];
+      try { localStorage.setItem(CLE, JSON.stringify(m)); } catch (e2) {}
+      maj();
+      shot();
+    });
+  }
+  // les reglages d'un apercu, masques
+  function appliquer(p) {
+    if (fond()) p.set('backdrop', '');
+    if (m.machine) p.set('presence', '0');
+    return p;
+  }
+  maj();
+  return {appliquer, maj};
+})();
+
+/* ---------- ecouter : le son dans la page, l'apercu qui suit ----------
+
+   Le navigateur joue le morceau. L'apercu demande au studio des images plus
+   petites (480 x 270, en JPEG), une a la fois, chacune pour l'instant que le
+   son aura atteint quand elle arrivera : le temps d'une image se mesure au
+   fil de l'ecoute. La barre d'espace lance et arrete ; la frise et les sauts
+   deplacent le son. */
+var ECOUTE = (() => {
+  const son = $('#son'), bouton = $('#ecoute'), toile = $('#ecranDirect');
+  const badge = $('#direct'), dessin = toile.getContext('2d');
+  const W = 480, H = 270;
+  let actif = false, tour = 0, raf = 0, avance = 0.15, wav = false, vues = [];
+  // deux images en route a la fois : le studio en dessine une pendant que
+  // l'autre voyage. Une image partie avant la derniere montree est jetee.
+  let demandees = 0, montree = 0;
+  function bascule(ic, titre) {
+    bouton.innerHTML = '<i class="ic">' + icone(ic) + '</i>';
+    bouton.title = titre;
+  }
+  function source() {
+    son.src = '/audio?track=' + encodeURIComponent(track) + (wav ? '&wav=1' : '');
+    son.load();
+  }
+  function morceau() {
+    arreter(false);
+    cacher();
+    wav = false;
+    source();
+    bouton.disabled = false;
+  }
+  // un format que le navigateur ne lit pas (aiff, wma...) : le studio le
+  // lui decode une fois en WAV
+  son.addEventListener('error', () => {
+    if (!track || wav) return;
+    wav = true;
+    source();
+  });
+  async function demarrer() {
+    if (!track || actif) return;
+    // un seul son a la fois : l'extrait anime se tait, son calcul s'arrete
+    if (!$('#clipprog').hidden && !$('#clipStop').disabled) $('#clipStop').click();
+    rendreLImage();
+    const t = Math.max(0, Math.min(+$('#scrub').value || 0, duration - 0.5));
+    for (let essai = 0; ; essai++) {
+      try {
+        son.currentTime = t;
+        await son.play();
+        break;
+      } catch (e) {
+        if (essai === 0 && !wav && e.name === 'NotSupportedError') { wav = true; source(); continue; }
+        setStatus('le son ne part pas : ' + e.message, true);
+        return;
+      }
+    }
+    actif = true;
+    vues = [];
+    bouton.classList.add('on');
+    bascule('pause', 'arrêter l\'écoute (barre d\'espace)');
+    badge.textContent = 'direct';
+    badge.hidden = false;
+    suivre();
+    const n = ++tour;
+    image(n);
+    setTimeout(() => image(n), 25);
+  }
+  function arreter(rendre = true) {
+    if (!actif) return;
+    actif = false;
+    tour++;
+    son.pause();
+    cancelAnimationFrame(raf);
+    bouton.classList.remove('on');
+    bascule('play', 'écouter le morceau : l\'aperçu suit le son (barre d\'espace)');
+    badge.hidden = true;
+    FRISE.tetes();
+    // l'image entiere, la ou l'on s'est arrete ; la derniere de l'ecoute
+    // reste en place jusqu'a ce qu'elle arrive
+    if (rendre) shot();
+  }
+  function cacher() { toile.hidden = true; }
+  // la tete de lecture suit le son
+  function suivre() {
+    if (!actif) return;
+    const s = $('#scrub'), t = son.currentTime;
+    s.value = Math.min(+s.max, t).toFixed(2);
+    majTemps();
+    FRISE.montrer(t);
+    raf = requestAnimationFrame(suivre);
+  }
+  async function image(n) {
+    if (!actif || n !== tour) return;
+    const p = MASQUES.appliquer(params());
+    const t = Math.max(0, Math.min(son.currentTime + (son.paused ? 0 : avance), duration - 0.9));
+    p.set('t', t.toFixed(3)); p.set('w', W); p.set('h', H); p.set('rapide', '1');
+    const t0 = performance.now(), numero = ++demandees;
+    let pause = 0;
+    try {
+      const r = await fetch('/still?' + p.toString());
+      if (r.status === 204) {
+        // depassee par une autre demande : rien a montrer
+      } else if (r.ok) {
+        const im = await createImageBitmap(await r.blob());
+        // le temps d'une image, lisse : c'est l'avance a prendre sur le son
+        avance = Math.min(1.5, 0.7 * avance + 0.3 * (performance.now() - t0) / 1000);
+        if (actif && n === tour && numero > montree) {
+          montree = numero;
+          if (toile.width !== im.width) toile.width = im.width;
+          if (toile.height !== im.height) toile.height = im.height;
+          dessin.drawImage(im, 0, 0);
+          toile.hidden = false;
+          $('#ecranVide').hidden = true;
+          $('#ecran').classList.remove('vide');
+          $('#shoterr').classList.remove('on');
+          compter();
+        }
+        if (im.close) im.close();
+      } else {
+        let m = 'erreur ' + r.status;
+        try { m = (await r.json()).error || m; } catch (e) { /* pas du JSON */ }
+        $('#shoterr').textContent = "L'aperçu en direct n'a pas pu être calculé : " + m;
+        $('#shoterr').classList.add('on');
+        pause = 1000;
+      }
+    } catch (e) { pause = 500; }        // le studio ne repond plus : on reessaie
+    if (actif && n === tour) setTimeout(() => image(n), pause);
+  }
+  // combien d'images sont arrivees dans la derniere seconde
+  function compter() {
+    const m = performance.now();
+    vues.push(m);
+    while (vues.length && m - vues[0] > 1000) vues.shift();
+    badge.textContent = 'direct · ' + vues.length + ' i/s';
+  }
+  son.addEventListener('ended', () => arreter(true));
+  bouton.onclick = () => (actif ? arreter(true) : demarrer());
+  // La barre d'espace lance et arrete, d'ou que l'on soit — sauf dans un
+  // champ de saisie, et sur un bouton atteint au clavier, qui la garde.
+  document.addEventListener('keydown', e => {
+    if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const c = e.target;
+    if (c.matches && c.matches('input[type=text], input[type=number], textarea, select')) return;
+    if (c.matches && c.matches('button, input[type=checkbox]') && c.matches(':focus-visible')) return;
+    if (!track || bouton.disabled || !$('#styles').hidden) return;
+    e.preventDefault();
+    if (e.repeat) return;
+    // un bouton clique a la souris garde le focus : sans cela, la barre
+    // d'espace le recliquerait en plus
+    if (c !== document.body && c.blur) c.blur();
+    if (actif) arreter(true); else demarrer();
+  }, true);
+  return {morceau, demarrer, arreter, cacher, actif: () => actif,
+          chercher: t => { if (actif) son.currentTime = t; }};
 })();
 
 (function () {

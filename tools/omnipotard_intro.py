@@ -37,7 +37,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.13"
+VERSION = "2026-10-02.14"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -757,6 +757,81 @@ def _image_fond(path, aw, ah, seek=0.0, blur=0.0):
     return np.ascontiguousarray(img, dtype=np.float32)
 
 
+class LecteurFond:
+    """Les images d'une video de fond lues a la suite, par un ffmpeg qui
+    reste ouvert : pour l'ecoute du studio, dont les instants avancent avec
+    le son. Extraire chaque image a part relancait ffmpeg a chaque fois — plus
+    de cent millisecondes par image, la ou la suivante, lue a la suite, en
+    coute deux ou trois. Un retour en arriere, ou un saut de plus de deux
+    secondes en avant, relance la lecture a l'instant demande."""
+
+    SAUT = 2.0
+
+    def __init__(self, path, aw, ah, blur=0.0, duree=0.0, cadence=25.0):
+        self.path, self.aw, self.ah, self.blur = path, aw, ah, blur
+        self.duree = duree
+        # pas plus de trente images par seconde : l'apercu n'en montre pas plus
+        self.cadence = min(30.0, max(5.0, cadence or 25.0))
+        self.proc = None
+        self.img = None
+        self.t_img = self.pos = 0.0     # l'image tenue, et la suivante
+
+    def _ouvrir(self, seek):
+        self.fermer()
+        self.proc = subprocess.Popen(
+            ["ffmpeg", "-v", "error", "-ss", "%.3f" % seek, "-i", self.path,
+             "-vf", "scale=%d:%d:force_original_aspect_ratio=increase,"
+                    "crop=%d:%d,fps=%g" % (self.aw, self.ah, self.aw, self.ah,
+                                           self.cadence),
+             "-an", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.img, self.t_img, self.pos = None, seek, seek
+
+    def _lire(self):
+        n = self.aw * self.ah * 3
+        brut = self.proc.stdout.read(n)
+        if len(brut) < n:
+            return None
+        img = (np.frombuffer(brut, dtype=np.uint8).reshape(self.ah, self.aw, 3)
+               .astype(np.float32) / 255.0)
+        if self.blur > 0:
+            img = np.stack([gauss(img[:, :, c], self.blur) for c in range(3)],
+                           axis=-1)
+        return np.ascontiguousarray(img, dtype=np.float32)
+
+    def image(self, seek):
+        """L'image de l'instant `seek` de la video (une copie : l'appelant la
+        multiplie sur place)."""
+        if self.duree > 0.5:
+            seek = seek % self.duree
+        if (self.proc is None or seek < self.t_img - 1e-3
+                or seek > self.pos + self.SAUT):
+            self._ouvrir(seek)
+        while self.img is None or self.pos <= seek + 1e-6:
+            img = self._lire()
+            if img is None:                 # la fin du fichier
+                break
+            self.img, self.t_img = img, self.pos
+            self.pos += 1.0 / self.cadence
+        if self.img is None:
+            return _image_fond(self.path, self.aw, self.ah, seek, self.blur)
+        return self.img.copy()
+
+    def fermer(self):
+        if self.proc is None:
+            return
+        try:
+            self.proc.kill()
+        except OSError:
+            pass
+        try:
+            self.proc.stdout.close()
+        except OSError:
+            pass
+        self.proc.wait()
+        self.proc = None
+
+
 def _fond_illisible(path, err=b""):
     """Ce qu'on dit quand ffmpeg ne tire rien d'un fichier de fond.
 
@@ -773,16 +848,31 @@ def _fond_illisible(path, err=b""):
             "en JPEG ou en PNG." % (os.path.basename(path), detail))
 
 
+_DUREES = {}
+
+
 def media_duration(path):
-    """Duree d'un fichier en secondes, ou 0 si ce n'en est pas un (une image)."""
+    """Duree d'un fichier en secondes, ou 0 si ce n'en est pas un (une image).
+
+    Gardee par fichier (chemin, taille, date) : l'apercu la redemandait a
+    chaque image d'une video de fond, et ffprobe coute pres de 50 ms."""
+    try:
+        cle = (path, os.path.getsize(path), os.path.getmtime(path))
+    except OSError:
+        cle = None
+    if cle is not None and cle in _DUREES:
+        return _DUREES[cle]
     try:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=nw=1:nk=1", path],
             stdout=subprocess.PIPE, check=True).stdout.decode().strip()
-        return float(out)
+        d = float(out)
     except Exception:                                     # noqa: BLE001
-        return 0.0
+        d = 0.0
+    if cle is not None:
+        _DUREES[cle] = d
+    return d
 
 
 def is_video(path):
@@ -1160,10 +1250,12 @@ class SuiteDeFonds:
 def apercu_fonds(paths, w, h, t, total, vitesse=1.0, boucle="boucle",
                  fondu=0.0, photo=6.0, blur=2.2, strength=0.80, clear=0.45,
                  scale=None, screen_dim=0.40, ecran=None, travel=0.0,
-                 travel_mode="avant"):
+                 travel_mode="avant", lire=None):
     """Le fond de l'apercu a l'instant t du morceau : le meme plan que le
     rendu (plan_fonds), mais seulement la ou les deux images de l'instant,
-    extraites directement — rien n'est detaille."""
+    extraites directement — rien n'est detaille. `lire(chemin, l, h, instant,
+    flou)` remplace l'extraction : l'ecoute du studio lit ses videos a la
+    suite."""
     if isinstance(paths, str):
         paths = [paths]
     vitesse = min(max(float(vitesse), 0.05), 20.0)
@@ -1173,7 +1265,7 @@ def apercu_fonds(paths, w, h, t, total, vitesse=1.0, boucle="boucle",
     acc = None
     for k, v, wk in plan_fonds(durees, t, boucle, fondu):
         seek = v * vitesse if genres[k][0] == "video" else 0.0
-        img = _image_fond(paths[k], aw, ah, seek, blur)
+        img = (lire or _image_fond)(paths[k], aw, ah, seek, blur)
         img *= np.float32(wk)
         acc = img if acc is None else acc + img
     return StillBackdrop(np.ascontiguousarray(acc, dtype=np.float32),

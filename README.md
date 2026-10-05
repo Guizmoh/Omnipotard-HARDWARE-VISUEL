@@ -2027,6 +2027,8 @@ Sous l'aperçu, tout le morceau d'un coup d'œil, pistes superposées :
   gonflée plus de cinq fois : un morceau sans basse ne s'en invente pas une.
   Les **paroxysmes**, là où tombent les glitchs, sont marqués en rose ; les
   **dédoublements** du trait, en losanges jaunes.
+- **Effets** — les effets placés sur un passage du morceau, une couleur par
+  famille (voir *Placer un effet sur la frise*, plus bas).
 - **Machines** — le plan du séquenceur, une couleur par machine, avec la
   déformation qui précède chaque changement.
 - **Mélodie** — les notes du fichier MIDI **là où le moteur les jouera** :
@@ -2257,6 +2259,116 @@ python3 tools/mpc_performance.py morceau.mp3 \
     --backdrop ciel1.mp4 nuages.jpg ciel2.mp4 \
     --fond-vitesse 0.5 --fond-boucle allerretour --fond-fondu 1.5 --fond-photo 6
 ```
+
+## Placer un effet sur la frise, écouter en direct
+
+### Glisser un effet sur la frise
+
+Chaque effet du panneau qui part au rythme — les réactions, les avaries,
+l'écho, la texture, l'éclair de la caisse claire, les glitchs, l'ondulation du
+tracé, la frange d'objectif : 31 en tout — a une **poignée ⠿** à gauche de son
+nom. On l'attrape, on la lâche sur la frise : l'effet n'agit plus que sur ce
+**bloc** de temps. Pendant le bloc, sa valeur remplace celle du curseur, et
+son instrument celui de la liste ; ailleurs, c'est le curseur du panneau qui
+compte. Un curseur à zéro et trois blocs : l'effet n'existe que dans ses trois
+passages. Un bloc à zéro, à l'inverse, coupe sur son passage un effet allumé
+partout ailleurs.
+
+- Pendant qu'on glisse, la frise montre où tombera le bloc, et une ligne sur
+  toute sa hauteur le début : on voit sur quel coup du son il part.
+- Le bloc **s'aimante aux temps du morceau** — la grille que mesure
+  l'analyse : au temps près (au demi ou au quart quand on a beaucoup zoomé),
+  à la mesure quand on voit tout le morceau ; *Alt* le pose librement. Il dure
+  deux mesures (huit temps) au départ, et commence avec la valeur du curseur
+  s'il est monté — sinon un peu moins de la moitié de sa course.
+- Il se **déplace** en le faisant glisser, s'**étire** ou se **raccourcit** par
+  ses bords.
+- Un **clic** l'ouvre : son intensité, l'instrument qui le déclenche, son
+  début et sa fin au centième, *Aller au début*, *Dupliquer*, *Supprimer*.
+- *Suppr* efface le bloc choisi, *Échap* le lâche, *Ctrl + Z* annule
+  (*Ctrl + Maj + Z* refait), *tout retirer* vide la piste.
+- Un **clic sur la poignée**, sans glisser, pose l'effet sur le temps le plus
+  proche de l'instant regardé — c'est aussi ce que fait *Entrée* au clavier.
+- Des blocs qui se chevauchent passent sur plusieurs rangées ; deux blocs du
+  même effet au même instant : le plus fort l'emporte.
+- Un effet qui part sur un instrument bascule net au début et à la fin du bloc
+  — le bloc commence souvent sur un coup, qu'un fondu aurait étouffé. Un effet
+  continu (halo, poussière, écho…) entre et sort en **fondu**, sur un quart de
+  seconde, que la frise dessine.
+- La poignée d'un effet déjà placé reste allumée dans le panneau, et les blocs
+  que traverse la tête de lecture s'éclairent.
+
+Les blocs vont partout où vont les réglages : l'aperçu, *Lire en mouvement*
+(recalés sur le départ de l'extrait), le rendu. Ils sont gardés dans le
+navigateur, par morceau — son nom et sa durée : on retrouve les siens en
+redéposant le même fichier.
+
+Le moteur relit chaque effet à chaque image, sans rien préparer d'après sa
+valeur : il pose celles de l'instant avant de dessiner, puis remet celles du
+panneau. Mesuré sur le moteur du rendu : hors des blocs, chaque image est
+identique, pixel pour pixel, à celle d'un rendu sans eux. `tools/verifier_studio.py` contrôle
+la valeur dans le bloc, à son entrée, en dehors, la cadence entière, le
+décalage d'un extrait, et que chaque effet placable existe dans la page.
+
+### Écouter : le son dans la page, l'aperçu qui suit
+
+Le bouton rond de la barre de lecture — ou la **barre d'espace** — joue le
+morceau dans la page. L'aperçu le suit, en 480×270, aussi vite que
+l'ordinateur le permet, et la tête de lecture avance sur la frise ; un clic sur
+la frise ou un saut au paroxysme suivant déplacent le son. On règle pendant
+l'écoute : chaque image relit les curseurs et les blocs du moment. À l'arrêt,
+l'image entière (960×540) reprend sa place.
+
+Chaque image est demandée pour l'instant que le son aura atteint quand elle
+arrivera — le temps d'une image se mesure au fil de l'écoute —, et deux sont
+en route à la fois : le studio en dessine une pendant que l'autre voyage. Le
+son est le fichier déposé, lu par tranches ; un format que le navigateur ne
+lit pas (aiff, wma…) lui est décodé une fois en WAV.
+
+C'est un aperçu, pas la vidéo : *Lire en mouvement* reste la vidéo exacte,
+calculée pour de bon.
+
+### Masquer le fond et la machine dans l'aperçu
+
+En haut à droite de l'aperçu, **fond** et **machine** les masquent — dans
+l'aperçu, l'écoute et *Lire en mouvement* seulement, jamais dans l'export, et
+une ligne en bas de l'écran le rappelle. Le choix est gardé d'une séance à
+l'autre. `tools/verifier_studio.py` contrôle que le rendu n'y passe pas.
+
+### Ce qui rendait l'écoute lente
+
+Mesuré dans le navigateur, sur une machine à quatre cœurs (images par seconde
+de l'écoute) :
+
+| | au départ | maintenant |
+|---|---|---|
+| sans fond | 11 | 20 |
+| vidéo de fond | 4 | 17 |
+| vidéo de fond masquée | 11 | 20 |
+| machine masquée | — | 19 |
+
+Trois causes, corrigées :
+
+- **Chaque réponse du studio attendait 40 ms.** Le système retenait la fin
+  d'une image le temps que le navigateur accuse réception du début, ce qu'il
+  fait avec retard : une image dessinée en 43 ms arrivait en 88. Le studio
+  envoie maintenant ses réponses tout de suite — tous les aperçus, pas
+  seulement l'écoute, arrivent 40 ms plus tôt.
+- **La vidéo de fond était extraite image par image** : ffmpeg relancé à
+  chaque image, et ffprobe en plus pour redemander la durée du fichier —
+  177 ms par image. Pendant l'écoute, la vidéo se lit maintenant d'un trait,
+  par un ffmpeg qui reste ouvert et avance avec le son (54 ms) ; la durée d'un
+  fichier est gardée une fois mesurée, ce qui épargne aussi près de 50 ms à
+  chaque aperçu fixe sur une vidéo. Les images lues à la suite sont les mêmes que
+  celles extraites une à une (contrôlé par `tools/verifier_studio.py`).
+- **Une seule image en route** : le studio attendait la demande suivante
+  pendant que l'image voyageait et s'affichait. Avec deux en route, il ne
+  chôme plus.
+
+Masquer la machine ne fait presque rien gagner : son dessin ne coûte que
+quelques millisecondes. Le masque sert à dégager la vue — mais les avaries
+d'image (bandes arrachées, blocs, négatif…) travaillent sur la machine, et ne
+se voient plus sans elle.
 
 ## STUDIO WEB — une page HTML, rien a installer
 

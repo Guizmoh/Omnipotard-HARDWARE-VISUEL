@@ -26,6 +26,7 @@ Pour un apercu rapide avant de lancer le morceau entier :
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -183,6 +184,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               texture_touches="nappe",
                               mode_trait="neon", encre=(0.04, 0.07, 0.06),
                               detourage=0.0, inverser=False,
+                              effets=None,
                               **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
                  palette=palette, **bgkw)
@@ -228,7 +230,9 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.echo, r.echo_n = float(echo), int(echo_n)
     r.echo_delay, r.couleurs = float(echo_delay), float(couleurs)
     r.spectro = float(spectro)
-    if r.spectro > 0.01:
+    effets = lire_effets(effets)
+    if r.spectro > 0.01 or any(e["e"] == "spectro" and e["v"] > 0.01
+                               for e in effets):
         # calcule ici, une fois : les taches de rendu le recevront tout fait
         r.spec, r.spec_fps = compute_spectro(audio["mono"], audio["sr"])
     r.snare, r.wave_gain = float(snare), float(wave_gain)
@@ -264,10 +268,153 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.tl.seg["out"] = far              # pas d'extinction automatique
     r.step_phase = float(phi)                     # phase reelle du morceau
     r.drops = np.asarray(drops, dtype=np.float64)  # glitchs sur les paroxysmes
+    # les effets places sur la frise : en dernier, une fois tous les reglages
+    # du panneau poses — ce sont eux qui reviennent hors des blocs
+    poser_effets(r, effets)
     return r
 
 
+# ==========================================================================
+#  Les effets places sur la frise
+#
+#  Un effet glisse sur la frise du studio n'agit que sur la duree de son
+#  bloc : pendant le bloc, sa valeur remplace celle du curseur — et son
+#  instrument celui de la liste, s'il en a un ; hors des blocs, c'est le
+#  curseur qui compte. Le moteur relit chaque effet a chaque image, rien n'est
+#  prepare d'apres leur valeur : il suffit donc de poser celles de l'instant
+#  avant de dessiner. Un bloc mis a zero eteint l'effet sur son passage.
+# ==========================================================================
+
+# nom dans la page -> (attribut du moteur, attribut de son instrument, entier)
+EFFETS_PLACABLES = {
+    "punch": ("punch", "punch_on", False),
+    "shake": ("shake_amp", "shake_on", False),
+    "parts": ("parts", "parts_on", False),
+    "ring": ("ring", "ring_on", False),
+    "gridPulse": ("grid_pulse", "grid_on", False),
+    "bgFlash": ("bg_flash", "flash_on", False),
+    "snare": ("snare", None, False),
+    "glitch": ("glitch", None, False),
+    "tranches": ("tranches", "tranches_on", False),
+    "blocs": ("blocs", "blocs_on", False),
+    "roll": ("roll", "roll_on", False),
+    "cisaille": ("cisaille", "cisaille_on", False),
+    "coupure": ("coupure", "coupure_on", False),
+    "ghost": ("ghost", "ghost_on", False),
+    "invert": ("invert", "invert_on", False),
+    "miroir": ("miroir", "miroir_on", False),
+    "ondul": ("ondul", "ondul_on", False),
+    "mosaic": ("mosaic", "mosaic_on", False),
+    "kaleido": ("kaleido", "kaleido_on", False),
+    "stut": ("stut", "stut_on", False),
+    "tapestop": ("tapestop", "tapestop_on", False),
+    "scramble": ("scramble", None, False),
+    "echo": ("echo", None, False),
+    "couleurs": ("couleurs", None, False),
+    "spectro": ("spectro", None, False),
+    "cadence": ("cadence", None, True),
+    "haloDoux": ("halo_doux", None, False),
+    "poussiere": ("poussiere", None, False),
+    "flottement": ("flottement", None, False),
+    "wobble": ("wobble", None, False),
+    "aberration": ("aberration", None, False),
+}
+# Un effet continu (halo, poussiere, echo...) entre et sort en fondu, sur
+# cette duree. Un effet qui part sur un instrument, lui, bascule net : le bloc
+# commence sur un temps, souvent sur un coup, et un fondu aurait etouffe
+# justement celui-la.
+FONDU_EFFET = 0.25
+MAX_EFFETS = 500
+
+
+def lire_effets(brut, familles=None):
+    """Les blocs envoyes par la page (JSON), verifies : liste de dicts
+    {e, a, b, v, on}. Ce qui ne se comprend pas est ignore."""
+    if not brut:
+        return []
+    if isinstance(brut, str):
+        try:
+            brut = json.loads(brut)
+        except ValueError:
+            return []
+    if not isinstance(brut, list):
+        return []
+    out = []
+    for e in brut[:MAX_EFFETS]:
+        if not isinstance(e, dict) or e.get("e") not in EFFETS_PLACABLES:
+            continue
+        try:
+            a, b, v = float(e.get("a")), float(e.get("b")), float(e.get("v"))
+        except (TypeError, ValueError):
+            continue
+        if not (np.isfinite(a) and np.isfinite(b) and np.isfinite(v)) or b <= a:
+            continue
+        on = e.get("on")
+        if not EFFETS_PLACABLES[e["e"]][1] or not isinstance(on, str) \
+                or (familles is not None and on not in familles):
+            on = None
+        out.append({"e": e["e"], "a": max(0.0, a), "b": min(b, 1e6),
+                    "v": min(max(v, 0.0), 1e3), "on": on})
+    return out
+
+
+def decaler_effets(effets, dt):
+    """Les memes blocs, dans le temps d'un extrait qui commence a -dt."""
+    return [dict(e, a=e["a"] + dt, b=e["b"] + dt) for e in effets or []
+            if e["b"] + dt > 0.0]
+
+
+def poser_effets(r, effets):
+    """Retient les blocs, et les valeurs du panneau qu'ils remplacent.
+
+    A appeler une fois tous les reglages poses sur le moteur : ce sont eux
+    qui reviennent hors des blocs."""
+    blocs, base = [], {}
+    for e in effets or []:
+        attr, attr_on, entier = EFFETS_PLACABLES[e["e"]]
+        blocs.append((attr, attr_on, entier, e["a"], e["b"], e["v"], e["on"]))
+        base[attr] = getattr(r, attr)
+        if attr_on:
+            base[attr_on] = getattr(r, attr_on)
+    r.effets_places, r._base_effets = blocs, base
+
+
+def appliquer_effets(r, t):
+    """Pose les valeurs de l'instant t : celles des blocs qui le couvrent,
+    celles du panneau ailleurs. Plusieurs blocs du meme effet : le plus fort."""
+    blocs = getattr(r, "effets_places", None)
+    if not blocs:
+        return
+    base = r._base_effets
+    for k, v in base.items():
+        setattr(r, k, v)
+    fort = {}
+    for attr, attr_on, entier, a, b, v, on in blocs:
+        if not a <= t < b:
+            continue
+        if attr_on or entier:
+            val = v
+        else:
+            f = min(1.0, (t - a) / FONDU_EFFET, (b - t) / FONDU_EFFET)
+            val = base[attr] + (v - base[attr]) * max(0.0, f)
+        if attr not in fort or val > fort[attr][0]:
+            fort[attr] = (val, attr_on, on, entier)
+    for attr, (val, attr_on, on, entier) in fort.items():
+        setattr(r, attr, int(round(val)) if entier else float(val))
+        if attr_on and on:
+            setattr(r, attr_on, on)
+
+
+def retablir_effets(r):
+    """Remet les valeurs du panneau, une fois l'image dessinee."""
+    for k, v in (getattr(r, "_base_effets", None) or {}).items():
+        setattr(r, k, v)
+
+
 def frame_performance(r, t, duration):
+    # les effets places sur la frise : leurs valeurs a cet instant, avant
+    # tout le reste — la cadence et le begaiement en font partie
+    appliquer_effets(r, t)
     rng = np.random.default_rng(r.seed + int(t * r.fps + 0.5))
     # Le begaiement fige l'image sur l'instant du dernier coup : tout ce qui
     # suit est donc calcule a cet instant-la. Le tirage aleatoire, lui, reste
@@ -566,6 +713,11 @@ def _renderer(info, width, height, fps, seed, curve, palette, bgkw):
     # seconde montre le fond de la trentieme seconde, comme l'apercu
     bgkw.setdefault("fond_debut", float(info.get("start") or 0.0))
     bgkw.setdefault("fond_total", float(info.get("total") or 0.0))
+    # les blocs de la frise sont dates dans le morceau, l'extrait compte depuis
+    # son propre debut
+    if bgkw.get("effets"):
+        bgkw["effets"] = decaler_effets(lire_effets(bgkw["effets"]),
+                                        -float(info.get("start") or 0.0))
     return make_performance_renderer(
         width, height, fps, info["duration"], info["_audio"], info["_phi"],
         info["drops"], curve=curve, seed=seed, palette=palette, **bgkw)
