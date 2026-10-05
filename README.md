@@ -657,6 +657,27 @@ commence à 0:30 et le Digitakt est bien posé à 0:32. Deux curseurs la règlen
 sa **durée** et son **ondulation** (à zéro, les traits glissent proprement ;
 plus haut, ils serpentent).
 
+**Chaque changement peut avoir sa propre durée.** Sur la frise, la piste
+*Machines* montre chaque déformation ; son bord gauche est une poignée :
+
+- on la tire vers la gauche pour **allonger** la déformation, vers la droite
+  pour la **raccourcir** — jusqu'au changement sec. L'arrivée de la machine ne
+  bouge pas ;
+- on prend la déformation par son milieu ou son bord droit pour **déplacer le
+  changement** lui-même, sa durée avec ;
+- les deux s'aimantent aux temps du morceau (*Alt* : librement), comme les
+  effets placés ; un simple clic, sans glisser, y place l'aperçu ;
+- *Ctrl + Z* revient en arrière, comme pour les effets placés.
+
+La durée se lit, et se tape, dans la ligne du changement : la petite case
+**s**. Vide, elle montre en gris la durée du curseur, qui vaut alors ; une
+poignée bleue sur la frise signale un changement qui a la sienne. Le curseur
+*durée de la déformation* devient ainsi la durée par défaut : il ne touche
+pas aux changements réglés à la main. Une déformation ne commence jamais
+avant que la machine d'avant soit posée — plus longue que l'intervalle entre
+deux changements, elle partait d'une machine déjà à moitié déformée, et le
+tracé sautait à l'instant inscrit.
+
 Les noms des machines ne se déforment pas : celui de la première s'efface sur
 place pendant que celui de la seconde se lève à la sienne. Une lettre qui se
 déforme en une autre ne se lit plus — elle passe par de la bouillie.
@@ -665,8 +686,12 @@ En ligne de commande :
 
 ```bash
 python3 tools/mpc_performance.py morceau.mp3 \
-  --machines "0=mpc, 0:32=digitakt, 1:05=minifreak" --passage 1.9
+  --machines "0=mpc, 0:32=digitakt, 1:05=minifreak/3.5" --passage 1.9
 ```
+
+« /3.5 » donne à ce changement-là 3,5 s de déformation ; les autres prennent
+celle de `--passage`. Les instants s'écrivent au centième (« 1:31.81 ») : un
+changement posé sur un temps du morceau tombe rarement sur une seconde ronde.
 
 Un rendu à machine unique ne paie rien : le tracé n'est refait que lorsque la
 machine change.

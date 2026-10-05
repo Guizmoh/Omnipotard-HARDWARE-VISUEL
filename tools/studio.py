@@ -1644,36 +1644,51 @@ class Handler(BaseHTTPRequestHandler):
 #  La page
 # --------------------------------------------------------------------------
 
-# Le sequenceur de machines et le depot de melodie, ecrits une seule fois :
-# les deux pages du studio les montrent, et deux copies auraient fini par
-# diverger. Chacune fournit `_redessine`, `_etat` et `_duree`, qui ne portent
-# pas le meme nom d'une page a l'autre.
+# Le sequenceur de machines et le depot de melodie, ecrits a part : il y a eu
+# deux pages, et deux copies auraient fini par diverger. La page fournit
+# `_redessine`, `_etat`, `_duree` et `_memoriser` (un pas de retour en
+# arriere, commun avec la frise).
 JS_SEQ_MIDI = r"""
 /* ---------- sequenceur de machines ----------
 
-   Le plan s'ecrit « 0:32=digitakt, 1:05=minifreak » dans un champ cache, que
-   params() envoie comme n'importe quel reglage. Les lignes ci-dessous ne sont
+   Le plan s'ecrit « 0:32=digitakt, 1:05=minifreak/3.5 » dans un champ cache,
+   que params() envoie comme n'importe quel reglage ; « /3.5 » donne a ce
+   changement sa propre duree de deformation. Les lignes ci-dessous ne sont
    qu'une facon commode de l'ecrire : elles n'ont pas d'identifiant a elles,
-   pour que la page n'ait qu'un seul reglage a tenir. */
+   pour que la page n'ait qu'un seul reglage a tenir. Chaque changement est
+   {t, m, d} : l'instant, la machine, et la duree (null : celle du curseur). */
 let SEQ = [];
 
 function seqMachines() {
   return [...$('#machine').options].map(o => o.value);
 }
 
+// un instant au centieme — un changement pose sur un temps du morceau ne
+// tombe pas sur une seconde ronde : « 1:31.81 », et « 0:32 » quand il l'est
 function seqTemps(v) {
-  v = Math.max(0, Math.round(v));
-  return Math.floor(v / 60) + ':' + String(v % 60).padStart(2, '0');
+  v = Math.max(0, Math.round(v * 100) / 100);
+  const m = Math.floor(v / 60), cs = Math.round((v - m * 60) * 100);
+  const sec = Math.floor(cs / 100), reste = cs % 100;
+  return m + ':' + String(sec).padStart(2, '0')
+    + (reste ? '.' + String(reste).padStart(2, '0').replace(/0$/, '') : '');
 }
 
 function seqLire(txt) {
   const noms = seqMachines();
   return String(txt || '').split(',').map(b => {
+    // la duree propre du changement, apres la barre : « digitakt/2.5 »
+    let d = null;
+    const k = b.lastIndexOf('/');
+    if (k >= 0) {
+      const v = parseFloat(b.slice(k + 1));
+      if (Number.isFinite(v) && v >= 0) d = v;
+      b = b.slice(0, k);
+    }
     const m = b.trim().split('=');
     if (m.length < 2) return null;
     const t = m[0].trim().split(':');
     const s = t.length > 1 ? (+t[0] || 0) * 60 + (+t[1] || 0) : (+t[0] || 0);
-    return noms.includes(m[1].trim()) ? {t: s, m: m[1].trim()} : null;
+    return noms.includes(m[1].trim()) ? {t: s, m: m[1].trim(), d} : null;
   }).filter(Boolean);
 }
 
@@ -1681,7 +1696,8 @@ function seqEcrire() {
   SEQ.sort((a, b) => a.t - b.t);
   $('#machines').value = SEQ.length
     ? '0:00=' + $('#machine').value + ', '
-      + SEQ.map(e => seqTemps(e.t) + '=' + e.m).join(', ')
+      + SEQ.map(e => seqTemps(e.t) + '=' + e.m
+                     + (e.d != null ? '/' + Math.round(e.d * 100) / 100 : '')).join(', ')
     : '';
   midiAvis();
 }
@@ -1708,25 +1724,44 @@ function seqNom(n) {
 
 function seqDessine() {
   const noms = seqMachines(), l = $('#seqListe');
+  // la duree du curseur, en grise dans les cases laissees vides
+  const defaut = (+$('#passage').value || 0).toFixed(1);
   l.innerHTML = '';
   SEQ.forEach((e, i) => {
     const d = document.createElement('div');
     d.className = 'row seqrow';
-    d.innerHTML = '<span class="unite">a</span>'
-      + '<input type="text" class="seqt" value="' + seqTemps(e.t) + '">'
-      + '<select class="seqm">'
+    d.innerHTML = '<span class="unite">à</span>'
+      + '<input type="text" class="seqt" value="' + seqTemps(e.t) + '"'
+      + ' aria-label="instant du changement">'
+      + '<select class="seqm" aria-label="machine">'
       + noms.map(n => '<option value="' + n + '"'
                  + (n === e.m ? ' selected' : '') + '>' + seqNom(n) + '</option>').join('')
-      + '</select><button class="ghost seqx">&times;</button>';
+      + '</select>'
+      + '<input type="number" class="seqd" min="0" max="60" step="0.1"'
+      + ' placeholder="' + defaut + '" value="' + (e.d != null ? e.d : '') + '"'
+      + ' title="durée de la déformation vers cette machine, en secondes ; vide,'
+      + ' c\'est celle du curseur plus bas" aria-label="durée de la déformation">'
+      + '<span class="unite">s</span>'
+      + '<button class="ghost seqx" title="retirer ce changement">&times;</button>';
     d.querySelector('.seqt').onchange = ev => {
       const t = ev.target.value.trim().split(':');
+      _memoriser();
       SEQ[i].t = t.length > 1 ? (+t[0] || 0) * 60 + (+t[1] || 0) : (+t[0] || 0);
       seqEcrire(); seqDessine(); _redessine();
     };
     d.querySelector('.seqm').onchange = ev => {
+      _memoriser();
       SEQ[i].m = ev.target.value; seqEcrire(); _redessine();
     };
+    d.querySelector('.seqd').onchange = ev => {
+      const v = ev.target.value.trim();
+      _memoriser();
+      SEQ[i].d = v === '' || !Number.isFinite(+v) ? null
+               : Math.round(Math.min(60, Math.max(0, +v)) * 100) / 100;
+      seqEcrire(); seqDessine(); _redessine();
+    };
     d.querySelector('.seqx').onclick = () => {
+      _memoriser();
       SEQ.splice(i, 1); seqEcrire(); seqDessine(); _redessine();
     };
     l.appendChild(d);
@@ -1735,6 +1770,13 @@ function seqDessine() {
     l.innerHTML = '<p class="hint" style="margin:2px 0 6px">Une seule machine '
       + 'du début à la fin. Ajoutez un changement pour qu\'elle se déforme '
       + 'en une autre.</p>';
+  } else {
+    const h = document.createElement('p');
+    h.className = 'hint';
+    h.textContent = 'La durée de chaque déformation s\'étire aussi à la souris, '
+      + 'sur la frise : par le bord gauche de la déformation. Laissée vide, '
+      + 'c\'est celle du curseur plus bas.';
+    l.appendChild(h);
   }
 }
 
@@ -1759,19 +1801,21 @@ function seqBrancher() {
   const noms = seqMachines();
   const prec = SEQ.length ? SEQ[SEQ.length - 1].m : $('#machine').value;
   const suiv = noms[(noms.indexOf(prec) + 1) % noms.length];
+  _memoriser();
   SEQ.push({t: Math.round(dernier + (_duree() ? Math.max(8, _duree() / 6) : 30)),
-            m: suiv});
+            m: suiv, d: null});
   seqEcrire(); seqDessine(); _redessine();
 };
 
   $('#seqAuto').onclick = () => {
   const chaque = Math.max(4, +$('#seqChaque').value || 30);
   const noms = seqMachines(), fin = _duree() || chaque * 4;
+  _memoriser();
   SEQ = [];
   let i = noms.indexOf($('#machine').value);
   for (let t = chaque; t < fin - 1; t += chaque) {
     i = (i + 1) % noms.length;
-    SEQ.push({t: Math.round(t), m: noms[i]});
+    SEQ.push({t: Math.round(t), m: noms[i], d: null});
   }
   seqEcrire(); seqDessine(); _redessine();
 };
@@ -2073,7 +2117,9 @@ PAGE = r"""<!doctype html>
   .seq .row{display:grid;gap:6px;align-items:center;margin-top:8px}
   .seq .seqplus{grid-template-columns:1fr}
   .seq .seqauto{grid-template-columns:minmax(0,1fr) 64px auto}
-  .seq .seqrow{grid-template-columns:auto 72px minmax(0,1fr) 30px;margin-top:6px}
+  .seq .seqrow{grid-template-columns:auto 72px minmax(0,1fr) 54px auto 30px;margin-top:6px}
+  .seq .seqrow .seqd{padding:4px 6px;font:400 11.5px var(--m)}
+  .seq .seqrow .seqd::placeholder{color:var(--tx3)}
   .seq .seqrow input,.seq .seqrow select{height:28px}
   .seq .seqx{width:30px;height:28px;padding:0}
   .seq .unite{color:var(--tx3);font-size:11.5px}
@@ -2936,7 +2982,7 @@ PAGE = r"""<!doctype html>
     <p><b>Écouter</b> (barre d'espace) joue le morceau dans la page, et l'aperçu le suit en plus petit, aussi vite que l'ordinateur le permet. Une vidéo de fond est ce qui coûte le plus : les boutons en haut à droite de l'aperçu masquent le fond et la machine le temps de régler. Ils ne touchent que l'aperçu, jamais l'export.</p>
     <p><b>Lire en mouvement</b> calcule pour de bon quelques secondes à partir de l'instant regardé, avec le son, et les joue en boucle : c'est la vidéo exacte, en 15 images par seconde. Le rendu final, lui, en fera 30 ou 60.</p>
     <p><b>Placer un effet</b> : attrapez-le dans le panneau par sa poignée ⠿, à gauche de son nom, et lâchez-le sur la frise. Il n'agit alors que sur la durée de son bloc ; ailleurs, c'est le curseur du panneau qui compte. Un bloc s'aimante aux temps du morceau (Alt : librement), se déplace, s'étire par ses bords ; un clic l'ouvre pour régler son intensité et son instrument. Suppr l'efface, Ctrl + Z annule.</p>
-    <p><b>La frise</b> montre tout le morceau : le son en trois bandes (graves, médiums, aigus), les paroxysmes en rose, les dédoublements en jaune, les effets placés, le plan des machines, les notes de la mélodie et la suite des fonds. Un clic ou un glisser y place l'aperçu ; Ctrl + molette zoome, Maj + molette fait défiler ; les flèches du clavier avancent d'une seconde.</p>
+    <p><b>La frise</b> montre tout le morceau : le son en trois bandes (graves, médiums, aigus), les paroxysmes en rose, les dédoublements en jaune, les effets placés, le plan des machines, les notes de la mélodie et la suite des fonds. Un clic ou un glisser y place l'aperçu ; Ctrl + molette zoome, Maj + molette fait défiler ; les flèches du clavier avancent d'une seconde. Sur la piste Machines, le bord gauche d'une déformation se tire pour l'allonger ou la raccourcir ; prise par son milieu, elle se déplace avec son changement.</p>
   </div>
 
   <div id="bas">
@@ -3560,6 +3606,8 @@ function deposer(url, f, quoi) {
 const _redessine = () => shot();
 const _etat = (m, e) => setStatus(m, e);
 const _duree = () => duration;
+// un pas de retour en arriere (Ctrl + Z), le meme que celui de la frise
+const _memoriser = () => EFFETS.memoriser();
 /*__SEQ_MIDI__*/
 
 async function sendBackdrop(f) {
@@ -3572,7 +3620,12 @@ async function sendBackdrop(f) {
     shot();
   } catch (e) { setStatus('fond refuse : ' + e.message, true); }
 }
-$('#passage').oninput = e => { $('#v-psg').textContent = (+e.target.value).toFixed(2) + ' s'; shot(); };
+// la duree par defaut : les cases vides du sequenceur l'affichent en grise
+$('#passage').oninput = e => {
+  $('#v-psg').textContent = (+e.target.value).toFixed(2) + ' s';
+  seqDessine();
+  shot();
+};
 $('#passageTurb').oninput = e => { $('#v-psgt').textContent = (+e.target.value).toFixed(2); shot(); };
 $('#midiForce').oninput = e => { $('#v-mif').textContent = (+e.target.value).toFixed(2); shot(); };
 for (const [id, sp] of [['vignettage','v-vig'], ['scanlines','v-scl'],
@@ -4744,6 +4797,8 @@ var FRISE = (() => {
   // la grille des temps (les blocs d'effets s'y aimantent), le bloc fantome
   // d'un effet qu'on apporte du panneau, le bloc qu'on deplace ou etire
   let grille = null, fantome = null, geste = null;
+  // le changement de machine qu'on etire ou deplace, celui sous la souris
+  let gesteM = null, survolM = null;
   let mDedo = 0, mNotes = 0, mFonds = 0, nNotes = 0, nFonds = 0;
 
   const total = () => duration || 0;
@@ -4935,11 +4990,25 @@ var FRISE = (() => {
     }
   }
 
-  // le plan des machines, tel que le sequenceur l'ecrit
+  // Le plan des machines : celle du debut, puis les changements du
+  // sequenceur — les objets memes, que les gestes de la frise modifient. Lu
+  // comme le moteur le lit : deux changements au meme instant, le dernier
+  // l'emporte ; la meme machine deux fois de suite ne change rien.
   function planMachines() {
-    const p = seqLire($('#machines').value);
-    if (!p.length || p[0].t > 0) p.unshift({t: 0, m: $('#machine').value});
+    const p = [{t: 0, m: $('#machine').value, d: null}];
+    for (const e of SEQ) {
+      const der = p[p.length - 1];
+      if (Math.abs(e.t - der.t) < 1e-6) p[p.length - 1] = e;
+      else if (e.m !== der.m) p.push(e);
+    }
     return p;
+  }
+  // la deformation qui mene au changement i : sa duree a lui, sinon celle du
+  // curseur — jamais plus que l'intervalle depuis le changement d'avant,
+  // comme dans le moteur
+  function dureeChangement(pl, i) {
+    const d = pl[i].d != null ? pl[i].d : (+$('#passage').value || 0);
+    return Math.max(0, Math.min(d, pl[i].t - pl[i - 1].t));
   }
   function bloc(c, a, b, y, h, f, bord) {
     const xa = Math.max(ETI - 4, x(a)) + 1, xb = Math.min(largeur + 4, x(b)) - 1;
@@ -4958,7 +5027,7 @@ var FRISE = (() => {
     c.restore();
   }
   function peindreMachines(c, p) {
-    const plan = planMachines(), T = total(), pas = +$('#passage').value || 0;
+    const plan = planMachines(), T = total();
     c.font = '500 11px ' + C('--f');
     c.textBaseline = 'middle';
     plan.forEach((e, i) => {
@@ -4967,16 +5036,21 @@ var FRISE = (() => {
       const r = bloc(c, a, b, p.y + 4, p.h - 8, m[0], m[1]);
       if (r) texte(c, noms[e.m] || e.m, r[0], r[1], p.y + p.h / 2, m[2]);
     });
-    // la deformation d'une machine a l'autre precede l'instant inscrit
+    // la deformation d'une machine a l'autre precede l'instant inscrit ; son
+    // bord gauche est une poignee (bleue quand le changement a sa propre
+    // duree) : on l'etire a la souris
     for (let i = 1; i < plan.length; i++) {
-      const a = Math.max(0, plan[i].t - pas), b = plan[i].t;
+      const b = plan[i].t, a = b - dureeChangement(plan, i);
       const xa = x(a), xb = x(b);
-      if (xb - xa < 1) continue;
-      const g = c.createLinearGradient(xa, 0, xb, 0);
-      g.addColorStop(0, 'rgba(255,255,255,0)');
-      g.addColorStop(1, 'rgba(255,255,255,.22)');
-      c.fillStyle = g;
-      c.fillRect(xa, p.y + 4, xb - xa, p.h - 8);
+      if (xb - xa >= 1) {
+        const g = c.createLinearGradient(xa, 0, xb, 0);
+        g.addColorStop(0, 'rgba(255,255,255,0)');
+        g.addColorStop(1, 'rgba(255,255,255,.22)');
+        c.fillStyle = g;
+        c.fillRect(xa, p.y + 4, xb - xa, p.h - 8);
+      }
+      c.fillStyle = plan[i].d != null ? COUL.acc : 'rgba(255,255,255,.5)';
+      c.fillRect(Math.round(xa) - 1, p.y + 6, 2, p.h - 12);
     }
   }
 
@@ -5159,6 +5233,35 @@ var FRISE = (() => {
     }
   }
 
+  // la prise d'un changement de machine, survolee ou tenue : le bord gauche
+  // de la deformation, ou toute la deformation jusqu'a l'instant inscrit
+  function peindrePoigneeMachine(c) {
+    const h = gesteM || survolM, p = piste('machines');
+    if (!h || !p) return;
+    const pl = planMachines(), i = pl.indexOf(h.e);
+    if (i < 1) return;
+    const xa = x(h.e.t - dureeChangement(pl, i)), xb = x(h.e.t);
+    c.save();
+    c.beginPath(); c.rect(ETI, p.y, largeur - ETI, p.h); c.clip();
+    c.fillStyle = COUL.acc;
+    if (h.ou === 'duree') {
+      c.fillRect(Math.round(xa) - 1.5, p.y + 2, 3, p.h - 4);
+      // deux petites fleches : on tire vers la gauche ou vers la droite
+      for (const s of [-1, 1]) {
+        c.beginPath();
+        c.moveTo(xa + s * 4, p.y + p.h / 2 - 3.5);
+        c.lineTo(xa + s * 8, p.y + p.h / 2);
+        c.lineTo(xa + s * 4, p.y + p.h / 2 + 3.5);
+        c.closePath(); c.fill();
+      }
+    } else {
+      c.strokeStyle = COUL.acc; c.lineWidth = 1.5;
+      c.strokeRect(Math.round(xa) + .5, p.y + 3.5, Math.max(2, xb - xa - 1), p.h - 7);
+      c.fillRect(Math.round(xb) - 1, p.y + 2, 2, p.h - 4);
+    }
+    c.restore();
+  }
+
   // le bloc sous le pointeur, et la partie prise : le corps, ou un bord
   function blocSous(px, py) {
     const p = piste('effets');
@@ -5181,6 +5284,50 @@ var FRISE = (() => {
     }
     return null;
   }
+  // Le changement de machine sous le pointeur, et la prise : le bord gauche
+  // de sa deformation (« duree » : on l'etire, l'arrivee ne bouge pas) ou le
+  // reste, jusqu'a l'instant inscrit (« instant » : on deplace le changement).
+  // Une deformation trop etroite pour deux prises se partage en son milieu.
+  function changementSous(px, py) {
+    const p = piste('machines');
+    if (!p || py < p.y || py >= p.y + p.h) return null;
+    const pl = planMachines();
+    let best = null, bd = Infinity;
+    for (let i = 1; i < pl.length; i++) {
+      const xa = x(pl[i].t - dureeChangement(pl, i)), xb = x(pl[i].t), w = xb - xa;
+      const coupe = w >= 12 ? xa + 6 : xa + w / 2;
+      let ou = null, dist = Infinity;
+      if (px >= xa - 6 && px <= coupe) { ou = 'duree'; dist = Math.abs(px - xa); }
+      else if (px > coupe && px <= xb + 6) { ou = 'instant'; dist = Math.max(0, px - xb); }
+      if (ou && dist < bd) { bd = dist; best = {e: pl[i], ou}; }
+    }
+    return best;
+  }
+  // etirer la deformation, ou deplacer le changement, aimante sur la grille
+  function bougerChangement(px, libre) {
+    const g = gesteM;
+    if (!g.bouge && Math.abs(px - g.x0) < 3) return;
+    if (!g.bouge) { g.bouge = true; EFFETS.memoriser(); }
+    const dt = (px - g.x0) / utile() * (v1 - v0);
+    if (g.ou === 'duree') {
+      const debut = aimanter(g.t0 - g.d0 + dt, libre);
+      g.e.d = Math.round(Math.max(0, Math.min(g.t0 - debut, g.t0 - g.prec, 60)) * 100) / 100;
+    } else {
+      g.e.t = Math.round(Math.max(g.prec + 0.1, Math.min(aimanter(g.t0 + dt, libre),
+                                                         g.suiv - 0.1)) * 100) / 100;
+    }
+    seqEcrire();
+    seqDessine();
+    const pl = planMachines(), i = pl.indexOf(g.e), d = i > 0 ? dureeChangement(pl, i) : 0;
+    info.textContent = 'déformation ' + d.toFixed(1) + ' s → ' + (noms[g.e.m] || g.e.m)
+      + ' à ' + tc(g.e.t);
+    info.hidden = false;
+    const w = info.offsetWidth;
+    info.style.left = Math.round(Math.max(ETI, Math.min(x(g.e.t) - w / 2, largeur - w - 4))) + 'px';
+    dessiner();
+    shot();
+  }
+
   // deplacer ou etirer le bloc pris, aimante sur la grille
   function bougerBloc(px, libre) {
     const g = geste;
@@ -5234,7 +5381,8 @@ var FRISE = (() => {
       c.fillRect(xa, HAUT.regle, xb - xa, haut - HAUT.regle);
     }
     peindreEffets(c);
-    if (survol !== null && !prise && !geste) {
+    peindrePoigneeMachine(c);
+    if (survol !== null && !prise && !geste && !gesteM) {
       c.fillStyle = 'rgba(255,255,255,.28)';
       c.fillRect(Math.round(x(survol.t)), 0, 1, haut);
     }
@@ -5270,12 +5418,19 @@ var FRISE = (() => {
               : EFFETS.liste().length ? tc(tt)
               : 'glissez un effet du panneau jusqu\'ici · ' + tc(tt);
     } else if (p && p.cle === 'machines') {
-      const pl = planMachines(), pas = +$('#passage').value || 0;
+      const pl = planMachines(), hm = changementSous(survol.px, survol.py);
       let i = 0;
       while (i + 1 < pl.length && pl[i + 1].t <= tt) i++;
       const suiv = pl[i + 1];
       txt = (noms[pl[i].m] || pl[i].m) + ' · ' + tc(tt);
-      if (suiv && tt >= suiv.t - pas) txt = 'déformation → ' + (noms[suiv.m] || suiv.m);
+      if (suiv && tt >= suiv.t - dureeChangement(pl, i + 1))
+        txt = 'déformation → ' + (noms[suiv.m] || suiv.m);
+      if (hm) {
+        const nm = noms[hm.e.m] || hm.e.m, d = dureeChangement(pl, pl.indexOf(hm.e));
+        txt = hm.ou === 'duree'
+          ? 'déformation → ' + nm + ' · ' + d.toFixed(1) + ' s · glisser pour l\'allonger ou la raccourcir'
+          : nm + ' à ' + tc(hm.e.t) + ' · glisser pour déplacer le changement';
+      }
     } else if (p && p.cle === 'melodie' && p.notes) {
       const yv = q => p.y + 4 + (1 - (q[2] - p.lo) / p.ecart) * (p.h - 10);
       let best = null, bd = 6;
@@ -5347,6 +5502,18 @@ var FRISE = (() => {
       tetes();
       return;
     }
+    // un changement de machine : on etire sa deformation ou on le deplace ;
+    // un clic sans glisser, lui, reste un clic : il y place l'apercu
+    const hm = changementSous(px, py);
+    if (hm) {
+      const pl = planMachines(), i = pl.indexOf(hm.e);
+      gesteM = {e: hm.e, ou: hm.ou, x0: px, t0: hm.e.t, d0: dureeChangement(pl, i),
+                prec: pl[i - 1].t, suiv: i + 1 < pl.length ? pl[i + 1].t : total(),
+                bouge: false};
+      zone.style.cursor = hm.ou === 'duree' ? 'ew-resize' : 'grabbing';
+      tetes();
+      return;
+    }
     // ailleurs dans la piste des effets : on lache le bloc choisi
     const p = pistes.find(q => py >= q.y && py < q.y + q.h);
     if (p && p.cle === 'effets') EFFETS.choisir(null);
@@ -5356,16 +5523,20 @@ var FRISE = (() => {
   zone.addEventListener('pointermove', e => {
     const [px, py] = pos(e);
     if (geste) return bougerBloc(px, e.altKey);
+    if (gesteM) return bougerChangement(px, e.altKey);
     if (prise) chercher(t(Math.max(ETI, Math.min(largeur - MARGE, px))));
     survol = track && px >= ETI ? {t: Math.max(0, Math.min(total(), t(px))), px, py} : null;
-    // ce que la souris prendrait : un bloc a deplacer, un bord a etirer
+    // ce que la souris prendrait : un bloc a deplacer, un bord a etirer, la
+    // deformation d'un changement de machine, ou ce changement lui-meme
     if (!prise) {
       const h = survol ? blocSous(px, py) : null;
-      zone.style.cursor = !h ? '' : h.ou === 'corps' ? 'grab' : 'ew-resize';
+      survolM = survol && !h ? changementSous(px, py) : null;
+      zone.style.cursor = h ? (h.ou === 'corps' ? 'grab' : 'ew-resize')
+                        : survolM ? (survolM.ou === 'duree' ? 'ew-resize' : 'grab') : '';
     }
     majInfo(); tetes();
   });
-  const lacher = () => {
+  const lacher = e => {
     if (geste) {
       const g = geste;
       geste = null;
@@ -5373,11 +5544,30 @@ var FRISE = (() => {
       if (g.bouge) EFFETS.fini();
       majInfo();
     }
+    if (gesteM) {
+      const g = gesteM;
+      gesteM = null;
+      zone.style.cursor = '';
+      if (!g.bouge) {
+        // un simple clic : comme partout sur la frise, il y place l'apercu
+        if (e && e.type === 'pointerup') chercher(t(Math.max(ETI, pos(e)[0])));
+      } else {
+        const pl = planMachines(), i = pl.indexOf(g.e);
+        setStatus(g.ou === 'duree'
+          ? 'déformation vers ' + (noms[g.e.m] || g.e.m) + ' : '
+            + (i > 0 ? dureeChangement(pl, i) : 0).toFixed(2) + ' s (Ctrl + Z pour revenir)'
+          : (noms[g.e.m] || g.e.m) + ' arrive à ' + tc(g.e.t) + ' (Ctrl + Z pour revenir)');
+        _redessine();
+      }
+      majInfo();
+    }
     prise = false; tetes();
   };
   zone.addEventListener('pointerup', lacher);
   zone.addEventListener('pointercancel', lacher);
-  zone.addEventListener('pointerleave', () => { survol = null; info.hidden = true; tetes(); });
+  zone.addEventListener('pointerleave', () => {
+    survol = null; survolM = null; info.hidden = true; tetes();
+  });
   zone.addEventListener('dblclick', e => {
     if (pos(e)[1] < HAUT.regle && track) { v0 = 0; v1 = total(); majZoom(); dessiner(); }
   });
@@ -5509,7 +5699,13 @@ var FRISE = (() => {
           noms: m => { noms = m || {}; dessiner(); },
           enLecture: () => !!clip,
           grille: () => grille, aimanter, sous, rectBloc,
-          fantome: f => { fantome = f || null; tetes(); }};
+          fantome: f => { fantome = f || null; tetes(); },
+          // ou tombe un instant, et une piste, a l'ecran
+          ecran: tt => zone.getBoundingClientRect().left + x(tt),
+          piste: cle => {
+            const q = piste(cle), r = zone.getBoundingClientRect();
+            return q ? {haut: r.top + q.y, h: q.h} : null;
+          }};
 })();
 
 /* ---------- les effets places sur la frise ----------
@@ -5610,8 +5806,13 @@ var EFFETS = (() => {
     for (const p of document.querySelectorAll('.ctl-glisse'))
       p.classList.toggle('pose', blocs.some(b => b.e === p.dataset.e));
   }
+  // Un pas de retour en arriere : les blocs, et le plan des machines — la
+  // frise deplace l'un comme l'autre, Ctrl + Z defait l'un comme l'autre.
+  function etat() {
+    return JSON.stringify({b: blocs, m: $('#machines').value, d: $('#machine').value});
+  }
   function memoriser() {
-    histo.push(JSON.stringify(blocs));
+    histo.push(etat());
     if (histo.length > 100) histo.shift();
     refait = [];
   }
@@ -5690,19 +5891,24 @@ var EFFETS = (() => {
                     : 'effet retiré de la frise — Ctrl + Z le remet');
   }
   function retablir(json) {
-    blocs = JSON.parse(json);
+    const e = JSON.parse(json);
+    blocs = e.b;
+    if (e.m !== $('#machines').value || e.d !== $('#machine').value) {
+      $('#machine').value = e.d;
+      seqPose(e.m);
+    }
     if (!trouver(choisi)) { choisi = null; fermerInsp(); }
     changer();
   }
   function annuler() {
     if (!histo.length) return setStatus('rien à annuler sur la frise');
-    refait.push(JSON.stringify(blocs));
+    refait.push(etat());
     retablir(histo.pop());
-    setStatus('effets placés : retour en arrière (Ctrl + Maj + Z pour refaire)');
+    setStatus('frise : retour en arrière (Ctrl + Maj + Z pour refaire)');
   }
   function refaire() {
     if (!refait.length) return;
-    histo.push(JSON.stringify(blocs));
+    histo.push(etat());
     retablir(refait.pop());
   }
   // un nouveau morceau : ses blocs de la derniere fois, s'il y en a
@@ -5840,7 +6046,8 @@ var EFFETS = (() => {
     if (prise && e.key === 'Escape') { finirGlisse(); prise = null; return; }
     if (c.matches && c.matches('input[type=text], input[type=number], textarea, select')) return;
     const dedans = c === document.body
-             || (c.closest && c.closest('#frise, #blocInsp, #chrono, #carteApercu, .ctl-glisse'));
+             || (c.closest && c.closest('#frise, #blocInsp, #chrono, #carteApercu, '
+                                        + '.ctl-glisse, #seqBloc'));
     if ((e.ctrlKey || e.metaKey) && !e.altKey && /^[zZyY]$/.test(e.key)) {
       if (!dedans) return;
       e.preventDefault();

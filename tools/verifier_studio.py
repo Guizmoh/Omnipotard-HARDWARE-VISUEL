@@ -202,6 +202,27 @@ def main():
         soucis.append("ecoute : image du direct de type %s" % genre)
     soucis += lecteur_de_fond()
 
+    # 9. le sequenceur : une duree de deformation propre a chaque changement,
+    #    jamais plus longue que l'intervalle depuis le changement d'avant
+    from omnipotard_intro import Renderer, lire_plan_machines
+    plan = lire_plan_machines("0=mpc, 0:30=digitakt/4, 1:00=minifreak, "
+                              "1:02=sp404/9, 1:20=mpc/abc", "mpc", 300.0)
+    if [e[2] for e in plan] != [None, 4.0, None, 9.0, None]:
+        soucis.append("sequenceur : durees propres mal lues %s" % plan)
+
+    class Plan:
+        pass
+    m = Plan()
+    m.plan_mach, m.passage = plan, 1.9
+    for t, attendu in ((25.9, ("mpc", None, 0.0)),
+                       (27.0, ("mpc", "digitakt", 0.25)),
+                       (58.575, ("digitakt", "minifreak", 0.25)),
+                       (61.0, ("minifreak", "sp404", 0.5))):
+        a, b, u = Renderer.etape_machine(m, t)
+        if (a, b) != attendu[:2] or abs(u - attendu[2]) > 1e-6:
+            soucis.append("sequenceur : a %.3f s, %s au lieu de %s"
+                          % (t, (a, b, round(u, 3)), attendu))
+
     print("page : %d curseurs, %d listes ; %d reglages envoyes au moteur"
           % (len(curseurs), len(listes), len(envoi)))
     if soucis:

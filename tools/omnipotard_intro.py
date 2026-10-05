@@ -37,7 +37,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.14"
+VERSION = "2026-10-02.15"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -288,7 +288,10 @@ AIDE = {
     "passage": "Le temps que met une machine à se déformer jusqu'à devenir la "
                "suivante. La déformation précède l'instant inscrit, de sorte "
                "que la machine est bien posée quand cet instant arrive. À "
-               "zéro, le changement est sec.",
+               "zéro, le changement est sec. Chaque changement peut avoir sa "
+               "propre durée : étirez sa déformation à la souris sur la frise, "
+               "ou tapez-la dans sa ligne du séquenceur ; ce curseur vaut pour "
+               "les autres.",
     "passageTurb": "L'ondulation du tracé pendant la déformation. À zéro les "
                    "traits glissent proprement d'une forme à l'autre ; plus "
                    "haut, ils serpentent comme un faisceau dérangé.",
@@ -3274,19 +3277,26 @@ def lire_temps(txt):
 
 
 def ecrire_temps(v):
-    """L'ecriture inverse : 95.0 donne 1:35."""
-    v = max(0.0, float(v))
-    m, sec = divmod(int(round(v)), 60)
-    return "%d:%02d" % (m, sec)
+    """L'ecriture inverse : 95.0 donne 1:35, 95.25 donne 1:35.25 — au
+    centieme, comme la page, qui pose les changements sur les temps."""
+    v = round(max(0.0, float(v)), 2)
+    m, sec = divmod(v, 60.0)
+    if abs(sec - round(sec)) < 1e-9:
+        return "%d:%02d" % (m, round(sec))
+    return ("%d:%05.2f" % (m, sec)).rstrip("0")
 
 
 def lire_plan_machines(txt, defaut="mpc", duree=None):
     """Le sequenceur de machines : a partir de quel instant laquelle est a
-    l'image.
+    l'image, et en combien de temps elle s'y deforme.
 
-    S'ecrit « 0=mpc, 0:32=digitakt, 1:05=minifreak ». Les separateurs sont
-    larges a dessein : la page du studio ecrit proprement, mais un reglage
-    enregistre a la main doit passer aussi.
+    S'ecrit « 0=mpc, 0:32=digitakt, 1:05=minifreak/3.5 ». Un « /3.5 » apres
+    le nom donne a ce changement-la sa propre duree de deformation, en
+    secondes ; sans lui, c'est la duree du curseur qui vaut. Les separateurs
+    sont larges a dessein : la page du studio ecrit proprement, mais un
+    reglage enregistre a la main doit passer aussi.
+
+    Rend une liste de (instant, machine, duree de la deformation ou None).
     """
     defaut = defaut if defaut in MACHINES else "mpc"
     plan = []
@@ -3294,6 +3304,16 @@ def lire_plan_machines(txt, defaut="mpc", duree=None):
         bout = bout.strip()
         if not bout:
             continue
+        pas = None
+        if "/" in bout:
+            bout, _, d = bout.rpartition("/")
+            try:
+                pas = float(d.strip().lower().rstrip("s").strip().replace(",", "."))
+            except ValueError:
+                pas = None
+            # ni negative, ni infinie, ni « nan » (qui n'est egale a rien)
+            if pas is not None and not 0.0 <= pas < 1e4:
+                pas = None
         for sep in ("=", ">", "@"):
             bout = bout.replace(sep, " ")
         morceaux = bout.split()
@@ -3307,28 +3327,32 @@ def lire_plan_machines(txt, defaut="mpc", duree=None):
             continue
         if duree is not None and quand >= duree:
             continue
-        plan.append((max(0.0, quand), nom))
+        plan.append((max(0.0, quand), nom, pas))
     if not plan:
-        return [(0.0, defaut)]
+        return [(0.0, defaut, None)]
     plan.sort(key=lambda e: e[0])
     # deux machines au meme instant : la derniere ecrite gagne. Et une machine
     # annoncee deux fois de suite ne fait pas de passage.
     propre = []
-    for quand, nom in plan:
+    for quand, nom, pas in plan:
         if propre and abs(propre[-1][0] - quand) < 1e-6:
-            propre[-1] = (quand, nom)
+            propre[-1] = (quand, nom, pas)
         elif propre and propre[-1][1] == nom:
             continue
         else:
-            propre.append((quand, nom))
+            propre.append((quand, nom, pas))
     if propre[0][0] > 0.0:
-        propre.insert(0, (0.0, defaut if defaut != propre[0][1] else propre[0][1]))
+        propre.insert(0, (0.0, defaut if defaut != propre[0][1] else propre[0][1],
+                          None))
     return propre
 
 
 def ecrire_plan_machines(plan):
     """L'ecriture inverse, telle que la page la relit."""
-    return ", ".join("%s=%s" % (ecrire_temps(q), n) for q, n in plan)
+    return ", ".join("%s=%s%s" % (ecrire_temps(e[0]), e[1],
+                                   "/%g" % e[2] if len(e) > 2 and e[2] is not None
+                                   else "")
+                     for e in plan)
 
 
 # ==========================================================================
@@ -4469,13 +4493,22 @@ class Renderer:
         while i + 1 < len(plan) and t >= plan[i + 1][0]:
             i += 1
         a = plan[i][1]
-        if i + 1 >= len(plan) or self.passage <= 1e-6:
+        if i + 1 >= len(plan):
             return a, None, 0.0
-        debut = plan[i + 1][0] - self.passage
-        b = plan[i + 1][1]
+        suiv = plan[i + 1]
+        # la duree propre au changement, sinon celle du curseur
+        pas = self.passage if len(suiv) < 3 or suiv[2] is None else suiv[2]
+        # La deformation tient entre les deux instants : elle ne commence pas
+        # avant que la machine d'avant soit posee. Plus longue, elle partait
+        # d'une machine deja a moitie deformee — un saut a l'instant inscrit.
+        pas = min(pas, suiv[0] - plan[i][0])
+        if pas <= 1e-6:
+            return a, None, 0.0
+        debut = suiv[0] - pas
+        b = suiv[1]
         if t < debut or b == a:
             return a, None, 0.0
-        return a, b, min(1.0, max(0.0, (t - debut) / self.passage))
+        return a, b, min(1.0, max(0.0, (t - debut) / pas))
 
     def _le_passage(self, a, b):
         """Le passage de a vers b, prepare a la premiere image qui en a
@@ -4693,7 +4726,7 @@ class Renderer:
     # sur un « object has no attribute ». Avec ces replis il repart sur la
     # valeur d'origine, et la page, elle, previent qu'il faut relancer.
     machine = "mpc"
-    plan_mach = ((0.0, "mpc"),)
+    plan_mach = ((0.0, "mpc", None),)
     passage = 1.9
     passage_turb = 1.0
     _plan = None

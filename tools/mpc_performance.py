@@ -949,11 +949,13 @@ def add_look_args(ap):
     ap.add_argument("--machines", default="", metavar="PLAN",
                     help="sequenceur de machines : a partir de quel instant "
                          "laquelle est a l'image, par exemple "
-                         "\"0=mpc, 0:32=digitakt, 1:05=minifreak\". Vide, "
-                         "c'est --machine du debut a la fin")
+                         "\"0=mpc, 0:32=digitakt, 1:05=minifreak/3.5\" — "
+                         "« /3.5 » donne a ce changement sa propre duree de "
+                         "deformation. Vide, c'est --machine du debut a la fin")
     ap.add_argument("--passage", type=float, default=1.9, metavar="S",
                     help="duree de la deformation d'une machine a l'autre, "
-                         "en secondes (0 = changement sec)")
+                         "en secondes (0 = changement sec), pour les "
+                         "changements qui n'ont pas la leur")
     ap.add_argument("--passage-turb", type=float, default=1.0, metavar="X",
                     help="ondulation du trace pendant le passage "
                          "(0 = deformation lisse)")
