@@ -223,6 +223,20 @@ def main():
             soucis.append("sequenceur : a %.3f s, %s au lieu de %s"
                           % (t, (a, b, round(u, 3)), attendu))
 
+    # 10. « aucun instrument » : l'effet est plein tant qu'il est monte. Et
+    #     comme c'est desormais le choix par defaut de la page, un prereglage
+    #     ou un style qui monte un effet a instrument doit dire lequel —
+    #     sinon il passerait en continu sans que personne l'ait voulu.
+    from omnipotard_intro import CONTINU, STYLES
+    if Renderer.hit_env(None, 12.0, CONTINU) != 1.0:
+        soucis.append("le declencheur « continu » n'allume pas l'effet")
+    for genre, table in (("prereglage", {k: v for k, v in PRESETS.items()}),
+                         ("style", {k: v["reglages"] for k, v in STYLES.items()})):
+        for nom, reg in table.items():
+            for attr, attr_on, _ in MP.EFFETS_PLACABLES.values():
+                if attr_on and float(reg.get(attr, 0) or 0) > 0 and attr_on not in reg:
+                    soucis.append("%s « %s » : %s sans instrument dit" % (genre, nom, attr))
+
     print("page : %d curseurs, %d listes ; %d reglages envoyes au moteur"
           % (len(curseurs), len(listes), len(envoi)))
     if soucis:

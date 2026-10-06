@@ -1061,12 +1061,21 @@ trait* propose maintenant :
 | nature du trait : **encre** | le trait est **peint** par-dessus le fond, dans une couleur foncée (réglable). Son cœur couvre, son halo n'est qu'un voile plafonné à 45 % ; les coups en couleur s'y posent comme une peinture |
 | nature du trait : **auto** | chaque point choisit selon le fond qui est derrière lui — néon sur le sombre, encre sur le clair, en fondu. Pour un ciel qui change, un nuage blanc sur un ciel bleu, le jour qui tombe |
 | **détourage** | un liseré autour du trait qui le détache du fond : sombre en néon, clair en encre |
-| **inverser les couleurs** | le négatif de toute l'image : sur un fond noir, un dessin magenta sur papier blanc |
+| **papier derrière la machine** | en encre ou en auto : le fond derrière la machine éclairci en papier blanc. **À zéro par défaut** : le fond reste tel qu'il est |
+| **inverser** | le négatif : **toute l'image** (sur un fond noir, un dessin magenta sur papier blanc), **le fond seulement** (la photo ou la vidéo en négatif sous un trait intact), ou **le trait seulement** (sa couleur complémentaire, à la même clarté, sur un fond intact) |
 
 En encre, le **creux** derrière la machine et la dalle de l'écran
-s'**éclaircissent** au lieu de s'assombrir : un trait foncé dans une ombre ne
-se verrait plus. En auto, ils restent sombres, et c'est voulu : l'écran de la
+s'éclaircissaient d'office en papier : un grand halo blanc derrière le trait,
+qui effaçait le ciel. Il est désormais **au choix**, réglé par *papier
+derrière la machine*, à zéro au départ : le trait foncé se pose directement
+sur l'image. En auto, le creux reste sombre, et c'est voulu : l'écran de la
 machine garde un néon, le ciel autour passe à l'encre.
+
+« Le trait seulement » ne prend pas le négatif brut : 1 − image blanchirait
+tout ce qui entoure le trait, et le plus fort moins la couleur noircirait son
+cœur. Chaque point prend la couleur complémentaire — le plus fort plus le plus
+faible, moins la couleur : le vert vire au magenta, le blanc reste blanc, le
+noir reste noir. En encre, c'est l'encre qui passe en négatif.
 
 Les réglages du fond sont faits pour le néon et assombrissent la photo : pour
 un ciel lumineux, montez l'intensité du fond et baissez le creux.
@@ -1082,7 +1091,9 @@ maintenant couleur par couleur, et le fond qui ne bouge pas est gardé.
 python3 tools/mpc_performance.py morceau.mp3 --backdrop ciel.mp4 \
     --mode-trait auto --detourage 0.6
 python3 tools/mpc_performance.py morceau.mp3 --mode-trait encre --encre "#1a1030"
-python3 tools/mpc_performance.py morceau.mp3 --inverser
+python3 tools/mpc_performance.py morceau.mp3 --mode-trait encre --papier 0.6
+python3 tools/mpc_performance.py morceau.mp3 --inverser          # toute l'image
+python3 tools/mpc_performance.py morceau.mp3 --inverser fond     # ou trait
 ```
 
 `tools/verifier_lumiere.py` le contrôle : l'encre fonce le tracé sur un fond
@@ -1140,6 +1151,8 @@ Sept réglages qui font répondre l'image à la batterie. Chacun se **cale sur
 l'instrument de son choix** : la batterie ayant été reconnue à l'analyse
 (grosse caisse contre note de basse, caisse claire contre charley), « caisse
 claire » veut vraiment dire caisse claire. À zéro, la réaction est éteinte.
+Dans le studio, aucune ne part sur la batterie sans qu'on le demande : voir
+*Rien ne part tout seul*, plus bas.
 
 | réglage | ce que ça fait | option |
 | --- | --- | --- |
@@ -1204,11 +1217,12 @@ assez violents pour masquer tout ce qu'on cherche à régler.
 ### Sur quoi un effet se déclenche
 
 Six familles d'instruments, cela laisse vite deux effets tomber sur le même
-coup. Les listes proposent donc quatre sortes de déclencheurs — **41 en tout**,
+coup. Les listes proposent donc cinq sortes de déclencheurs — **42 en tout**,
 groupés dans le menu :
 
 | groupe | ce que c'est |
 | --- | --- |
+| **Aucun** (1) | `continu` — l'effet ne part sur aucun coup : il est là tant qu'il est monté, ou dans ses blocs de la frise. Le choix par défaut du studio |
 | **Instruments** (7) | grosse caisse, caisse claire, charley, basse, autres instruments, percussions, tout |
 | **Bandes de fréquences** (7) | sous-basses (20-60 Hz), graves (60-160), bas médium (160-400), médium (400-1000), haut médium (1000-2500), aigus (2500-6000), très aigus (6000-15000) |
 | **Hasard** (3) | rare, moyen, dense |
@@ -2394,6 +2408,60 @@ Masquer la machine ne fait presque rien gagner : son dessin ne coûte que
 quelques millisecondes. Le masque sert à dégager la vue — mais les avaries
 d'image (bandes arrachées, blocs, négatif…) travaillent sur la machine, et ne
 se voient plus sans elle.
+
+## Rien ne part tout seul : déclencheur « aucun », bouton 0, flash d'inversion
+
+### Le déclencheur « aucun », par défaut
+
+Jusqu'ici, chaque effet du studio partait sur un instrument dès qu'on montait
+son curseur — la grosse caisse, le plus souvent —, et quatre étaient allumés
+d'usine : le zoom d'impact sur la grosse caisse, l'éclair jaune sur la caisse
+claire, les glitchs sur les paroxysmes, le dédoublement sur les plus gros
+coups. Tout cela part maintenant **de zéro** :
+
+- les listes « sur : » s'ouvrent sur **aucun (en continu)** : l'effet ne part
+  sur aucun coup. Il est là tant que son curseur est monté — tout le morceau —,
+  ou seulement dans ses blocs posés sur la frise, ce qui permet de le
+  programmer passage par passage. Une avarie ou une réaction à enveloppe y est
+  pleinement allumée ; les effets qui partent par jets (étincelles, onde de
+  choc, bégaiement, patinage) en lancent un tous les quarts de seconde ;
+- on choisit un instrument, une bande ou le hasard dans la même liste si on
+  veut que l'effet réagisse à la musique ;
+- le zoom d'impact, l'éclair jaune, les glitchs et le dédoublement sont à
+  zéro d'usine. Le dédoublement garde la grosse caisse : il se choisit parmi
+  les plus gros coups, il lui faut des coups ;
+- les préréglages fournis gardent leur caractère : ceux qui comptaient sur la
+  grosse caisse ou sur les anciennes valeurs d'usine le disent maintenant
+  eux-mêmes. *propre* est désormais vraiment propre : la machine, sa courbe,
+  ses pads, et rien d'autre. `tools/verifier_studio.py` refuse un préréglage
+  ou un style qui monterait un effet à instrument sans dire lequel.
+
+La ligne de commande, elle, garde ses valeurs : `--punch-on` vaut toujours la
+grosse caisse, et `--punch-on continu` donne l'effet sans instrument.
+
+### Le bouton 0
+
+Tout en haut du rail, **Effets à 0** remet à zéro d'un coup tous les curseurs
+d'effet — réactions, avaries, écho, texture, éclair, glitchs, dédoublement,
+flash d'inversion — avant de personnaliser. La couleur, la machine, le fond,
+les instruments choisis et la frise ne bougent pas. *Ctrl + Z* remet les
+curseurs comme ils étaient.
+
+### Le flash d'inversion
+
+Dans les avaries, **flash d'inversion (toute l'image)** passe toute l'image en
+négatif, d'un coup : le noir devient blanc, le vert magenta. Tout ou rien,
+comme le miroir — un négatif à moitié fait n'est qu'un voile gris.
+
+- **Sans instrument** (par défaut), l'image reste en négatif tant que l'effet
+  est là : posé sur la frise, son bloc fait le flash. Lâché ou cliqué depuis sa
+  poignée, le bloc ne dure qu'**un temps** du morceau — un éclair ; on l'étire
+  pour un passage entier.
+- **Sur un instrument**, chaque coup fait un éclair de quelques images,
+  d'autant plus long que le curseur est haut.
+
+Il s'ajoute au *négatif du trait*, qui, lui, ne replie que le cœur du trait
+vers le sombre.
 
 ## STUDIO WEB — une page HTML, rien a installer
 

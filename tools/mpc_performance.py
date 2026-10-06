@@ -39,7 +39,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from omnipotard_intro import (  # noqa: E402 -- reutilise le moteur de l'intro
     SR, PALETTES, BACKGROUNDS, Renderer, Beam, FaisceauCouleur, _decode,
-    MODES_TRAIT,
+    MODES_TRAIT, INVERSIONS,
     _lowpass, detect_beat,
     detect_hits, hex_to_rgb, make_backdrop, write_wav, PAD_OF, PADS_REELS,
     pool_context,
@@ -183,7 +183,8 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               couleur_coups_libre=(1.0, 0.48, 0.12),
                               texture_touches="nappe",
                               mode_trait="neon", encre=(0.04, 0.07, 0.06),
-                              detourage=0.0, inverser=False,
+                              detourage=0.0, papier=0.0, inverser="non",
+                              inversion=0.0, inversion_on="grosse caisse",
                               effets=None,
                               **bgkw):
     r = Renderer(w, h, fps, duration, audio, curve=curve, seed=seed,
@@ -204,7 +205,10 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                          else "nappe")
     r.mode_trait = mode_trait if mode_trait in MODES_TRAIT else "neon"
     r.encre = tuple(float(c) for c in encre)
-    r.detourage, r.inverser = float(detourage), bool(inverser)
+    r.detourage, r.papier = float(detourage), float(papier)
+    # « inverser » etait une case : vrai voulait dire toute l'image
+    r.inverser = ("tout" if inverser is True else "non" if inverser is False
+                  else inverser if inverser in INVERSIONS else "non")
     r.wobble, r.split, r.split_px = float(wobble), float(split), float(split_px)
     r.split_count, r.split_on = int(split_count), str(split_on)
     r.glitch = float(glitch)
@@ -214,6 +218,7 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.ghost, r.ghost_on = float(ghost), str(ghost_on)
     r.blocs, r.blocs_on = float(blocs), str(blocs_on)
     r.invert, r.invert_on = float(invert), str(invert_on)
+    r.inversion, r.inversion_on = float(inversion), str(inversion_on)
     r.stut, r.stut_on = float(stut), str(stut_on)
     r.stut_loop = float(stut_loop)
     r.scramble, r.scr_len = float(scramble), float(scr_len)
@@ -302,6 +307,7 @@ EFFETS_PLACABLES = {
     "coupure": ("coupure", "coupure_on", False),
     "ghost": ("ghost", "ghost_on", False),
     "invert": ("invert", "invert_on", False),
+    "inversion": ("inversion", "inversion_on", False),
     "miroir": ("miroir", "miroir_on", False),
     "ondul": ("ondul", "ondul_on", False),
     "mosaic": ("mosaic", "mosaic_on", False),
@@ -1019,8 +1025,14 @@ def add_look_args(ap):
     ap.add_argument("--detourage", type=float, default=0.0, metavar="X",
                     help="liseré autour du trait qui le detache du fond : "
                          "sombre en neon, clair en encre (0 = aucun)")
-    ap.add_argument("--inverser", action="store_true",
-                    help="le negatif de toute l'image")
+    ap.add_argument("--papier", type=float, default=0.0, metavar="X",
+                    help="en encre ou en auto : le fond derriere la machine "
+                         "eclairci en papier (0 = le fond tel quel)")
+    ap.add_argument("--inverser", nargs="?", const="tout", default="non",
+                    choices=INVERSIONS,
+                    help="le negatif : de toute l'image (seul, --inverser "
+                         "vaut « tout »), du fond seulement, ou du trait "
+                         "seulement")
     ap.add_argument("--vignettage", type=float, default=1.0, metavar="X",
                     help="coins assombris : 1 = comme avant, 0 = dalle plate, "
                          "2 = deux fois plus creuse")
@@ -1076,6 +1088,11 @@ def add_look_args(ap):
     ap.add_argument("--invert", type=float, default=0.0,
                     help="negatif bref sur le coup")
     ap.add_argument("--invert-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
+    ap.add_argument("--inversion", type=float, default=0.0,
+                    help="flash d'inversion : toute l'image en negatif "
+                         "(« continu » : tant que l'effet est la)")
+    ap.add_argument("--inversion-on", default="grosse caisse", choices=DECLENCHEURS,
+                    metavar="QUOI")
     ap.add_argument("--stut", type=float, default=0.0,
                     help="begaiement : duree du gel de l'image, en secondes")
     ap.add_argument("--stut-on", default="charley", choices=DECLENCHEURS, metavar="QUOI")
@@ -1226,8 +1243,8 @@ def look_kwargs(args):
             "texture_touches": args.texture_touches,
             "mode_trait": args.mode_trait,
             "encre": hex_to_rgb(args.encre),
-            "detourage": args.detourage,
-            "inverser": bool(args.inverser),
+            "detourage": args.detourage, "papier": args.papier,
+            "inverser": args.inverser,
             "vignettage": args.vignettage, "scanlines": args.scanlines,
             "aberration": args.aberration,
             "passage": args.passage,
@@ -1241,6 +1258,7 @@ def look_kwargs(args):
             "ghost": args.ghost, "ghost_on": args.ghost_on,
             "blocs": args.blocs, "blocs_on": args.blocs_on,
             "invert": args.invert, "invert_on": args.invert_on,
+            "inversion": args.inversion, "inversion_on": args.inversion_on,
             "stut": args.stut, "stut_on": args.stut_on,
             "stut_loop": args.stut_loop,
             "scramble": args.scramble, "scr_len": args.scr_len,

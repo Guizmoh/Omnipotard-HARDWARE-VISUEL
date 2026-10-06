@@ -37,7 +37,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.15"
+VERSION = "2026-10-02.16"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -201,15 +201,16 @@ PRESETS = {
         "grid_pulse": 1.2, "grid_on": "grosse caisse",
         "tranches": 0.6, "tranches_on": "caisse claire",
         "split": 1.2, "split_count": 4, "trail": 1.4, "wave_gain": 1.30,
-        "glitch": 0.6, "step_div": 4,
+        "glitch": 0.6, "step_div": 4, "snare": 1.0,
     },
 
     "dub": {
         "echo": 0.60, "echo_n": 4, "echo_delay": 0.090,
         "trail": 2.0, "halo_doux": 0.5, "flottement": 0.5,
-        "wave_gain": 0.90, "punch": 0.05,
+        "wave_gain": 0.90, "punch": 0.05, "punch_on": "grosse caisse",
         "ring": 0.8, "ring_on": "grosse caisse",
         "couleurs": 0.5, "glitch": 0.3, "split": 0.8, "step_div": 1,
+        "snare": 1.0,
     },
 
     "idm": {
@@ -221,13 +222,14 @@ PRESETS = {
         "scramble": 0.25, "scr_len": 0.16,
         "parts": 1.0, "parts_n": 2000, "parts_on": "caisse claire",
         "split": 1.5, "glitch": 0.8,
+        "punch": 0.032, "punch_on": "grosse caisse", "snare": 1.0,
     },
 
     "trip hop": {
         "cadence": 3, "halo_doux": 1.1, "poussiere": 1.2, "flottement": 1.0,
-        "trail": 1.8, "wave_gain": 0.80, "punch": 0.03,
+        "trail": 1.8, "wave_gain": 0.80, "punch": 0.03, "punch_on": "grosse caisse",
         "palette": "orange", "glitch": 0.0, "split": 0.0,
-        "backdrop_sharp": 0.75, "step_div": 1,
+        "backdrop_sharp": 0.75, "step_div": 1, "snare": 1.0,
     },
 
     "hip hop": {
@@ -248,6 +250,7 @@ PRESETS = {
         "invert": 1.0, "invert_on": "grosse caisse",
         "parts": 1.1, "parts_n": 1500, "parts_on": "caisse claire",
         "split": 1.4, "glitch": 1.0, "step_div": 4,
+        "punch": 0.032, "punch_on": "grosse caisse", "snare": 1.0,
     },
 
     "techno": {
@@ -257,13 +260,16 @@ PRESETS = {
         "coupure": 0.8, "coupure_on": "grosse caisse",
         "parts": 0.8, "parts_n": 400, "parts_on": "charley",
         "couleurs": 0.4, "split": 1.0, "glitch": 0.5, "wave_gain": 1.10,
+        "snare": 1.0,
     },
 
     "ambient": {
         "echo": 0.50, "echo_n": 4, "echo_delay": 0.120,
         "halo_doux": 1.4, "trail": 2.2, "spectro": 0.8,
         "flottement": 0.4, "wave_gain": 0.60, "punch": 0.01,
+        "punch_on": "grosse caisse",
         "glitch": 0.0, "split": 0.0, "wave_smooth": 110, "step_div": 1,
+        "snare": 1.0,
     },
 }
 
@@ -324,9 +330,16 @@ AIDE = {
     "detourage": "Un liseré autour du trait qui le détache du fond : sombre "
                  "en néon (le ciel s'assombrit autour de la machine), clair "
                  "en encre. À zéro, rien ne change.",
-    "inverser": "Le négatif de toute l'image : le noir devient blanc, le "
-                "vert devient magenta. Avec un fond sombre, cela donne un "
-                "dessin sur papier ; avec une vidéo, un ciel en négatif.",
+    "papier": "En encre ou en auto : le fond derrière la machine éclairci en "
+              "papier blanc. À zéro, le fond reste tel qu'il est et le trait "
+              "foncé se pose directement dessus ; plus haut, un halo clair "
+              "détache la machine d'un fond chargé.",
+    "inverser": "Le négatif, en entier ou en partie. « toute l'image » : le "
+                "noir devient blanc, le vert devient magenta. « le fond "
+                "seulement » : la texture, la photo ou la vidéo passent en "
+                "négatif sous un trait qui ne change pas. « le trait "
+                "seulement » : le trait prend sa couleur complémentaire, à la "
+                "même clarté, sur un fond intact.",
     "couleurCoupsLibre": "La couleur des coups quand « une couleur au "
                          "choix » est retenue.",
     "textureTouches": "Ce qui remplit une touche ou un pad allumé : la nappe "
@@ -435,6 +448,11 @@ AIDE = {
     "ghost": "Une copie décalée et transparente se superpose à l'image.",
     "invert": "Le cœur du trait se replie vers le sombre en gardant ses bords "
               "lumineux.",
+    "inversion": "Toute l'image passe en négatif, d'un coup : le noir devient "
+                 "blanc, le vert magenta. Sans instrument, elle y reste tant "
+                 "que l'effet est là — posez-la sur la frise pour choisir "
+                 "l'instant et la durée du flash ; sur un instrument, chaque "
+                 "coup fait un éclair de quelques images.",
     "stut": "L'image décroche du son et rejoue en boucle un bout pris à "
             "l'instant du coup. Le son, lui, continue.",
     "stutLoop": "La longueur du bout rejoué. Sous une image, c'est un gel pur ; "
@@ -503,6 +521,7 @@ COMPTE = {
     "ring": "instrument", "gridPulse": "instrument", "bgFlash": "instrument",
     "tranches": "instrument", "blocs": "instrument", "roll": "instrument",
     "ghost": "instrument", "invert": "instrument", "stut": "instrument",
+    "inversion": "instrument",
     "miroir": "instrument", "ondul": "instrument", "mosaic": "instrument",
     "kaleido": "instrument", "cisaille": "instrument", "coupure": "instrument",
     "tapestop": "instrument",
@@ -535,7 +554,7 @@ CHAMPS = {
     "midi_force": "midiForce", "midi_offset": "midiOffset",
     "eclat_pads": "eclatPads", "couleur_coups": "couleurCoups",
     "texture_touches": "textureTouches", "mode_trait": "modeTrait",
-    "detourage": "detourage", "inverser": "inverser",
+    "detourage": "detourage", "inverser": "inverser", "papier": "papier",
     "midi_tempo": "midiTempo", "midi_type": "midiType",
     "vignettage": "vignettage", "scanlines": "scanlines",
     "aberration": "aberration",
@@ -554,6 +573,7 @@ CHAMPS = {
     "roll": "roll", "roll_on": "rollOn",
     "ghost": "ghost", "ghost_on": "ghostOn",
     "invert": "invert", "invert_on": "invertOn",
+    "inversion": "inversion", "inversion_on": "inversionOn",
     "stut": "stut", "stut_on": "stutOn", "stut_loop": "stutLoop",
     "scramble": "scramble", "scr_len": "scrLen",
     "miroir": "miroir", "miroir_on": "miroirOn",
@@ -689,15 +709,18 @@ class StillBackdrop:
                             self.w, self.h)
         return np.ascontiguousarray(cadre * self.mask, dtype=np.float32)
 
-    def clair(self, t):
+    def clair(self, t, papier=1.0):
         """Le fond pour un trait a l'encre : le creux et la dalle y sont un
-        papier clair plutot qu'une ombre (voir Renderer.fond_texture_clair)."""
+        papier clair plutot qu'une ombre, au dosage `papier` (voir
+        _eclaircir et Renderer.fond_texture_clair)."""
         if self.travel <= 1e-4 or self.mode == "aucun":
-            if getattr(self, "_clair", None) is None:
-                self._clair = _eclaircir(self.img[:self.h, :self.w], self.mask)
-            return self._clair
+            garde = getattr(self, "_clair", None)
+            if garde is None or garde[0] != papier:
+                self._clair = (papier, _eclaircir(self.img[:self.h, :self.w],
+                                                  self.mask, papier))
+            return self._clair[1]
         return _eclaircir(travel_crop(self.img, t / self.dur, self.travel,
-                                      self.mode, self.w, self.h), self.mask)
+                                      self.mode, self.w, self.h), self.mask, papier)
 
 
 def load_backdrop(path, w, h, strength=0.80, clear=0.45, scale=None, blur=2.2,
@@ -1244,10 +1267,10 @@ class SuiteDeFonds:
         self._dernier = (lect, img)
         return img
 
-    def clair(self, t):
+    def clair(self, t, papier=1.0):
         """Le fond pour un trait a l'encre (voir StillBackdrop.clair)."""
         self.at(t)
-        return _eclaircir(self._brut, self.mask)
+        return _eclaircir(self._brut, self.mask, papier)
 
 
 def apercu_fonds(paths, w, h, t, total, vitesse=1.0, boucle="boucle",
@@ -1330,14 +1353,18 @@ def disque_plein(dossier, besoin, quoi):
 PAPIER = 0.92
 
 
-def _eclaircir(brut, mask):
-    """Un fond dont le creux et la dalle sont eclaircis au lieu d'assombris.
+def _eclaircir(brut, mask, papier=1.0):
+    """Le fond d'un trait a l'encre : l'image telle quelle, son creux et sa
+    dalle eclaircis en papier selon `papier`.
 
     Le masque vaut le dosage du fond partout, moins dans le creux et sur la
-    dalle : ce qu'il y retire de l'image, on le rend en papier clair.
+    dalle. A 1, ce qu'il y retire de l'image est rendu en papier clair — un
+    grand halo blanc derriere la machine ; a 0, ni papier ni ombre : l'image
+    entiere, au dosage du fond, et le trait fonce se pose dessus.
     """
     plein = float(mask.max())
-    return np.ascontiguousarray(brut * mask + PAPIER * (plein - mask),
+    k = min(1.0, max(0.0, float(papier)))
+    return np.ascontiguousarray(brut * plein + (plein - mask) * (k * (PAPIER - brut)),
                                 dtype=np.float32)
 
 
@@ -2626,6 +2653,9 @@ COULEURS_COUPS = ("trait", "libre", "instrument", "arc-en-ciel")
 # le fond — pour les fonds clairs —, ou l'un ou l'autre selon le fond qui est
 # derriere chaque point (voir Renderer._sur_le_fond).
 MODES_TRAIT = ("neon", "encre", "auto")
+# ce que « inverser » met en negatif : rien, toute l'image, le fond seul, ou
+# le trait seul
+INVERSIONS = ("non", "tout", "fond", "trait")
 
 # La part de la lumiere de reference que garde chaque texture. Une texture
 # faite de traits fins concentre sa lumiere, que le halo fait paraitre plus
@@ -3577,6 +3607,17 @@ for _k, (_nom, _lo, _hi, _sm, _gap) in enumerate(BANDES):
 for _k, (_nom, _p) in enumerate(HASARDS):
     FAMILLES[_nom] = (PAD_HASARD + _k,)
 
+# « continu » : aucun instrument. L'effet est la tant qu'il est monte — tout
+# le morceau, ou seulement dans ses blocs sur la frise du studio — au lieu de
+# partir sur des coups. Une avarie ou une reaction a enveloppe y est
+# pleinement allumee (voir hit_env) ; celles qui partent par jets —
+# etincelles, onde de choc, begaiement, patinage — en lancent un toutes les
+# PAS_CONTINU secondes, sur des evenements a elles, qui n'allument aucun pad.
+CONTINU = "continu"
+PAD_CONTINU = 140
+PAS_CONTINU = 0.25
+FAMILLES[CONTINU] = (PAD_CONTINU,)
+
 # Une part se note apres le nom : « caisse claire · 1 sur 2 ». Deux effets
 # poses l'un sur « 1 sur 2 » et l'autre sur « l'autre sur 2 » ne peuvent
 # jamais partir en meme temps.
@@ -3606,6 +3647,7 @@ def decoupe_declencheur(nom):
 def groupes_declencheurs():
     """La liste complete, groupee comme la page l'affiche."""
     return [
+        ("Aucun instrument : l'effet est là tant qu'il est monté", [CONTINU]),
         ("Instruments", list(INSTRUMENTS)),
         ("Bandes de fréquences (une hauteur, pas un instrument)",
          [n for n, _, _, _, _ in BANDES]),
@@ -4080,6 +4122,16 @@ class Renderer:
         self.ev_pad = np.array([e[1] for e in ev], dtype=np.int32)
         self.ev_f = np.array([e[2] for e in ev], dtype=np.float64)
         self.ev_d = np.array([e[3] for e in ev], dtype=np.float64)
+        # les jets reguliers du declencheur « continu », ranges avec les
+        # autres dans l'ordre du temps
+        jets = np.arange(0.0, max(0.0, float(duration)), PAS_CONTINU)
+        if len(jets):
+            ordre = np.argsort(np.concatenate([self.ev_t, jets]), kind="stable")
+            self.ev_t = np.concatenate([self.ev_t, jets])[ordre]
+            self.ev_pad = np.concatenate(
+                [self.ev_pad, np.full(len(jets), PAD_CONTINU, np.int32)])[ordre]
+            self.ev_f = np.concatenate([self.ev_f, np.ones(len(jets))])[ordre]
+            self.ev_d = np.concatenate([self.ev_d, np.full(len(jets), 10.0)])[ordre]
         # grosses caisses et notes de basse
         self.ev_bass = np.isin(self.ev_pad, FAMILLES["grosse caisse"]
                                + FAMILLES["basse"])
@@ -4585,6 +4637,8 @@ class Renderer:
         qui doivent frapper ou ne rien faire, s'en servent ; les reactions
         douces gardent la force nue.
         """
+        if famille == CONTINU:
+            return 1.0                      # aucun instrument : allume
         dt = t - self.ev_t
         m = (dt >= 0.0) & (dt < win) & self._masque(famille)
         if seuil > 0.0:
@@ -4629,7 +4683,10 @@ class Renderer:
         sur le meme temps que la caisse claire, et l'effet avait alors l'air
         de se declencher sur elle.
         """
-        return self._masque(self.split_on)
+        # le dedoublement se choisit parmi les plus gros coups : sans
+        # instrument, il n'a rien a choisir — la grosse caisse alors
+        return self._masque(self.split_on if self.split_on != CONTINU
+                            else "grosse caisse")
 
     def sub_hit(self, t):
         """Enveloppe du dedoublement : attaque immediate, longue descente.
@@ -4747,7 +4804,10 @@ class Renderer:
     mode_trait = "neon"
     encre = (0.04, 0.07, 0.06)
     detourage = 0.0
-    inverser = False
+    papier = 0.0
+    inverser = "non"
+    inversion = 0.0
+    inversion_on = "grosse caisse"
     couleur_coups = "trait"
     couleur_coups_libre = (1.0, 0.48, 0.12)
     texture_touches = "nappe"
@@ -5984,14 +6044,16 @@ class Renderer:
         machine y est un papier clair au lieu d'une ombre. Un trait fonce dans
         une ombre ne se verrait plus ; c'est le meme creux, a l'envers."""
         creux = getattr(self, "_creux_fond", None)
-        if creux is None:
+        k = float(getattr(self, "papier", 0.0))
+        if creux is None or k <= 1e-3:
             return self.fond_texture(t)
         if self.c_bg is not None:
-            if self._fond_clair is None:
-                self._fond_clair = (self.c_bg + (PAPIER * (1.0 - creux))[..., None]
-                                    ).astype(np.float32)
-            return self._fond_clair
-        return self._fond_anime(t) + (PAPIER * (1.0 - creux))[..., None]
+            garde = self._fond_clair
+            if garde is None or garde[0] != k:
+                self._fond_clair = (k, (self.c_bg + (k * PAPIER * (1.0 - creux))[..., None]
+                                        ).astype(np.float32))
+            return self._fond_clair[1]
+        return self._fond_anime(t) + (k * PAPIER * (1.0 - creux))[..., None]
 
     def _fond_anime(self, t):
         pat = self.c_bg_pat
@@ -6190,6 +6252,20 @@ class Renderer:
             for y0 in range(0, self.H, self.BANDE):
                 b = img[y0:y0 + self.BANDE]
                 np.minimum(b, 2.0 * seuil - b, out=b)
+
+        # ---- flash d'inversion : toute l'image en negatif, d'un coup
+        # Tout ou rien, comme le miroir : un negatif a moitie fait n'est qu'un
+        # voile gris. Sur un instrument, chaque coup fait un eclair de
+        # quelques images, d'autant plus long que le curseur est haut ; sans
+        # instrument, l'image reste en negatif tant que l'effet est la — sur
+        # la frise, le temps de son bloc.
+        a = self.inversion * self.hit_env(t, self.inversion_on, fall=12.0,
+                                          plancher=PLANCHER_AVARIE)
+        if a > 0.30:
+            for y0 in range(0, self.H, self.BANDE):
+                b = img[y0:y0 + self.BANDE]
+                np.clip(b, 0.0, 1.0, out=b)
+                np.subtract(np.float32(1.0), b, out=b)
         self._texture_lofi(img, t, rng)
         return img
 
@@ -6376,12 +6452,20 @@ class Renderer:
         fige = (self.c_bg is not None and self.bg_flash <= 0.01
                 and (bd is None or (isinstance(bd, StillBackdrop)
                                     and (bd.travel <= 1e-4 or bd.mode == "aucun"))))
+        papier = float(getattr(self, "papier", 0.0))
+        inv = self._inversion_mode() == "fond"
+        # Le cache retient aussi ce dont le fond est fait : le studio garde
+        # le moteur d'un apercu a l'autre et lui change sa texture ou son
+        # image — garde sous la seule cle « clair », l'ancien fond restait.
         cache = self.__dict__.setdefault("_fonds_figes", {})
-        if fige and clair in cache:
-            return cache[clair]
+        cle = (clair, papier if clair else None, inv)
+        garde = cache.get(cle)
+        if fige and garde is not None and garde[0] is self.c_bg and garde[1] is bd:
+            return garde[2]
         tex = self.fond_texture_clair(t) if clair else self.fond_texture(t)
         if bd is not None:
-            b = bd.clair(t) if clair and hasattr(bd, "clair") else bd.at(t)
+            b = (bd.clair(t, papier) if clair and hasattr(bd, "clair")
+                 else bd.at(t))
             if self.bg_flash > 0.01:
                 b = b * (1.0 + 1.8 * self.bg_flash
                          * self.hit_env(t, self.flash_on, fall=13.0))
@@ -6392,9 +6476,21 @@ class Renderer:
             # un fond uni n'est qu'une couleur, de forme (1, 1, 3)
             fond = np.broadcast_to(fond, (self.H, self.W, 3))
         fond = np.ascontiguousarray(fond, dtype=np.float32)
+        if inv:
+            # le fond seul en negatif : le trait se pose ensuite dessus
+            fond = np.subtract(np.float32(1.0), np.clip(fond, 0.0, 1.0),
+                               dtype=np.float32)
         if fige:
-            cache[clair] = fond
+            cache[cle] = (self.c_bg, bd, fond)
         return fond
+
+    def _inversion_mode(self):
+        """Ce que « inverser » met en negatif : non, tout, le fond, le trait.
+        Un moteur d'avant ne connaissait que vrai ou faux."""
+        inv = getattr(self, "inverser", "non")
+        if inv is True:
+            return "tout"
+        return inv if inv in INVERSIONS else "non"
 
     def _sur_le_fond(self, trait, t, gc, coups, fluo, k_teinte, inten):
         """Pose le trait sur le fond, selon le mode choisi.
@@ -6450,6 +6546,9 @@ class Renderer:
         # l'encre prend un peu de la teinte du coup (caisse claire, couleurs
         # par instrument) : l'eclair jaune reste visible
         encre = np.array(self.encre, dtype=np.float32)
+        if self._inversion_mode() == "trait":
+            # le trait seul en negatif : l'encre foncee devient claire
+            encre = np.float32(1.0) - encre
         if k_teinte > 0.01:
             encre = encre * (1.0 - k_teinte) + np.array(fluo, np.float32) * (0.7 * k_teinte)
 
@@ -6586,9 +6685,25 @@ class Renderer:
         sp = self.split * self.sub_hit(t)
         if sp > 0.01:
             img = self._split(img, sp)
+        inv = self._inversion_mode()
+        if inv == "trait":
+            # Le trait seul en negatif : chaque point prend la couleur
+            # complementaire, a la meme clarte — le vert vire au magenta, le
+            # coeur blanc reste blanc —, et le noir autour reste noir : le
+            # fond ne bouge pas. (1 - image blanchirait tout ce qui entoure le
+            # trait ; le plus fort moins la couleur noircirait son coeur.)
+            for plan in (img, coups):
+                if plan is None:
+                    continue
+                bornes = plan.max(axis=2, keepdims=True)
+                bornes += plan.min(axis=2, keepdims=True)
+                np.subtract(bornes, plan, out=plan)
         # le fond passe sous les textures : scanlines, vignettage et grain
         # le travaillent comme le reste de la dalle.
-        if mode == "neon" and getattr(self, "detourage", 0.0) <= 0.001:
+        if mode == "neon" and getattr(self, "detourage", 0.0) <= 0.001 \
+                and inv == "fond":
+            img += self._fond_de(t, False)
+        elif mode == "neon" and getattr(self, "detourage", 0.0) <= 0.001:
             img += self.fond_texture(t)
             if self.backdrop is not None:
                 fond = self.backdrop.at(t)
@@ -6650,7 +6765,7 @@ class Renderer:
             img[:, :, 0] = np.roll(img[:, :, 0], sh, axis=1)
             img[:, :, 2] = np.roll(img[:, :, 2], -sh, axis=1)
 
-        if getattr(self, "inverser", False):
+        if self._inversion_mode() == "tout":
             # le negatif : le noir devient blanc, le vert devient magenta. Avant
             # la deformation du tube, pour que ses coins restent noirs
             np.clip(img, 0.0, 1.0, out=img)

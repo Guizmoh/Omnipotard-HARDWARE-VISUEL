@@ -48,7 +48,7 @@ from omnipotard_intro import (  # noqa: E402
     menage_fonds, apercu_fonds, genre_fond, BOUCLES_FOND, plan_fonds,
     _durees_fonds, _image_fond, LecteurFond,
     VERSION, INSTRUMENTS, DECLENCHEURS, groupes_declencheurs, MACHINES,
-    NOMS_MACHINES, COULEURS_COUPS, TEXTURES_TOUCHES, MODES_TRAIT,
+    NOMS_MACHINES, COULEURS_COUPS, TEXTURES_TOUCHES, MODES_TRAIT, INVERSIONS,
     compte_frappes, TRAVELLINGS, FAMILLES, apercu_possible,
     lire_plan_machines,
     backdrop_quality, PRESETS, STYLES, CHAMPS, AIDE, COMPTE, QUALITES, pick_split_times,
@@ -179,6 +179,15 @@ def safe_name(name):
     return name[:120]
 
 
+def _inversion(v):
+    """Ce que le negatif touche : « non », « tout », « fond » ou « trait ».
+    Une ancienne case cochee (« 1 », « true ») voulait dire toute l'image."""
+    v = str(v if v is not None else "").strip().lower()
+    if v in INVERSIONS:
+        return v
+    return "tout" if v in ("1", "true", "on", "oui") else "non"
+
+
 def _coche(valeur, defaut=False):
     """Une case a cocher, telle que la page l'envoie.
 
@@ -264,7 +273,10 @@ def look_from(q):
         "mode_trait": _dans(q.get("modeTrait"), MODES_TRAIT, "neon"),
         "encre": _couleur(q.get("encre"), "#0a1210"),
         "detourage": float(q.get("detourage", 0.0)),
-        "inverser": _coche(q.get("inverser")),
+        # le fond derriere la machine, eclairci en papier sous l'encre
+        "papier": float(q.get("papier", 0.0)),
+        # ce que le negatif touche ; l'ancienne case cochee voulait dire tout
+        "inverser": _inversion(q.get("inverser")),
         "vignettage": float(q.get("vignettage", 1.0)),
         "scanlines": float(q.get("scanlines", 1.0)),
         "aberration": float(q.get("aberration", 0.0)),
@@ -295,6 +307,9 @@ def look_from(q):
         "blocs_on": _dans(q.get("blocsOn"), DECLENCHEURS, "caisse claire"),
         "invert": float(q.get("invert", 0.0)),
         "invert_on": _dans(q.get("invertOn"), DECLENCHEURS, "grosse caisse"),
+        # le flash d'inversion : toute l'image en negatif
+        "inversion": float(q.get("inversion", 0.0)),
+        "inversion_on": _dans(q.get("inversionOn"), DECLENCHEURS, "grosse caisse"),
         "stut": float(q.get("stut", 0.0)),
         "stut_on": _dans(q.get("stutOn"), DECLENCHEURS, "charley"),
         "stut_loop": float(q.get("stutLoop", 0.05)),
@@ -787,7 +802,8 @@ class Studio:
                 "bg_flash", "flash_on",
                 "tranches", "tranches_on", "roll", "roll_on",
                 "ghost", "ghost_on", "blocs", "blocs_on",
-                "invert", "invert_on", "stut", "stut_on", "stut_loop",
+                "invert", "invert_on", "inversion", "inversion_on",
+                "stut", "stut_on", "stut_loop",
                 "scramble", "scr_len", "miroir", "miroir_on",
                 "ondul", "ondul_on", "mosaic", "mosaic_on",
                 "kaleido", "kaleido_on", "cisaille", "cisaille_on",
@@ -799,7 +815,7 @@ class Studio:
                 "vignettage", "scanlines", "aberration",
                 "eclat_pads", "couleur_coups", "couleur_coups_libre",
                 "texture_touches", "mode_trait", "encre", "detourage",
-                "inverser")
+                "papier", "inverser")
         APART = POSE + ("wave_smooth", "backdrop", "backdrop_strength",
                         "fond_vitesse", "fond_boucle", "fond_fondu",
                         "fond_photo",
@@ -2047,6 +2063,10 @@ PAGE = r"""<!doctype html>
   #rail button.modif::after{content:"";position:absolute;top:7px;right:14px;width:6px;
     height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 6px rgba(56,189,248,.6)}
   #rail hr{flex:none;border:none;height:1px;background:var(--lig);margin:6px}
+  /* « 0 » : une action, pas une section — un rond plutot qu'une icone */
+  #rail button .ic.zero{width:21px;height:21px;border:1.6px solid currentColor;
+    border-radius:50%;font:600 11.5px/1 var(--m)}
+  #rail button.zero:hover .ic.zero{color:var(--acc)}
   #panneau{min-height:0;overflow-y:auto;background:var(--pan)}
   #poignee{cursor:col-resize;position:relative;touch-action:none;background:var(--pan);
     border-right:1px solid var(--lig)}
@@ -2440,6 +2460,8 @@ PAGE = r"""<!doctype html>
 
 <main>
 <nav id="rail" aria-label="sections des réglages">
+  <button type="button" id="toutZero" class="zero" title="tous les effets à zéro — réactions, avaries, écho, texture, éclair, glitchs, dédoublement — avant de personnaliser. La couleur, la machine, le fond et la frise ne bougent pas (Ctrl + Z pour revenir)"><i class="ic zero" aria-hidden="true">0</i><span>Effets à 0</span></button>
+  <hr>
   <button type="button" data-section="prereglage"><i class="ic" data-ic="prereglage"></i><span>Préréglage</span></button>
   <hr>
   <button type="button" data-section="machine"><i class="ic" data-ic="machine"></i><span>Machine</span></button>
@@ -2544,7 +2566,8 @@ PAGE = r"""<!doctype html>
       <button type="button" class="q" title="explications">?</button></div>
     <p class="desc">La teinte du trait et sa nature : néon, encre pour les fonds clairs, ou les deux.</p>
     <div class="explications" hidden>
-      <p>Sur un <b>fond clair</b> — un ciel, une vidéo de nuages — un néon se perd : sa lumière s'ajoute au blanc. Trois réponses : <b>encre</b> peint la machine en trait foncé par-dessus le fond (les coups gardent leur couleur) ; <b>auto</b> choisit point par point, néon sur le sombre et encre sur le clair, ce qui suit un ciel qui change ; le <b>détourage</b> pose un liseré autour du trait, sombre en néon, clair en encre. Le creux derrière la machine s'éclaircit en encre au lieu de s'assombrir.</p>
+      <p>Sur un <b>fond clair</b> — un ciel, une vidéo de nuages — un néon se perd : sa lumière s'ajoute au blanc. Trois réponses : <b>encre</b> peint la machine en trait foncé par-dessus le fond (les coups gardent leur couleur) ; <b>auto</b> choisit point par point, néon sur le sombre et encre sur le clair, ce qui suit un ciel qui change ; le <b>détourage</b> pose un liseré autour du trait, sombre en néon, clair en encre. En encre, le fond reste tel qu'il est derrière la machine ; le curseur <b>papier derrière la machine</b> l'éclaircit en halo blanc, pour détacher le trait d'un fond chargé.</p>
+      <p><b>Inverser</b> met en négatif toute l'image, ou seulement le fond (le trait ne bouge pas), ou seulement le trait, qui prend alors sa couleur complémentaire sur un fond intact.</p>
       <p>Les réglages du fond sont faits pour le néon : ils assombrissent la photo. Pour un ciel lumineux, montez la <b>présence du fond</b> et baissez le <b>dégagement</b> — en auto, ce qui reste sombre (l'écran de la machine, le creux) garde le néon, le reste passe à l'encre.</p>
     </div>
     <div class="ctl liste"><label for="palette">couleur</label>
@@ -2568,10 +2591,18 @@ PAGE = r"""<!doctype html>
     <div id="encreBloc" hidden>
       <div class="ctl couleur"><label for="encre">couleur de l'encre</label>
         <input type="color" id="encre" value="#0a1210"></div>
+      <div class="ctl"><label for="papier">papier derrière la machine</label>
+        <input type="range" id="papier" min="0" max="1" step="0.05" value="0"><output><span id="v-pap">0.00</span></output></div>
     </div>
     <div class="ctl"><label for="detourage">détourage</label>
       <input type="range" id="detourage" min="0" max="2" step="0.05" value="0"><output><span id="v-det">0.00</span></output></div>
-    <div class="ctl coche"><label class="coche"><input type="checkbox" id="inverser"><span>inverser les couleurs (négatif)</span></label></div>
+    <div class="ctl liste"><label for="inverser">inverser (négatif)</label>
+      <select id="inverser">
+        <option value="non" selected>non</option>
+        <option value="tout">toute l'image</option>
+        <option value="fond">le fond seulement</option>
+        <option value="trait">le trait seulement</option>
+      </select></div>
   </div>
 
   <div class="section" data-section="dalle">
@@ -2685,7 +2716,7 @@ PAGE = r"""<!doctype html>
       <input type="range" id="wobble" min="0" max="1.5" step="0.05" value="0"><output><span id="v-wob">0.00</span></output></div>
     <div class="groupe">Dédoublement sur les gros coups</div>
     <div class="ctl"><label for="split">dédoublement du trait</label>
-      <input type="range" id="split" min="0" max="2.5" step="0.05" value="1"><output><span id="v-split">1.00</span></output>
+      <input type="range" id="split" min="0" max="2.5" step="0.05" value="0"><output><span id="v-split">0.00</span></output>
       <select id="splitOn" class="inst"></select></div>
     <div class="ctl"><label for="splitCount">dédoublements dans la vidéo, au plus</label>
       <input type="range" id="splitCount" min="0" max="12" step="1" value="3"><output><span id="v-sc">3</span></output></div>
@@ -2702,9 +2733,9 @@ PAGE = r"""<!doctype html>
       <input type="range" id="trail" min="0" max="2.5" step="0.05" value="1"><output><span id="v-trail">1.00</span></output></div>
     <div class="groupe">Coups et paroxysmes</div>
     <div class="ctl"><label for="snare">éclair jaune sur la caisse claire</label>
-      <input type="range" id="snare" min="0" max="2" step="0.05" value="1"><output><span id="v-sn">1.00</span></output></div>
+      <input type="range" id="snare" min="0" max="2" step="0.05" value="0"><output><span id="v-sn">0.00</span></output></div>
     <div class="ctl"><label for="glitch">glitchs sur les paroxysmes</label>
-      <input type="range" id="glitch" min="0" max="2" step="0.05" value="1"><output><span id="v-gl">1.00</span></output></div>
+      <input type="range" id="glitch" min="0" max="2" step="0.05" value="0"><output><span id="v-gl">0.00</span></output></div>
     <div class="groupe">La dalle de la machine</div>
     <div class="ctl liste"><label for="stepDiv">vitesse des pas du séquenceur</label>
       <select id="stepDiv">
@@ -2719,15 +2750,16 @@ PAGE = r"""<!doctype html>
   <div class="section" data-section="reactions">
     <div class="tete"><i class="ic" data-ic="reactions"></i><h2>Réactions au son</h2>
       <button type="button" class="q" title="explications">?</button></div>
-    <p class="desc">Ce qui bouge au rythme. Chaque réaction se cale sur un instrument, une bande de fréquences ou le hasard ; à zéro, elle est éteinte.</p>
+    <p class="desc">Ce qui bouge au rythme. Par défaut, une réaction ne part sur rien : elle est là tant que son curseur est monté, ou dans ses blocs de la frise. Calez-la sur un instrument, une bande de fréquences ou le hasard si vous le voulez ; à zéro, elle est éteinte.</p>
     <div class="explications" hidden>
-      <p>Les listes proposent quatre sortes de déclencheurs. <b>Instruments</b> : la batterie est reconnue à l'analyse, « caisse claire » veut donc vraiment dire caisse claire. <b>Bandes de fréquences</b> : une hauteur et non un instrument — elles attrapent aussi ce qui n'est pas percussif, une nappe qui monte, une voix, un souffle de cymbale. <b>Hasard</b> : tiré au sort, mais posé sur la grille du morceau, donc jamais à contretemps. <b>Un coup sur deux</b> : deux effets posés l'un sur « 1 sur 2 » et l'autre sur « l'autre sur 2 » ne peuvent jamais partir ensemble — c'est la réponse quand tout tombe en même temps.</p>
+      <p><b>Aucun</b>, le choix par défaut : l'effet ne part sur aucun coup. Il est là, en continu, tant que son curseur est monté — ou seulement dans ses blocs posés sur la frise, ce qui permet de le programmer passage par passage. Les effets qui partent par jets (étincelles, onde de choc, bégaiement, patinage) en lancent un tous les quarts de seconde.</p>
+      <p>Les listes proposent aussi quatre sortes de déclencheurs. <b>Instruments</b> : la batterie est reconnue à l'analyse, « caisse claire » veut donc vraiment dire caisse claire. <b>Bandes de fréquences</b> : une hauteur et non un instrument — elles attrapent aussi ce qui n'est pas percussif, une nappe qui monte, une voix, un souffle de cymbale. <b>Hasard</b> : tiré au sort, mais posé sur la grille du morceau, donc jamais à contretemps. <b>Un coup sur deux</b> : deux effets posés l'un sur « 1 sur 2 » et l'autre sur « l'autre sur 2 » ne peuvent jamais partir ensemble — c'est la réponse quand tout tombe en même temps.</p>
       <p>Pour une vraie explosion d'étincelles, montez le nombre, la vitesse et la durée ensemble. Au-delà de quelques centaines de braises, le tracé de chacune est écourté pour tenir un budget de points par image : c'est ce qui permet d'en lancer des dizaines de milliers sans que le rendu s'effondre.</p>
       <p>Chacun peut aussi n'agir que sur un passage : attrapez-le par sa poignée ⠿, à gauche de son nom, et lâchez-le sur la frise sous l'aperçu. Le curseur ci-dessous vaut alors pour le reste du morceau — à zéro, l'effet n'existe que dans ses blocs.</p>
     </div>
     <div class="groupe">L'image</div>
     <div class="ctl"><label for="punch">zoom d'impact</label>
-      <input type="range" id="punch" min="0" max="0.25" step="0.005" value="0.032"><output><span id="v-pu">0.03</span></output>
+      <input type="range" id="punch" min="0" max="0.25" step="0.005" value="0"><output><span id="v-pu">0.000</span></output>
       <select id="punchOn" class="inst"></select></div>
     <div class="ctl"><label for="shake">secousse de l'image</label>
       <input type="range" id="shake" min="0" max="2" step="0.05" value="0"><output><span id="v-sh">0.00</span></output>
@@ -2787,6 +2819,9 @@ PAGE = r"""<!doctype html>
     <div class="ctl"><label for="invert">négatif du trait</label>
       <input type="range" id="invert" min="0" max="2.5" step="0.05" value="0"><output><span id="v-in">0.00</span></output>
       <select id="invertOn" class="inst"></select></div>
+    <div class="ctl"><label for="inversion">flash d'inversion (toute l'image)</label>
+      <input type="range" id="inversion" min="0" max="2" step="0.05" value="0"><output><span id="v-inv">0.00</span></output>
+      <select id="inversionOn" class="inst"></select></div>
     <div class="ctl"><label for="miroir">miroir</label>
       <input type="range" id="miroir" min="0" max="2" step="0.05" value="0"><output><span id="v-mi">0.00</span></output>
       <select id="miroirOn" class="inst"></select></div>
@@ -3175,7 +3210,7 @@ function params() {
     textureTouches: $('#textureTouches').value,
     modeTrait: $('#modeTrait').value, encre: $('#encre').value,
     detourage: $('#detourage').value,
-    inverser: $('#inverser').checked ? '1' : '0',
+    inverser: $('#inverser').value, papier: $('#papier').value,
     midiTempo: $('#midiTempo').value, midiType: $('#midiType').value,
     midiBpm: $('#midiBpm').value,
     midiTelQuel: $('#midiTelQuel').checked ? '1' : '0',
@@ -3212,6 +3247,7 @@ function params() {
     roll: $('#roll').value, rollOn: $('#rollOn').value,
     ghost: $('#ghost').value, ghostOn: $('#ghostOn').value,
     invert: $('#invert').value, invertOn: $('#invertOn').value,
+    inversion: $('#inversion').value, inversionOn: $('#inversionOn').value,
     stut: $('#stut').value, stutOn: $('#stutOn').value,
     stutLoop: $('#stutLoop').value,
     scramble: $('#scramble').value, scrLen: $('#scrLen').value,
@@ -3256,8 +3292,14 @@ function majFrequences() {
       continue;
     }
     let txt = '';
+    // la liste « sur : » de l'effet ; deux ne portent pas son nom suivi de On
+    const AUTRE = {gridPulse: 'gridOn', bgFlash: 'flashOn'};
+    const choix = genre === 'instrument' ? $('#' + (AUTRE[id] || id + 'On')) : null;
     if (eteint) {
       txt = 'éteint';
+    } else if (choix && choix.value === 'continu') {
+      txt = 'en continu, sur aucun instrument : tant que le curseur est monté'
+          + ' — ou seulement dans ses blocs posés sur la frise';
     } else if (!FRAPPES) {
       txt = 'déposez un morceau pour connaître la fréquence';
     } else if (Array.isArray(genre)) {
@@ -3266,8 +3308,7 @@ function majFrequences() {
       txt = '~ ' + n + ' fois dans le morceau' + parMinute(n, duree)
           + '  (' + genre.join(' et ') + ')';
     } else if (genre === 'instrument') {
-      const sel = $('#' + id + 'On');
-      const fam = sel ? sel.value : 'grosse caisse';
+      const fam = choix ? choix.value : 'grosse caisse';
       const n = (FRAPPES.frappes || {})[fam] || 0;
       txt = '~ ' + n + ' fois dans le morceau' + parMinute(n, duree)
           + '  (' + fam + ')';
@@ -3467,6 +3508,7 @@ bind('#echo','#v-ec',2); bind('#echoN','#v-ecn',0);
 bind('#echoDelay','#v-ecd',3); bind('#couleurs','#v-cl',2);
 bind('#eclatPads','#v-ep',2); bind('#detourage','#v-det',2);
 bind('#spectro','#v-sp',2);
+bind('#inversion','#v-inv',2); bind('#papier','#v-pap',2);
 $('#cadence').oninput = e => {
   const n = +e.target.value;
   $('#v-ca').textContent = n < 2 ? 'fluide' : Math.round(30 / n) + ' i/s';
@@ -3476,7 +3518,7 @@ $('#travel').oninput = e => {
   $('#v-tv').textContent = Math.round(+e.target.value * 100) + ' %'; shot(); };
 for (const id of ['#travelMode','#punchOn','#shakeOn','#partsOn','#ringOn',
                   '#gridOn','#flashOn','#splitOn','#tranchesOn','#blocsOn',
-                  '#rollOn','#ghostOn','#invertOn','#stutOn','#miroirOn',
+                  '#rollOn','#ghostOn','#invertOn','#inversionOn','#stutOn','#miroirOn',
                   '#ondulOn','#mosaicOn','#kaleidoOn','#cisailleOn',
                   '#coupureOn','#tapestopOn','#stepDiv'])
   $(id).onchange = () => { majFrequences(); shot(); };
@@ -4029,7 +4071,7 @@ function rendreLImage() {
 // « var » : l'apercu peut etre demande avant que ces lignes ne soient lues
 var EXEMPLES = new Set(), minuteurEx = null;
 var LISTES_EX = ['machine', 'palette', 'bg', 'couleurCoups',
-                 'textureTouches', 'travelMode', 'modeTrait'];
+                 'textureTouches', 'travelMode', 'modeTrait', 'inverser'];
 function cleExemple(id) {
   return LISTES_EX.includes(id) ? id + '=' + $('#' + id).value : id;
 }
@@ -4187,7 +4229,7 @@ fetch('/config').then(r => r.json())
     // affiche accentues.
     const AFFICHE = {'arriere': 'arrière', 'medium': 'médium',
                      'bas medium': 'bas médium', 'haut medium': 'haut médium',
-                     'tres aigus': 'très aigus'};
+                     'tres aigus': 'très aigus', 'continu': 'aucun (en continu)'};
     const affiche = v => AFFICHE[v] || v;
     const remplir = (sel, liste, choisi) => {
       $(sel).innerHTML = liste.map(
@@ -4208,27 +4250,20 @@ fetch('/config').then(r => r.json())
                + (v === choisi ? ' selected' : '') + '>sur : ' + echap(affiche(v))
                + '</option>').join('') + '</optgroup>').join('');
     };
-    for (const [sel, def] of [['#splitOn', 'grosse caisse'],
-                              ['#punchOn', 'grosse caisse'],
-                              ['#shakeOn', 'grosse caisse'],
-                              ['#partsOn', 'caisse claire'],
-                              ['#ringOn', 'grosse caisse'],
-                              ['#gridOn', 'grosse caisse'],
-                              ['#flashOn', 'caisse claire'],
-                              ['#tranchesOn', 'caisse claire'],
-                              ['#blocsOn', 'caisse claire'],
-                              ['#rollOn', 'grosse caisse'],
-                              ['#ghostOn', 'caisse claire'],
-                              ['#invertOn', 'grosse caisse'],
-                              ['#stutOn', 'charley'],
-                              ['#miroirOn', 'caisse claire'],
-                              ['#ondulOn', 'basse'],
-                              ['#mosaicOn', 'caisse claire'],
-                              ['#kaleidoOn', 'caisse claire'],
-                              ['#cisailleOn', 'caisse claire'],
-                              ['#coupureOn', 'grosse caisse'],
-                              ['#tapestopOn', 'grosse caisse']])
-        remplirGroupes(sel, c.declencheurs || [], def);
+    /* Par defaut, aucun effet ne part sur la batterie : la liste s'ouvre sur
+       « aucun » — l'effet est la tant qu'il est monte, ou seulement dans ses
+       blocs de la frise —, et l'on choisit un instrument si on le veut. Le
+       dedoublement seul garde la grosse caisse : il se choisit parmi les
+       plus gros coups, il lui faut des coups. */
+    const groupes = c.declencheurs || [];
+    remplirGroupes('#splitOn', groupes.filter(g => !g.noms.includes('continu')),
+                   'grosse caisse');
+    for (const sel of ['#punchOn', '#shakeOn', '#partsOn', '#ringOn', '#gridOn',
+                       '#flashOn', '#tranchesOn', '#blocsOn', '#rollOn',
+                       '#ghostOn', '#invertOn', '#inversionOn', '#stutOn',
+                       '#miroirOn', '#ondulOn', '#mosaicOn', '#kaleidoOn',
+                       '#cisailleOn', '#coupureOn', '#tapestopOn'])
+        remplirGroupes(sel, groupes, 'continu');
     remplir('#travelMode', c.travellings || [], 'avant');
     // chaque qualite dit en clair ce qu'elle coute et ce qu'elle rend
     $('#machine').innerHTML = (c.machines || []).map(
@@ -4572,8 +4607,9 @@ function montrerSection(k) {
   BULLE.fermer();
   try { localStorage.setItem(CLE_SECTION, k); } catch (e) {}
 }
-for (const b of document.querySelectorAll('#rail button'))
+for (const b of document.querySelectorAll('#rail button[data-section]'))
   b.onclick = () => montrerSection(b.dataset.section);
+$('#toutZero').onclick = () => EFFETS.toutAZero();
 // le « ? » d'une section deplie ses explications
 for (const q of document.querySelectorAll('.section .q')) {
   q.onclick = () => {
@@ -5761,7 +5797,8 @@ var EFFETS = (() => {
   }
   function detail(b) {
     if (!(b.v > 0)) return 'coupé';
-    return texte(b.e, b.v) + (b.on ? ' · ' + b.on : '');
+    // « aucun instrument » est l'ordinaire : on ne le redit pas sur le bloc
+    return texte(b.e, b.v) + (b.on && b.on !== 'continu' ? ' · ' + b.on : '');
   }
   function decrire(b) {
     return nom(b.e) + ' · ' + detail(b) + ' · ' + tc(b.a) + ' → ' + tc(b.b);
@@ -5808,13 +5845,39 @@ var EFFETS = (() => {
   }
   // Un pas de retour en arriere : les blocs, et le plan des machines — la
   // frise deplace l'un comme l'autre, Ctrl + Z defait l'un comme l'autre.
-  function etat() {
-    return JSON.stringify({b: blocs, m: $('#machines').value, d: $('#machine').value});
+  function etat(avecCurseurs) {
+    const e = {b: blocs, m: $('#machines').value, d: $('#machine').value};
+    if (avecCurseurs) {
+      e.z = {};
+      for (const id of curseursEffets()) e.z[id] = $('#' + id).value;
+    }
+    return JSON.stringify(e);
   }
-  function memoriser() {
-    histo.push(etat());
+  function memoriser(avecCurseurs) {
+    histo.push(etat(avecCurseurs === true));
     if (histo.length > 100) histo.shift();
     refait = [];
+  }
+  // les curseurs que « 0 » remet a zero : chaque effet placable, et le
+  // dedoublement du trait
+  function curseursEffets() {
+    return Object.keys(PLAC).concat(['split']).filter(id => $('#' + id));
+  }
+  // « 0 » : tous les effets a zero, avant de personnaliser. L'allure — la
+  // couleur, la machine, le fond — et la frise ne bougent pas.
+  function toutAZero() {
+    const ids = curseursEffets().filter(id => +$('#' + id).value !== 0);
+    if (!ids.length) return setStatus('tous les effets sont déjà à zéro');
+    memoriser(true);
+    for (const id of ids) {
+      const el = $('#' + id);
+      el.value = 0;
+      el.dispatchEvent(new Event('input'));
+    }
+    majFrequences();
+    shot();
+    setStatus(ids.length + ' effet' + (ids.length > 1 ? 's' : '') + ' remis à zéro : '
+              + 'montez ceux que vous voulez, ou posez-les sur la frise (Ctrl + Z pour revenir)');
   }
   // apres chaque changement : les rangees, le champ, la frise et l'apercu
   function changer() {
@@ -5893,6 +5956,11 @@ var EFFETS = (() => {
   function retablir(json) {
     const e = JSON.parse(json);
     blocs = e.b;
+    // les curseurs, quand le pas en arriere est celui de « 0 »
+    for (const [id, v] of Object.entries(e.z || {})) {
+      const el = $('#' + id);
+      if (el && el.value !== v) { el.value = v; el.dispatchEvent(new Event('input')); }
+    }
     if (e.m !== $('#machines').value || e.d !== $('#machine').value) {
       $('#machine').value = e.d;
       seqPose(e.m);
@@ -5901,15 +5969,19 @@ var EFFETS = (() => {
     changer();
   }
   function annuler() {
-    if (!histo.length) return setStatus('rien à annuler sur la frise');
-    refait.push(etat());
-    retablir(histo.pop());
-    setStatus('frise : retour en arrière (Ctrl + Maj + Z pour refaire)');
+    if (!histo.length) return setStatus('rien à annuler');
+    const h = histo.pop();
+    refait.push(etat(!!JSON.parse(h).z));
+    retablir(h);
+    majFrequences();
+    setStatus('retour en arrière (Ctrl + Maj + Z pour refaire)');
   }
   function refaire() {
     if (!refait.length) return;
-    histo.push(etat());
-    retablir(refait.pop());
+    const r = refait.pop();
+    histo.push(etat(!!JSON.parse(r).z));
+    retablir(r);
+    majFrequences();
   }
   // un nouveau morceau : ses blocs de la derniere fois, s'il y en a
   function morceau(n) {
@@ -5989,7 +6061,7 @@ var EFFETS = (() => {
     insp.classList.toggle('dessous', dessous);
   }
   // l'intensite : un pas de retour en arriere par geste, pas par cran
-  q('.bi-v').addEventListener('pointerdown', memoriser);
+  q('.bi-v').addEventListener('pointerdown', () => memoriser());
   q('.bi-v').addEventListener('keydown', e => {
     if (!e.repeat && /^(Arrow|Page|Home|End)/.test(e.key)) memoriser();
   });
@@ -6047,7 +6119,7 @@ var EFFETS = (() => {
     if (c.matches && c.matches('input[type=text], input[type=number], textarea, select')) return;
     const dedans = c === document.body
              || (c.closest && c.closest('#frise, #blocInsp, #chrono, #carteApercu, '
-                                        + '.ctl-glisse, #seqBloc'));
+                                        + '.ctl-glisse, #seqBloc, #rail'));
     if ((e.ctrlKey || e.metaKey) && !e.altKey && /^[zZyY]$/.test(e.key)) {
       if (!dedans) return;
       e.preventDefault();
@@ -6064,9 +6136,11 @@ var EFFETS = (() => {
   // ---- les poignees du panneau : on emporte un effet vers la frise
   // le bloc qu'un depot donnerait : il commence la ou l'on lache, et dure
   // deux mesures (huit temps), ou quatre secondes sans grille
-  function bornesDepot(tt, libre, auTemps) {
+  // le flash d'inversion est un eclair : son bloc ne dure qu'un temps
+  function bornesDepot(tt, libre, auTemps, e) {
     const T = duration, g = FRISE.grille();
-    const L = Math.min(T, g && g.sure && g.temps > 0.05 ? 8 * g.temps : 4);
+    const temps = g && g.sure && g.temps > 0.05 ? g.temps : 0;
+    const L = Math.min(T, e === 'inversion' ? (temps || 0.5) : temps ? 8 * temps : 4);
     const a = Math.max(0, Math.min(FRISE.aimanter(tt, libre, auTemps), T - L));
     return [a, a + L];
   }
@@ -6090,7 +6164,7 @@ var EFFETS = (() => {
       g.querySelector('span').textContent = 'lâchez-le sur la frise';
       return;
     }
-    const [a, b] = bornesDepot(tt, libre);
+    const [a, b] = bornesDepot(tt, libre, false, prise && prise.e);
     FRISE.fantome({a, b});
     g.querySelector('span').textContent = tc(a) + ' → ' + tc(b);
   }
@@ -6109,7 +6183,7 @@ var EFFETS = (() => {
   // proche de l'instant regarde
   function ici(e) {
     if (!track) return;
-    const [a, b] = bornesDepot(+$('#scrub').value || 0, false, true);
+    const [a, b] = bornesDepot(+$('#scrub').value || 0, false, true, e);
     deposer(e, a, b);
   }
   function poignee(e, ctl) {
@@ -6149,7 +6223,7 @@ var EFFETS = (() => {
       const tt = FRISE.sous(ev.clientX, ev.clientY);
       finirGlisse();
       if (tt !== null) {
-        const [a, c] = bornesDepot(tt, ev.altKey);
+        const [a, c] = bornesDepot(tt, ev.altKey, false, e);
         deposer(e, a, c);
       }
     });
@@ -6169,7 +6243,7 @@ var EFFETS = (() => {
     }
     ecrire(false);
   }
-  return {placables, morceau, liste: () => blocs, rangs: () => nRangs,
+  return {placables, morceau, toutAZero, liste: () => blocs, rangs: () => nRangs,
           choisi: () => choisi, trouver, choisir, memoriser, deplacer,
           fini: changer, teinte, nom, net, detail, decrire,
           fondu: () => FONDU, placerInsp};

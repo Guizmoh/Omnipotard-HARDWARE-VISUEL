@@ -48,9 +48,9 @@ SANS = {"splitPx", "splitCount", "partsN", "partsSpeed", "partsLife",
         "fondVitesse", "fondFondu", "fondPhoto"}
 # Les listes dont chaque choix a son exemple
 OPTIONS = ("machine", "palette", "bg", "couleurCoups", "textureTouches",
-           "travelMode", "modeTrait")
+           "travelMode", "modeTrait", "inverser")
 # Les cases a cocher qui ont leur exemple : cochees
-COCHES = ("inverser",)
+COCHES = ()
 # Le repos : ce qui a deja un effet par defaut est coupe, pour que chaque
 # exemple ne montre que le sien
 REPOS = {"glitch": "0", "split": "0", "punch": "0", "snare": "0",
@@ -70,6 +70,9 @@ AVEC = {
     # la nature du trait se juge sur un fond clair : un ciel
     "modeTrait": {"fond": "ciel", "bdStrength": "1"},
     "detourage": {"fond": "ciel", "bdStrength": "1"},
+    # le papier n'existe qu'a l'encre ; le negatif du fond se voit sur un ciel
+    "papier": {"modeTrait": "encre", "fond": "ciel", "bdStrength": "1"},
+    "inverser": {"fond": "ciel", "bdStrength": "1"},
 }
 # Des valeurs choisies a la main plutot qu'aux 85 % de la course
 FORT = {"taille": "0.55", "nettete": "0.4", "reflet": "1", "split": "2.2",
