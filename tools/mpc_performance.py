@@ -26,6 +26,7 @@ Pour un apercu rapide avant de lancer le morceau entier :
 """
 
 import argparse
+import errno
 import json
 import os
 import shutil
@@ -765,6 +766,77 @@ class RenduArrete(Exception):
     """Le rendu a ete arrete a la demande, avant sa fin."""
 
 
+class EncodeurArrete(Exception):
+    """ffmpeg s'est arrete avant d'avoir recu toutes les images."""
+
+
+def _envoyer(proc, buf):
+    """Donne une image a ffmpeg.
+
+    S'il est deja mort, ecrire dans son tuyau leve « Broken pipe » — ou,
+    sous Windows, parfois « Invalid argument » —, ce qui ne dit rien de ce
+    qui s'est passe. On le signale a part : le rendu va chercher la raison
+    dans ce que ffmpeg a ecrit avant de s'arreter.
+    """
+    try:
+        proc.stdin.write(buf)
+    except (BrokenPipeError, ConnectionResetError) as e:
+        raise EncodeurArrete() from e
+    except OSError as e:
+        if proc.poll() is not None or e.errno in (errno.EPIPE, errno.EINVAL):
+            raise EncodeurArrete() from e
+        raise
+
+
+def _fin_du_journal(chemin, n=4000):
+    """Les dernieres lignes ecrites par ffmpeg ('' s'il n'a rien dit)."""
+    try:
+        with open(chemin, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - n))
+            return f.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def panne_ffmpeg(dit, dossier, code):
+    """La phrase a dire quand ffmpeg s'arrete avant la fin de la video.
+
+    Avant, la page n'affichait que « BrokenPipeError: Broken pipe » : la
+    raison, ffmpeg l'avait ecrite dans la fenetre du studio, que personne ne
+    regarde pendant un rendu. On la reprend ici, avec ce qu'on peut en
+    conclure.
+    """
+    lignes = [l.strip() for l in dit.splitlines() if l.strip()][-3:]
+    txt = " ".join(lignes).lower()
+    try:
+        libre = shutil.disk_usage(dossier).free
+    except OSError:
+        libre = None
+    if (libre is not None and libre < 300e6) or "no space left" in txt:
+        return disque_plein(dossier, 2e9, "ecrire la video")
+    msg = "ffmpeg s'est arrêté avant la fin de la vidéo"
+    if code not in (None, 0):
+        msg += " (code %d)" % code
+    if lignes:
+        msg += ". Il dit : « %s »." % " / ".join(lignes)[:400]
+    else:
+        msg += (", sans rien dire : il a peut-être été fermé de l'extérieur "
+                "— antivirus, mémoire épuisée.")
+    if any(m in txt for m in ("permission denied", "access denied")):
+        msg += (" La vidéo n'a pas pu être écrite : le dossier out\\studio est "
+                "peut-être protégé (OneDrive, antivirus).")
+    elif any(m in txt for m in ("could not open", "error opening output")):
+        msg += " La vidéo n'a pas pu être créée à cet endroit."
+    elif any(m in txt for m in ("cannot allocate", "out of memory",
+                                "memory allocation")):
+        msg += (" La mémoire a manqué : fermez d'autres fenêtres, ou rendez "
+                "en 1080p plutôt qu'en 4K.")
+    else:
+        msg += " Relancez le rendu ; si cela recommence, copiez ce message."
+    return msg
+
+
 def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
                  fps=30, crf=None, jobs=None, seed=7, curve=True, palette="vert",
                  info=None, progress=None, quality="compatible", arret=None,
@@ -800,7 +872,7 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
     if outdir:
         os.makedirs(outdir, exist_ok=True)
 
-    entree = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+    entree = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats",
               "-f", "rawvideo", "-pix_fmt", "rgb24",
               "-s", "%dx%d" % (width, height), "-r", str(fps), "-i", "-",
               "-i", wav]
@@ -844,9 +916,14 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
         if hasattr(fond, "toucher"):
             fond.toucher()
 
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    # Ce que ffmpeg dit part dans un fichier, et non plus dans la fenetre du
+    # studio : s'il s'arrete en route, la page peut ainsi afficher pourquoi.
+    journal = os.path.join(tmpdir, "ffmpeg.txt")
+    with open(journal, "wb") as err:
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=err)
     t0 = time.time()
-    arrete = False
+    arrete = mort = False
+    dit = ""
     try:
         if jobs > 1:
             # Le moteur est construit : la memoire qu'il reste est celle dont
@@ -861,50 +938,73 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
                 print("  memoire disponible limitee : %d taches de rendu au lieu "
                       "de %d (fermez quelques fenetres pour aller plus vite)"
                       % (jobs, demande), flush=True)
-        if jobs > 1:
-            if ctx.get_start_method() == "spawn":
-                # Les taches reconstruisent chacune leurs tables de
-                # deformation, qu'on ne leur transmet pas ; le processus
-                # principal ne dessine plus rien et n'a donc plus besoin des
-                # siennes. Elles pesent 230 Mo en 4K.
-                _R.forget_warp()
+        fait = 0                         # images deja confiees a ffmpeg
+        if jobs > 1 and ctx.get_start_method() == "spawn":
+            # Les taches reconstruisent chacune leurs tables de deformation,
+            # qu'on ne leur transmet pas ; le processus principal ne dessine
+            # plus rien et n'a donc plus besoin des siennes. Elles pesent
+            # 230 Mo en 4K.
+            _R.forget_warp()
+        while jobs > 1 and not arrete and fait < nframes:
             chunk = max(jobs, 24)
-            with ctx.Pool(jobs, initializer=_init_worker,
-                          initargs=(_R, _DUR)) as pool:
-                for s0 in range(0, nframes, chunk):
-                    if arret and arret():
-                        # la sortie du bloc « with » termine les taches
-                        arrete = True
-                        break
-                    toucher()
-                    idx = range(s0, min(nframes, s0 + chunk))
-                    for buf in pool.map(_worker, idx, chunksize=1):
-                        proc.stdin.write(buf)
-                    if progress:
-                        progress(min(nframes, s0 + chunk), nframes, time.time() - t0)
-        else:
-            for i in range(nframes):
+            try:
+                with ctx.Pool(jobs, initializer=_init_worker,
+                              initargs=(_R, _DUR)) as pool:
+                    for s0 in range(fait, nframes, chunk):
+                        if arret and arret():
+                            # la sortie du bloc « with » termine les taches
+                            arrete = True
+                            break
+                        toucher()
+                        idx = range(s0, min(nframes, s0 + chunk))
+                        for buf in pool.map(_worker, idx, chunksize=1):
+                            _envoyer(proc, buf)
+                            fait += 1
+                        if progress:
+                            progress(fait, nframes, time.time() - t0)
+            except (BrokenPipeError, EOFError, ConnectionResetError,
+                    MemoryError) as e:
+                # Sous Windows, chaque tache recoit le moteur entier en
+                # demarrant ; si l'une meurt en route — la memoire epuisee,
+                # le plus souvent —, le processus principal ne voyait qu'un
+                # « Broken pipe » et tout le rendu etait perdu. On reprend la
+                # ou on en etait, avec moitie moins de taches, jusqu'a une
+                # seule s'il le faut : plus lent, mais la video sort.
+                jobs = info["jobs"] = max(1, jobs // 2)
+                print("  une tache de rendu s'est arretee (%s) : le rendu "
+                      "reprend a l'image %d avec %d tache%s, plus lentement"
+                      % (type(e).__name__, fait, jobs, "s" if jobs > 1 else ""),
+                      flush=True)
+        if jobs <= 1 and _R.curve and getattr(_R, "ww00", None) is None:
+            _R._build_warp()             # le processus principal dessine seul
+        if jobs <= 1 and not arrete:
+            for i in range(fait, nframes):
                 if arret and i % 6 == 0 and arret():
                     arrete = True
                     break
                 if i % 24 == 0:
                     toucher()
-                proc.stdin.write(_worker(i))
+                _envoyer(proc, _worker(i))
                 if progress and i % 12 == 0:
                     progress(i + 1, nframes, time.time() - t0)
+    except EncodeurArrete:
+        # ffmpeg est mort en route : sa raison est dans son journal
+        mort = True
     except BaseException:
         # une erreur, ou Ctrl-C : ffmpeg ne doit pas rester en vie a attendre
         # des images, ni laisser un fichier a moitie ecrit
         arrete = True
         raise
     finally:
-        if arrete:
-            proc.kill()
+        if arrete or mort:
+            if proc.poll() is None:
+                proc.kill()
             try:
                 proc.stdin.close()
             except OSError:
                 pass
             proc.wait()
+            dit = _fin_du_journal(journal)
             shutil.rmtree(tmpdir, ignore_errors=True)
             try:
                 os.remove(out)
@@ -916,26 +1016,23 @@ def render_video(music, out, start=0.0, duration=None, width=1920, height=1080,
             except OSError:
                 pass                     # ffmpeg deja mort : on le dit plus bas
             proc.wait()
+            dit = _fin_du_journal(journal)
         if hasattr(fond, "liberer"):
             fond.liberer()
     if arrete:
         raise RenduArrete("rendu arrete")
     shutil.rmtree(tmpdir, ignore_errors=True)
-    if proc.returncode:
+    if mort or proc.returncode:
         # un fichier a moitie ecrit ne sert a rien et prend de la place —
         # justement celle qui manque, le plus souvent
         try:
             os.remove(out)
         except OSError:
             pass
-        try:
-            libre = shutil.disk_usage(outdir or ".").free
-        except OSError:
-            libre = None
-        if libre is not None and libre < 300e6:
-            raise RuntimeError(disque_plein(
-                os.path.abspath(outdir or "."), 2e9, "ecrire la video"))
-        raise RuntimeError("ffmpeg a echoue (code %d)" % proc.returncode)
+        if dit.strip():
+            print(dit.rstrip(), file=sys.stderr, flush=True)
+        raise RuntimeError(panne_ffmpeg(dit, os.path.abspath(outdir or "."),
+                                        proc.returncode))
     if progress:
         progress(nframes, nframes, time.time() - t0)
     return info

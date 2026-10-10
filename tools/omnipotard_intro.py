@@ -37,7 +37,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.18"
+VERSION = "2026-10-02.19"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -6455,7 +6455,11 @@ class Renderer:
                                     plancher=PLANCHER_AVARIE)
         if a > 0.02:
             for _ in range(int(1 + 5 * a)):
-                hb = int(rng.integers(max(2, H // 90), max(4, int(H * 0.16 * min(a, 1.5))) + 3))
+                # la bande la plus haute suit le reglage ; la plus basse ne
+                # doit jamais la depasser, sans quoi le tirage est impossible
+                # (en 1080p, des que l'effet retombe sous 0,05)
+                haut = max(4, int(H * 0.16 * min(a, 1.5))) + 3
+                hb = int(rng.integers(max(2, min(H // 90, haut - 1)), haut))
                 y0 = int(rng.integers(0, max(1, H - hb)))
                 lg = int(W * float(rng.uniform(0.25, 0.85)))
                 x0 = int(rng.integers(0, max(1, W - lg)))

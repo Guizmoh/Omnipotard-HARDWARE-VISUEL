@@ -2559,6 +2559,33 @@ maintenant le trait de rouge côté extérieur et de bleu côté intérieur, que
 que soit sa couleur, de plus en plus large vers les bords, et son curseur va
 jusqu'à 3. Voir « La matière de la dalle ».
 
+### Un rendu ne s'arrête plus sur « Broken pipe »
+
+Un rendu pouvait échouer sur un message sans explication : *BrokenPipeError:
+[Errno 32] Broken pipe*. Il voulait dire qu'un des deux partenaires du rendu
+avait lâché en route, sans dire lequel ni pourquoi :
+
+- **une tâche de rendu**. Sous Windows, chacune reçoit le moteur entier en
+  démarrant ; si l'une meurt en route, la mémoire épuisée le plus souvent, tout
+  le rendu était perdu. Il reprend maintenant là où il en était, avec moitié
+  moins de tâches, et jusqu'à une seule s'il le faut : plus lent, mais la vidéo
+  sort. La fenêtre du studio le signale (« une tâche de rendu s'est arrêtée…
+  le rendu reprend à l'image… ») ;
+- **ffmpeg**, qui encode la vidéo. Sa raison (disque plein, dossier protégé,
+  fichier impossible à créer) partait dans la fenêtre noire du studio, que
+  personne ne regarde pendant un rendu. Elle est maintenant recueillie et
+  affichée dans la page, avec ce qu'on peut en conclure. Le contrôle « disque
+  plein », qui était court-circuité dans ce cas, s'applique aussi.
+
+Les deux pannes ont été provoquées exprès pour le vérifier : tâche tuée au
+démarrage, mémoire épuisée en plein rendu, sortie impossible à créer, ffmpeg
+tué en route.
+
+Corrigé au passage : le **tri de pixels** plantait en 720p et au-dessus quand
+il était faible, par exemple quand l'effet retombe après un coup. Le tirage
+de la hauteur de ses bandes devenait impossible. Il a été essayé à toutes les
+intensités, en 720p, 1080p et 4K.
+
 ## STUDIO WEB — une page HTML, rien a installer
 
 `tools/build_web_studio.py` fabrique **un seul fichier HTML autonome** : on
