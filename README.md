@@ -241,15 +241,22 @@ près. À 0 la dalle est plate, au-delà elle se creuse.
 
 L'**aberration** ne se confond pas avec le dédoublement du trait (`split`) :
 celui-ci part sur les gros subs et frappe toute l'image d'un coup, c'est un
-défaut de convergence. Une aberration d'objectif ne se voit qu'en **bord de
-champ** — un objectif ne disperse pas les couleurs au milieu — et elle ne bouge
-jamais. D'où le masque radial, nul au centre.
+défaut de convergence. Une aberration d'objectif vient de ce que l'objectif ne
+focalise pas toutes les couleurs à la même taille : le rouge sort un peu plus
+grand, le bleu un peu plus petit, autour du centre de l'image. Le décalage est
+donc nul au milieu et grandit vers les bords, et il ne bouge jamais.
 
-Elle ne coûte rien : les deux plans sont décalés d'un nombre **entier** de
-pixels plutôt que rééchantillonnés. À ces amplitudes-là (un à trois pixels) la
-différence ne se voit pas, et un rééchantillonnage bilinéaire aurait coûté une
-passe de plus sur toute l'image pour le même résultat. Mesuré : le surcoût se
-perd dans le bruit de mesure.
+Les franges sont tirées de la **clarté** du trait, pas de ses canaux rouge et
+bleu : dans une palette verte ceux-ci sont presque vides, et les décaler — ce
+que faisait la première version — ne montrait presque rien, même au maximum.
+Elles ne s'ajoutent que là où le trait n'est pas déjà : son cœur garde sa
+couleur, une frange rouge le borde côté extérieur, une bleue côté intérieur.
+À 1, la frange fait 0,8 % de la distance au centre : six pixels sur le bord de
+la machine en 1080p, une dizaine dans les coins. Le curseur va jusqu'à 3, où
+le rouge et le bleu se détachent en copies franches.
+
+L'image est relue en bilinéaire, ligne puis colonne : 55 ms par image en
+1080p quand l'effet est monté, rien quand il est à zéro.
 
 ### Ce qui n'a pas été optimisé, et pourquoi
 
@@ -2543,6 +2550,14 @@ python3 tools/mpc_performance.py morceau.mp3 --bg etoiles --bg-color '#1a3a6a' -
     --tri 1.2 --tri-on "caisse claire" --retro 0.9 --retro-on "grosse caisse"
 python3 tools/mpc_performance.py morceau.mp3 --preset "glitch art" --bg tunnel --bg-anim 1.5
 ```
+
+### La frange d'objectif, enfin visible
+
+La **frange d'objectif** (section « Texture de la dalle ») a été refaite : sur
+un trait vert, elle ne montrait presque rien même au maximum. Elle borde
+maintenant le trait de rouge côté extérieur et de bleu côté intérieur, quelle
+que soit sa couleur, de plus en plus large vers les bords, et son curseur va
+jusqu'à 3. Voir « La matière de la dalle ».
 
 ## STUDIO WEB — une page HTML, rien a installer
 

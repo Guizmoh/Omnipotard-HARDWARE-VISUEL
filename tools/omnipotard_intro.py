@@ -37,7 +37,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.17"
+VERSION = "2026-10-02.18"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -374,12 +374,12 @@ AIDE = {
     "scanlines": "Le peigne horizontal des lignes de tube. À 1 c'est la dalle "
                  "d'origine, à 0 l'image est lisse. Marqué, il donne le grain "
                  "d'un moniteur filmé.",
-    "aberration": "La frange de couleur d'un objectif : rouge d'un côté, bleu "
-                  "de l'autre, et seulement en bord de champ — un objectif ne "
-                  "disperse pas au milieu. Elle est permanente, là où le "
-                  "dédoublement du trait part sur les gros subs et frappe "
-                  "toute l'image. Elle ne coûte rien : un décalage entier de "
-                  "deux plans, pas un rechantillonnage.",
+    "aberration": "La frange de couleur d'un objectif : le trait est bordé de "
+                  "rouge côté extérieur et de bleu côté intérieur, de plus en "
+                  "plus large vers les bords de l'image — un objectif ne "
+                  "disperse pas au milieu. Visible avec toutes les couleurs, "
+                  "vert compris. Elle est permanente, là où le dédoublement "
+                  "du trait part sur les gros subs et décale toute l'image.",
     "midiType": "Ce que contient le fichier. En piano, chaque note allume la "
                 "touche de sa hauteur, sur le clavier du MiniFreak. En batterie, "
                 "la hauteur désigne un instrument : chacun prend un pad, du "
@@ -5034,10 +5034,6 @@ class Renderer:
         # on retrouve exactement la dalle d'origine, a 0 elle est plate.
         self._vign_ecart = (self._vign - 1.0).astype(np.float32)
         self._scan_ecart = (self._scan - 1.0).astype(np.float32)
-        # Le poids de l'aberration : nul au centre, plein dans les coins. Un
-        # objectif ne disperse pas les couleurs au milieu du champ, seulement
-        # en bord — c'est ce qui la distingue d'un simple dedoublement.
-        self._abr = np.clip(nx * nx * 0.62 + ny * ny, 0.0, 1.0).astype(np.float32)
 
     def _build_warp(self):
         """Tables de gather de la deformation cathodique.
@@ -6658,31 +6654,68 @@ class Renderer:
                 x0 = int(rng.integers(0, W // 2))
                 img[y:y + 1, x0:x0 + int(W * rng.uniform(0.05, 0.25))] += 0.22 * k
 
+    # De combien l'aberration agrandit le rouge et retrecit le bleu, par cran
+    # du reglage : a 1, la frange fait 0,8 % de la distance au centre — six
+    # pixels sur le bord de la machine en 1080p, une dizaine dans les coins.
+    DISPERSION = 0.008
+
+    @staticmethod
+    def _plan_a(plan, xs, ys):
+        """Un plan relu aux coordonnees (xs, ys), en bilineaire, axe par axe."""
+        hs, ws = plan.shape
+        x0 = np.clip(np.floor(xs), 0, ws - 2).astype(np.intp)
+        y0 = np.clip(np.floor(ys), 0, hs - 2).astype(np.intp)
+        fx = np.clip(xs - x0, 0.0, 1.0).astype(np.float32)[None, :]
+        fy = np.clip(ys - y0, 0.0, 1.0).astype(np.float32)[:, None]
+        # take plutot que l'indexation : deux fois plus rapide, meme resultat
+        lig = plan.take(y0, axis=0)
+        suiv = plan.take(y0 + 1, axis=0)
+        suiv -= lig
+        suiv *= fy
+        lig += suiv
+        out = lig.take(x0, axis=1)
+        suiv = lig.take(x0 + 1, axis=1)
+        suiv -= out
+        suiv *= fx
+        out += suiv
+        return out
+
     def _aberration(self, img):
         """La frange chromatique d'un objectif, en permanence.
 
-        Le dedoublement du trait, lui, part sur les gros subs et se recolle :
-        c'est un effet de convergence, il frappe toute l'image d'un coup. Une
-        vraie aberration ne se voit qu'en bord de champ, et elle ne bouge
-        jamais — d'ou le masque radial, nul au centre.
+        Un objectif ne focalise pas toutes les couleurs a la meme taille :
+        le rouge sort un peu plus grand, le bleu un peu plus petit, autour du
+        centre de l'image. Le decalage est donc nul au milieu et grandit vers
+        les bords — c'est ce qui la distingue du dedoublement du trait, qui
+        part sur les gros subs et decale toute l'image d'un bloc.
 
-        On decale d'un nombre entier de pixels plutot que de rechantillonner :
-        a ces amplitudes-la (un a trois pixels) la difference ne se voit pas,
-        et un rechantillonnage bilineaire aurait coute une passe de plus sur
-        toute l'image, pour le meme resultat.
+        Les franges sont tirees de la clarte du trait et non de ses canaux
+        rouge et bleu : dans une palette verte ceux-ci sont presque vides, et
+        les decaler ne montrait rien. Elles ne s'ajoutent que la ou le trait
+        n'est pas deja : son coeur garde sa couleur, une frange rouge le borde
+        cote exterieur, une bleue cote interieur. L'axe se relit en deux
+        vecteurs, ligne puis colonne : le prix de deux plans relus, pas d'une
+        image entiere.
         """
         a = float(self.aberration)
         if a <= 0.005:
             return
-        dx = max(1, int(round(a * 2.2 * (self.H / 540.0))))
-        m = self._abr * a
-        for canal, sens in ((0, dx), (2, -dx)):
-            # la copie se prend AVANT d'affaiblir le canal : sinon on decale
-            # ce qu'on vient d'effacer, et la frange s'eteint avec lui
-            avant = img[:, :, canal].copy()
-            p = img[:, :, canal]
-            p *= (1.0 - m)
-            p += self._shift(avant, sens, 0) * m
+        H, W = self.H, self.W
+        k = np.float32(self.DISPERSION * a)
+        clarte = np.maximum(np.maximum(img[:, :, 0], img[:, :, 1]), img[:, :, 2])
+        np.clip(clarte, 0.0, 1.5, out=clarte)
+        cy, cx = (H - 1) * 0.5, (W - 1) * 0.5
+        yy = np.arange(H, dtype=np.float32) - cy
+        xx = np.arange(W, dtype=np.float32) - cx
+        poids = np.float32(min(1.0, 0.55 + 0.45 * a))
+        for canal, e in ((0, 1.0 / (1.0 + k)), (2, 1.0 + k)):
+            # le rouge relu plus pres du centre sort agrandi, le bleu relu
+            # plus loin sort retreci
+            frange = self._plan_a(clarte, cx + xx * e, cy + yy * e)
+            frange -= clarte
+            np.clip(frange, 0.0, None, out=frange)
+            frange *= poids
+            img[:, :, canal] += frange
 
     def _split(self, img, amount):
         """Dedoublement chromatique du trait sur les gros coups de sub.
@@ -7050,6 +7083,11 @@ class Renderer:
         else:
             img = self._sur_le_fond(img, t, gc, coups, fluo, k_teinte, inten)
 
+        # La frange d'objectif avant le peigne des lignes et les coins
+        # assombris : relus decales, ils la faisaient deborder en voile rose
+        # sur tout un fond clair. Elle ne borde ainsi que le dessin.
+        self._aberration(img)
+
         # Scanlines, ondulation lente et vignettage : trois multiplications de
         # la taille de l'image, ramenees a une seule. Le peigne et le
         # vignettage sont figes, seule l'ondulation suit le temps.
@@ -7059,7 +7097,6 @@ class Renderer:
         scan = 1.0 + self._scan_ecart * float(self.scanlines)
         vign = 1.0 + self._vign_ecart * float(self.vignettage)
         img *= ((scan * roll).astype(np.float32) * vign)[..., None]
-        self._aberration(img)
 
         # Le grain : fin — un tirage par pixel — et discret, 1,4 niveau sur 255.
         # Tire au quart de la definition puis agrandi, il faisait des carres

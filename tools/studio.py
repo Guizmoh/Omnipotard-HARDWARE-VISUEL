@@ -2662,7 +2662,7 @@ PAGE = r"""<!doctype html>
     <div class="ctl"><label for="scanlines">lignes de tube</label>
       <input type="range" id="scanlines" min="0" max="2" step="0.05" value="1"><output><span id="v-scl">1.00</span></output></div>
     <div class="ctl"><label for="aberration">frange d'objectif</label>
-      <input type="range" id="aberration" min="0" max="1.5" step="0.05" value="0"><output><span id="v-abr">0.00</span></output></div>
+      <input type="range" id="aberration" min="0" max="3" step="0.05" value="0"><output><span id="v-abr">0.00</span></output></div>
   </div>
 
   <div class="section" data-section="fonds">
