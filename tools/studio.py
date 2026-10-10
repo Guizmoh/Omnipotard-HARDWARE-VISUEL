@@ -329,6 +329,21 @@ def look_from(q):
         "coupure_on": _dans(q.get("coupureOn"), DECLENCHEURS, "grosse caisse"),
         "tapestop": float(q.get("tapestop", 0.0)),
         "tapestop_on": _dans(q.get("tapestopOn"), DECLENCHEURS, "grosse caisse"),
+        # ---- glitchs avances
+        "tri": float(q.get("tri", 0.0)),
+        "tri_on": _dans(q.get("triOn"), DECLENCHEURS, "caisse claire"),
+        "rvb": float(q.get("rvb", 0.0)),
+        "rvb_on": _dans(q.get("rvbOn"), DECLENCHEURS, "caisse claire"),
+        "retro": float(q.get("retro", 0.0)),
+        "retro_on": _dans(q.get("retroOn"), DECLENCHEURS, "grosse caisse"),
+        "macro": float(q.get("macro", 0.0)),
+        "macro_on": _dans(q.get("macroOn"), DECLENCHEURS, "caisse claire"),
+        "tourbillon": float(q.get("tourbillon", 0.0)),
+        "tourbillon_on": _dans(q.get("tourbillonOn"), DECLENCHEURS, "basse"),
+        "bits": float(q.get("bits", 0.0)),
+        "bits_on": _dans(q.get("bitsOn"), DECLENCHEURS, "grosse caisse"),
+        "tracking": float(q.get("tracking", 0.0)),
+        "tracking_on": _dans(q.get("trackingOn"), DECLENCHEURS, "grosse caisse"),
         "cadence": int(float(q.get("cadence", 0))),
         "poussiere": float(q.get("poussiere", 0.0)),
         "flottement": float(q.get("flottement", 0.0)),
@@ -808,6 +823,9 @@ class Studio:
                 "ondul", "ondul_on", "mosaic", "mosaic_on",
                 "kaleido", "kaleido_on", "cisaille", "cisaille_on",
                 "coupure", "coupure_on", "tapestop", "tapestop_on",
+                "tri", "tri_on", "rvb", "rvb_on", "retro", "retro_on",
+                "macro", "macro_on", "tourbillon", "tourbillon_on",
+                "bits", "bits_on", "tracking", "tracking_on",
                 "cadence", "poussiere", "flottement", "halo_doux",
                 "echo", "echo_n", "echo_delay", "couleurs", "step_div",
                 "presence", "neon", "reflet", "tube",
@@ -2608,7 +2626,7 @@ PAGE = r"""<!doctype html>
   <div class="section" data-section="dalle">
     <div class="tete"><i class="ic" data-ic="dalle"></i><h2>Texture de la dalle</h2>
       <button type="button" class="q" title="explications">?</button></div>
-    <p class="desc">La texture qui tapisse l'écran derrière la machine, et l'allure du tube lui-même.</p>
+    <p class="desc">La texture qui tapisse l'écran derrière la machine — d'un simple quadrillage à un tunnel ou un champ d'étoiles qui vivent avec l'animation —, et l'allure du tube lui-même.</p>
     <div class="explications" hidden>
       <p>Le trait est additif : un fond clair mange son contraste. Le <b>dégagement</b> creuse la texture derrière la machine pour qu'elle ressorte quand même.</p>
       <p>Les coins assombris, les lignes de tube et la frange d'objectif valent pour toutes les textures, même le noir : c'est l'écran lui-même.</p>
@@ -2622,6 +2640,11 @@ PAGE = r"""<!doctype html>
         <option value="scan">lignes de tube</option>
         <option value="degrade">dégradé (sombre au centre)</option>
         <option value="bruit">grain</option>
+        <option value="plasma">plasma (ondes qui se croisent)</option>
+        <option value="horizon">horizon quadrillé (sol qui file)</option>
+        <option value="etoiles">champ d'étoiles (hyperespace)</option>
+        <option value="ondes">ondes croisées (moiré)</option>
+        <option value="tunnel">tunnel (cadres qui viennent)</option>
       </select></div>
     <div id="bgopts" hidden>
       <div class="ctl couleur"><label for="bgColor">couleur du fond</label>
@@ -2789,10 +2812,11 @@ PAGE = r"""<!doctype html>
   <div class="section" data-section="avaries">
     <div class="tete"><i class="ic" data-ic="avaries"></i><h2>Avaries d'image</h2>
       <button type="button" class="q" title="explications">?</button></div>
-    <p class="desc">Les pannes d'une vieille image, déclenchées par ce qui est joué : coupures, décalages, blocs, négatif.</p>
+    <p class="desc">Les pannes d'une vieille image, déclenchées par ce qui est joué : coupures, décalages, blocs, négatif — et des glitchs d'art vidéo : tri de pixels, rétroaction, tourbillon, 8 bits, tracking.</p>
     <div class="explications" hidden>
       <p>Les mêmes pannes que sur les paroxysmes, mais déclenchées par ce qui est joué. Elles s'appliquent à l'image finie, juste avant la déformation du tube : d'où leur air de signal cassé plutôt que d'effet dessiné.</p>
       <p>Le <b>bégaiement</b> décroche l'image du son : elle rejoue en boucle un bout très court pris à l'instant du coup. Une boucle plus courte qu'une image donne un gel pur ; deux ou trois images donnent un sursaut répété, bien plus visible.</p>
+      <p>Les <b>glitchs avancés</b> viennent de l'art vidéo plutôt que de la panne : le <b>tri de pixels</b> range chaque ligne par clarté, la <b>déchirure RVB</b> sépare les trois couleurs, la <b>rétroaction</b> filme l'écran dans l'écran, la <b>compression cassée</b> fait baver des macroblocs, le <b>tourbillon</b> aspire l'image en spirale, l'<b>écran 8 bits</b> la réduit à quelques teintes tramées, et la <b>bande de tracking</b> monte comme sur une cassette mal calée. Sur « aucun », ils sont là en continu ; sur un instrument, chaque coup les lance.</p>
       <p>Les <b>tranches brassées</b> ne dépendent d'aucun instrument : elles découpent le temps en blocs réguliers et les rejouent dans le désordre, pendant que le son continue tout droit. Des tranches courtes hachent, des longues désorientent.</p>
       <p>Chacun peut aussi n'agir que sur un passage : attrapez-le par sa poignée ⠿, à gauche de son nom, et lâchez-le sur la frise sous l'aperçu. Le curseur ci-dessous vaut alors pour le reste du morceau — à zéro, l'effet n'existe que dans ses blocs.</p>
     </div>
@@ -2834,6 +2858,28 @@ PAGE = r"""<!doctype html>
     <div class="ctl"><label for="kaleido">kaléidoscope</label>
       <input type="range" id="kaleido" min="0" max="2" step="0.05" value="0"><output><span id="v-ka">0.00</span></output>
       <select id="kaleidoOn" class="inst"></select></div>
+    <div class="groupe">Glitchs avancés</div>
+    <div class="ctl"><label for="tri">tri de pixels</label>
+      <input type="range" id="tri" min="0" max="2.5" step="0.05" value="0"><output><span id="v-tri">0.00</span></output>
+      <select id="triOn" class="inst"></select></div>
+    <div class="ctl"><label for="rvb">déchirure RVB</label>
+      <input type="range" id="rvb" min="0" max="2.5" step="0.05" value="0"><output><span id="v-rvb">0.00</span></output>
+      <select id="rvbOn" class="inst"></select></div>
+    <div class="ctl"><label for="retro">rétroaction vidéo</label>
+      <input type="range" id="retro" min="0" max="2" step="0.05" value="0"><output><span id="v-ret">0.00</span></output>
+      <select id="retroOn" class="inst"></select></div>
+    <div class="ctl"><label for="macro">compression cassée</label>
+      <input type="range" id="macro" min="0" max="2.5" step="0.05" value="0"><output><span id="v-mac">0.00</span></output>
+      <select id="macroOn" class="inst"></select></div>
+    <div class="ctl"><label for="tourbillon">tourbillon</label>
+      <input type="range" id="tourbillon" min="0" max="2" step="0.05" value="0"><output><span id="v-tou">0.00</span></output>
+      <select id="tourbillonOn" class="inst"></select></div>
+    <div class="ctl"><label for="bits">écran 8 bits</label>
+      <input type="range" id="bits" min="0" max="2" step="0.05" value="0"><output><span id="v-bit">0.00</span></output>
+      <select id="bitsOn" class="inst"></select></div>
+    <div class="ctl"><label for="tracking">bande de tracking VHS</label>
+      <input type="range" id="tracking" min="0" max="2" step="0.05" value="0"><output><span id="v-trk">0.00</span></output>
+      <select id="trackingOn" class="inst"></select></div>
     <div class="groupe">Le temps</div>
     <div class="ctl"><label for="stut">bégaiement</label>
       <input type="range" id="stut" min="0" max="0.6" step="0.01" value="0"><output><span id="v-st">0.00</span> s</output>
@@ -3258,6 +3304,13 @@ function params() {
     cisaille: $('#cisaille').value, cisailleOn: $('#cisailleOn').value,
     coupure: $('#coupure').value, coupureOn: $('#coupureOn').value,
     tapestop: $('#tapestop').value, tapestopOn: $('#tapestopOn').value,
+    tri: $('#tri').value, triOn: $('#triOn').value,
+    rvb: $('#rvb').value, rvbOn: $('#rvbOn').value,
+    retro: $('#retro').value, retroOn: $('#retroOn').value,
+    macro: $('#macro').value, macroOn: $('#macroOn').value,
+    tourbillon: $('#tourbillon').value, tourbillonOn: $('#tourbillonOn').value,
+    bits: $('#bits').value, bitsOn: $('#bitsOn').value,
+    tracking: $('#tracking').value, trackingOn: $('#trackingOn').value,
     echo: $('#echo').value, echoN: $('#echoN').value,
     echoDelay: $('#echoDelay').value, couleurs: $('#couleurs').value,
     spectro: $('#spectro').value,
@@ -3509,6 +3562,9 @@ bind('#echoDelay','#v-ecd',3); bind('#couleurs','#v-cl',2);
 bind('#eclatPads','#v-ep',2); bind('#detourage','#v-det',2);
 bind('#spectro','#v-sp',2);
 bind('#inversion','#v-inv',2); bind('#papier','#v-pap',2);
+bind('#tri','#v-tri',2); bind('#rvb','#v-rvb',2); bind('#retro','#v-ret',2);
+bind('#macro','#v-mac',2); bind('#tourbillon','#v-tou',2); bind('#bits','#v-bit',2);
+bind('#tracking','#v-trk',2);
 $('#cadence').oninput = e => {
   const n = +e.target.value;
   $('#v-ca').textContent = n < 2 ? 'fluide' : Math.round(30 / n) + ' i/s';
@@ -3520,7 +3576,8 @@ for (const id of ['#travelMode','#punchOn','#shakeOn','#partsOn','#ringOn',
                   '#gridOn','#flashOn','#splitOn','#tranchesOn','#blocsOn',
                   '#rollOn','#ghostOn','#invertOn','#inversionOn','#stutOn','#miroirOn',
                   '#ondulOn','#mosaicOn','#kaleidoOn','#cisailleOn',
-                  '#coupureOn','#tapestopOn','#stepDiv'])
+                  '#coupureOn','#tapestopOn','#triOn','#rvbOn','#retroOn',
+                  '#macroOn','#tourbillonOn','#bitsOn','#trackingOn','#stepDiv'])
   $(id).onchange = () => { majFrequences(); shot(); };
 // la qualite ne change rien a l'apercu : elle ne touche que l'encodage
 $('#quality').onchange = majFrequences;
@@ -4262,7 +4319,9 @@ fetch('/config').then(r => r.json())
                        '#flashOn', '#tranchesOn', '#blocsOn', '#rollOn',
                        '#ghostOn', '#invertOn', '#inversionOn', '#stutOn',
                        '#miroirOn', '#ondulOn', '#mosaicOn', '#kaleidoOn',
-                       '#cisailleOn', '#coupureOn', '#tapestopOn'])
+                       '#cisailleOn', '#coupureOn', '#tapestopOn',
+                       '#triOn', '#rvbOn', '#retroOn', '#macroOn',
+                       '#tourbillonOn', '#bitsOn', '#trackingOn'])
         remplirGroupes(sel, groupes, 'continu');
     remplir('#travelMode', c.travellings || [], 'avant');
     // chaque qualite dit en clair ce qu'elle coute et ce qu'elle rend

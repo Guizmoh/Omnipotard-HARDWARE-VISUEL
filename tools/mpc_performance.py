@@ -156,6 +156,13 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
                               cisaille=0.0, cisaille_on="caisse claire",
                               coupure=0.0, coupure_on="grosse caisse",
                               tapestop=0.0, tapestop_on="grosse caisse",
+                              tri=0.0, tri_on="caisse claire",
+                              rvb=0.0, rvb_on="caisse claire",
+                              retro=0.0, retro_on="grosse caisse",
+                              macro=0.0, macro_on="caisse claire",
+                              tourbillon=0.0, tourbillon_on="basse",
+                              bits=0.0, bits_on="grosse caisse",
+                              tracking=0.0, tracking_on="grosse caisse",
                               cadence=0, poussiere=0.0, flottement=0.0,
                               halo_doux=0.0, echo=0.0, echo_n=3,
                               echo_delay=0.045, couleurs=0.0, spectro=0.0,
@@ -229,6 +236,13 @@ def make_performance_renderer(w, h, fps, duration, audio, phi, drops, curve=True
     r.cisaille, r.cisaille_on = float(cisaille), str(cisaille_on)
     r.coupure, r.coupure_on = float(coupure), str(coupure_on)
     r.tapestop, r.tapestop_on = float(tapestop), str(tapestop_on)
+    r.tri, r.tri_on = float(tri), str(tri_on)
+    r.rvb, r.rvb_on = float(rvb), str(rvb_on)
+    r.retro, r.retro_on = float(retro), str(retro_on)
+    r.macro, r.macro_on = float(macro), str(macro_on)
+    r.tourbillon, r.tourbillon_on = float(tourbillon), str(tourbillon_on)
+    r.bits, r.bits_on = float(bits), str(bits_on)
+    r.tracking, r.tracking_on = float(tracking), str(tracking_on)
     r.cadence = int(cadence)
     r.poussiere, r.flottement = float(poussiere), float(flottement)
     r.halo_doux = float(halo_doux)
@@ -314,6 +328,13 @@ EFFETS_PLACABLES = {
     "kaleido": ("kaleido", "kaleido_on", False),
     "stut": ("stut", "stut_on", False),
     "tapestop": ("tapestop", "tapestop_on", False),
+    "tri": ("tri", "tri_on", False),
+    "rvb": ("rvb", "rvb_on", False),
+    "retro": ("retro", "retro_on", False),
+    "macro": ("macro", "macro_on", False),
+    "tourbillon": ("tourbillon", "tourbillon_on", False),
+    "bits": ("bits", "bits_on", False),
+    "tracking": ("tracking", "tracking_on", False),
     "scramble": ("scramble", None, False),
     "echo": ("echo", None, False),
     "couleurs": ("couleurs", None, False),
@@ -1123,6 +1144,28 @@ def add_look_args(ap):
     ap.add_argument("--tapestop", type=float, default=0.0,
                     help="duree du patinage de bande sur le coup (s)")
     ap.add_argument("--tapestop-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
+    # ---- glitchs avances
+    ap.add_argument("--tri", type=float, default=0.0,
+                    help="tri de pixels par clarte, dans quelques bandes")
+    ap.add_argument("--tri-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
+    ap.add_argument("--rvb", type=float, default=0.0,
+                    help="les trois couleurs partent chacune de son cote, par bandes")
+    ap.add_argument("--rvb-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
+    ap.add_argument("--retro", type=float, default=0.0,
+                    help="retroaction : l'image repetee en plus petit vers le centre")
+    ap.add_argument("--retro-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
+    ap.add_argument("--macro", type=float, default=0.0,
+                    help="macroblocs d'une compression numerique cassee")
+    ap.add_argument("--macro-on", default="caisse claire", choices=DECLENCHEURS, metavar="QUOI")
+    ap.add_argument("--tourbillon", type=float, default=0.0,
+                    help="l'image aspiree en spirale vers le centre")
+    ap.add_argument("--tourbillon-on", default="basse", choices=DECLENCHEURS, metavar="QUOI")
+    ap.add_argument("--bits", type=float, default=0.0,
+                    help="ecran huit bits : gros pixels, peu de teintes, trame")
+    ap.add_argument("--bits-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
+    ap.add_argument("--tracking", type=float, default=0.0,
+                    help="bande de neige qui monte et dechire les lignes, comme une cassette mal calee")
+    ap.add_argument("--tracking-on", default="grosse caisse", choices=DECLENCHEURS, metavar="QUOI")
     # ---- textures continues
     ap.add_argument("--cadence", type=int, default=0,
                     help="images tenues : 2 = 15 i/s, 3 = 10 i/s (0 = fluide)")
@@ -1269,6 +1312,13 @@ def look_kwargs(args):
             "cisaille": args.cisaille, "cisaille_on": args.cisaille_on,
             "coupure": args.coupure, "coupure_on": args.coupure_on,
             "tapestop": args.tapestop, "tapestop_on": args.tapestop_on,
+            "tri": args.tri, "tri_on": args.tri_on,
+            "rvb": args.rvb, "rvb_on": args.rvb_on,
+            "retro": args.retro, "retro_on": args.retro_on,
+            "macro": args.macro, "macro_on": args.macro_on,
+            "tourbillon": args.tourbillon, "tourbillon_on": args.tourbillon_on,
+            "bits": args.bits, "bits_on": args.bits_on,
+            "tracking": args.tracking, "tracking_on": args.tracking_on,
             "cadence": args.cadence, "poussiere": args.poussiere,
             "flottement": args.flottement, "halo_doux": args.halo_doux,
             "echo": args.echo, "echo_n": args.echo_n,

@@ -1103,7 +1103,7 @@ noir, et une grosse caisse frappée en encre reste rouge.
 ### Fond
 
 Le faisceau est **additif** : un fond clair mange le contraste du trait. Les
-six textures restent donc sombres, et surtout elles se **creusent derrière la
+textures restent donc sombres, et surtout elles se **creusent derrière la
 machine** — c'est le curseur *dégagement*, qui va de 0 (texture uniforme) à 1
 (plus rien derrière la machine). C'est ce qui permet de mettre un fond coloré
 sans que la machine s'y noie.
@@ -1117,6 +1117,17 @@ sans que la machine s'y noie.
 | `scan` | lignes de tube serrées |
 | `degrade` | sombre au centre, coloré vers les bords — le regard va au milieu |
 | `bruit` | un grain fixe, une matière |
+| `plasma` | des ondes qui se croisent et ondoient, sans jamais se répéter |
+| `horizon` | un sol quadrillé en perspective, une lueur sur l'horizon — le sol file vers vous |
+| `etoiles` | un champ d'étoiles en profondeur — animé, elles filent en traînées (hyperespace) |
+| `ondes` | deux sources de ronds dans l'eau, et leurs franges de moiré |
+| `tunnel` | des cadres emboîtés et les arêtes d'un couloir — animé, on y avance |
+
+Les cinq derniers sont des **fonds vivants** : avec *animation de la texture*
+(`--bg-anim`), ils ne défilent pas comme une texture figée, ils sont
+redessinés à chaque image — le plasma ondoie, les ondes s'élargissent, le sol
+et le tunnel viennent vers vous, les étoiles s'étirent d'autant plus que la
+vitesse est haute. À zéro, ils restent une image fixe.
 
 Les mêmes réglages existent en ligne de commande sur les deux autres scripts :
 `--bg`, `--bg-color`, `--bg-strength`, `--bg-clear`.
@@ -1285,6 +1296,13 @@ choix.
 | cisaillement | l'image penche d'un bloc | `--cisaille`, `--cisaille-on` |
 | coupure franche | l'image s'absente, deux images durant | `--coupure`, `--coupure-on` |
 | patinage de bande | le temps ralentit puis rattrape d'un coup | `--tapestop`, `--tapestop-on` |
+| tri de pixels | chaque ligne d'une bande rangée par clarté : le trait coule en dégradé | `--tri`, `--tri-on` |
+| déchirure RVB | par bandes, rouge, vert et bleu partent chacun de son côté | `--rvb`, `--rvb-on` |
+| rétroaction vidéo | l'image filmée dans son propre écran, en couloir de copies qui virent de couleur | `--retro`, `--retro-on` |
+| compression cassée | macroblocs figés, couleurs permutées, colonnes qui bavent | `--macro`, `--macro-on` |
+| tourbillon | l'image aspirée en spirale vers le centre | `--tourbillon`, `--tourbillon-on` |
+| écran 8 bits | gros pixels, quelques teintes, trame de console | `--bits`, `--bits-on` |
+| bande de tracking VHS | une bande de neige monte et déchire les lignes | `--tracking`, `--tracking-on` |
 
 Le **bégaiement** demande un mot. Sur chaque coup retenu, l'image se fige sur
 l'instant de ce coup pendant la durée réglée ; le son, lui, ne s'arrête pas.
@@ -2462,6 +2480,69 @@ comme le miroir — un négatif à moitié fait n'est qu'un voile gris.
 
 Il s'ajoute au *négatif du trait*, qui, lui, ne replie que le cœur du trait
 vers le sombre.
+
+## Fonds vivants et glitchs avancés
+
+### Cinq fonds de plus
+
+La liste *texture* de la section « Texture de la dalle » gagne cinq fonds :
+**plasma**, **horizon quadrillé**, **champ d'étoiles**, **ondes croisées** et
+**tunnel**. Ils prennent la couleur, l'intensité et le dégagement du fond
+comme les autres, et passent sous les lignes de tube, le vignettage et le
+grain. Leur différence est dans l'animation : monter *animation de la texture*
+ne les fait pas défiler, il les fait **vivre** — chaque image est redessinée à
+son instant. Le champ d'étoiles devient un passage en hyperespace, dont les
+traînées s'allongent avec la vitesse ; le sol de l'horizon et le tunnel
+avancent vers vous ; le plasma et les ondes ondulent.
+
+Tout se mesure en hauteur d'image : le même réglage donne le même dessin à
+l'aperçu et en 4K. Les formes douces (plasma, ondes, tunnel) se calculent en
+définition réduite ; les traits fins de l'horizon et les étoiles, en pleine
+définition, sans crénelage. Un fond vivant coûte de 10 à 80 ms par image en
+1080p, seulement quand il est animé.
+
+### Sept glitchs avancés
+
+Dans les avaries, un nouveau groupe, **Glitchs avancés**, emprunte à l'art
+vidéo plutôt qu'à la panne. Chacun a sa liste « sur : » (aucun par défaut,
+c'est-à-dire en continu), se pose sur la frise, et se règle en ligne de
+commande :
+
+- **tri de pixels** — dans quelques bandes, chaque ligne est rangée par
+  clarté : le trait se ramasse à un bout en un dégradé qui coule. Le geste
+  fondateur du glitch art ;
+- **déchirure RVB** — par bandes, le rouge, le vert et le bleu partent chacun
+  de son côté. À la différence du dédoublement, qui décale tout le trait d'un
+  bloc, l'image se déchire ligne à ligne ;
+- **rétroaction vidéo** — la caméra filme son propre écran : l'image se
+  répète en plus petit vers le centre, chaque reprise virant de couleur. Sur
+  une grosse caisse, chaque coup ouvre un couloir ;
+- **compression cassée** — des macroblocs de 16 pixels, comme un flux qui perd
+  des paquets : aplats aux couleurs permutées, blocs quantifiés, et colonnes
+  dont la première ligne bave vers le bas (le « datamosh ») ;
+- **tourbillon** — l'image tourne autour du centre, d'autant plus qu'on s'en
+  approche ; sur la basse, la machine se tord à chaque note ;
+- **écran 8 bits** — gros pixels, une poignée de teintes et la trame ordonnée
+  des vieilles consoles pour passer de l'une à l'autre ;
+- **bande de tracking VHS** — une bande de neige monte dans l'image et y
+  déchire les lignes, comme une cassette mal calée ; en continu, elle remonte
+  sans fin.
+
+À zéro, chacun ne coûte rien et l'image est identique, au pixel près, à celle
+d'avant. Poussés fort en 1080p, ils prennent de 2 ms (compression cassée) à
+une centaine de millisecondes (rétroaction, tourbillon) par image.
+
+Un nouveau préréglage, **glitch art**, les combine : tri sur une caisse claire
+sur deux, déchirure sur un charley sur trois, rétroaction toutes les quatre
+grosses caisses, compression sur les percussions, tracking au hasard,
+tourbillon sur la basse et écran 8 bits sur l'autre caisse claire — réglés en
+alternance pour ne pas tous tomber ensemble.
+
+```bash
+python3 tools/mpc_performance.py morceau.mp3 --bg etoiles --bg-color '#1a3a6a' --bg-anim 3 \
+    --tri 1.2 --tri-on "caisse claire" --retro 0.9 --retro-on "grosse caisse"
+python3 tools/mpc_performance.py morceau.mp3 --preset "glitch art" --bg tunnel --bg-anim 1.5
+```
 
 ## STUDIO WEB — une page HTML, rien a installer
 

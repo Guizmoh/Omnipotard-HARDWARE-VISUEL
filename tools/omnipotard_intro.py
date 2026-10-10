@@ -37,7 +37,7 @@ import numpy as np
 # d'erreur. Elle ne depend pas de git : le dossier est souvent recupere en
 # archive zip, sans historique, et Windows n'a pas git installe d'origine.
 # Sans ce reperage, impossible de savoir si une correction est bien arrivee.
-VERSION = "2026-10-02.16"
+VERSION = "2026-10-02.17"
 
 # --------------------------------------------------------------------------
 # Repere : unite = demi-hauteur de l'image. y vers le haut, centre en (0, 0).
@@ -56,7 +56,11 @@ PALETTES = {
 # Fonds de dalle. Le faisceau est additif : un fond clair mange le contraste
 # du trait. Toutes ces textures restent donc sombres, et se creusent derriere
 # la machine (voir `clear`) pour qu'elle garde son relief.
-BACKGROUNDS = ("noir", "uni", "grille", "points", "scan", "degrade", "bruit")
+BACKGROUNDS = ("noir", "uni", "grille", "points", "scan", "degrade", "bruit",
+               "plasma", "horizon", "etoiles", "ondes", "tunnel")
+# Les fonds qui se redessinent a chaque image quand on les anime, au lieu de
+# faire defiler une texture figee : leur mouvement n'est pas une translation.
+FONDS_VIVANTS = ("plasma", "horizon", "etoiles", "ondes", "tunnel")
 
 
 TRAVELLINGS = ("aucun", "avant", "arriere", "gauche", "droite", "haut", "bas")
@@ -251,6 +255,18 @@ PRESETS = {
         "parts": 1.1, "parts_n": 1500, "parts_on": "caisse claire",
         "split": 1.4, "glitch": 1.0, "step_div": 4,
         "punch": 0.032, "punch_on": "grosse caisse", "snare": 1.0,
+    },
+
+    "glitch art": {
+        "tri": 1.0, "tri_on": "caisse claire · 1 sur 2",
+        "rvb": 0.9, "rvb_on": "charley · 1 sur 3",
+        "retro": 0.8, "retro_on": "grosse caisse · 1 sur 4",
+        "macro": 0.9, "macro_on": "percussions",
+        "tracking": 0.7, "tracking_on": "hasard rare",
+        "tourbillon": 0.6, "tourbillon_on": "basse · 1 sur 4",
+        "bits": 0.8, "bits_on": "caisse claire · l'autre sur 2",
+        "split": 1.0, "glitch": 0.7, "couleurs": 0.6,
+        "punch": 0.04, "punch_on": "grosse caisse", "snare": 0.0,
     },
 
     "techno": {
@@ -462,6 +478,13 @@ AIDE = {
     "mosaic": "L'image tombe en gros pixels.",
     "kaleido": "L'image répétée en grille, un carreau sur deux retourné.",
     "cisaille": "L'image penche d'un bloc, comme cisaillée.",
+    "tri": "Dans quelques bandes, chaque ligne est rangée par clarté : le trait se ramasse à un bout en un dégradé qui coule. Le geste fondateur du glitch art.",
+    "rvb": "Par bandes, le rouge, le vert et le bleu partent chacun de son côté : l'image se déchire en trois couleurs qui ne se recouvrent plus.",
+    "retro": "La caméra filme son propre écran : l'image se répète en plus petit vers le centre, chaque reprise virant de couleur, comme un couloir sans fin.",
+    "macro": "Un flux numérique qui perd des paquets : des carrés de 16 pixels figés en aplat, aux couleurs permutées, et des colonnes qui bavent vers le bas.",
+    "tourbillon": "L'image tourne sur elle-même autour du centre, d'autant plus qu'on s'en approche, comme aspirée par un siphon.",
+    "bits": "Gros pixels, une poignée de teintes et la trame ordonnée des vieilles consoles pour passer de l'une à l'autre.",
+    "tracking": "Une bande de neige monte dans l'image et y déchire les lignes, comme une cassette VHS mal calée. En continu, elle remonte sans fin.",
     "coupure": "L'image s'absente, deux images durant.",
     "tapestop": "Le temps ralentit puis rattrape d'un coup, comme une bande "
                 "qui patine.",
@@ -498,9 +521,11 @@ AIDE = {
     "tube": "Donne au trait l'épaisseur d'un tube de verre : les bords "
             "s'assombrissent et un reflet file le long de son arête haute.",
     "bgAnim": "Fait vivre la texture du fond : les lignes et le quadrillage "
-              "descendent, le grain bout comme une pellicule. À zéro, la "
-              "texture est fixe. Sans effet sur « uni » et « dégradé », qui "
-              "n'ont rien à faire défiler.",
+              "descendent, le grain bout comme une pellicule, le plasma "
+              "ondoie, les ondes s'élargissent, le sol de l'horizon et le "
+              "tunnel viennent vers vous, les étoiles filent en traînées. "
+              "À zéro, la texture est fixe. Sans effet sur « uni » et "
+              "« dégradé », qui n'ont rien à faire défiler.",
     "nettete": "La finesse du trait lui-même. À 1 il est large et velours ; "
                "plus haut il se resserre, jusqu'à un cheveu de lumière. Le "
                "gain de netteté se voit surtout en 1080p et au-dessus.",
@@ -525,6 +550,9 @@ COMPTE = {
     "miroir": "instrument", "ondul": "instrument", "mosaic": "instrument",
     "kaleido": "instrument", "cisaille": "instrument", "coupure": "instrument",
     "tapestop": "instrument",
+    "tri": "instrument", "rvb": "instrument", "retro": "instrument",
+    "macro": "instrument", "tourbillon": "instrument", "bits": "instrument",
+    "tracking": "instrument",
     "split": "split", "glitch": "drops", "scramble": "tranche",
     # la rangee de pas n'attend aucun coup : elle avance au tempo
     "stepDiv": "sequenceur",
@@ -583,6 +611,13 @@ CHAMPS = {
     "cisaille": "cisaille", "cisaille_on": "cisailleOn",
     "coupure": "coupure", "coupure_on": "coupureOn",
     "tapestop": "tapestop", "tapestop_on": "tapestopOn",
+    "tri": "tri", "tri_on": "triOn",
+    "rvb": "rvb", "rvb_on": "rvbOn",
+    "retro": "retro", "retro_on": "retroOn",
+    "macro": "macro", "macro_on": "macroOn",
+    "tourbillon": "tourbillon", "tourbillon_on": "tourbillonOn",
+    "bits": "bits", "bits_on": "bitsOn",
+    "tracking": "tracking", "tracking_on": "trackingOn",
     "cadence": "cadence", "poussiere": "poussiere",
     "flottement": "flottement", "halo_doux": "haloDoux",
     "echo": "echo", "echo_n": "echoN", "echo_delay": "echoDelay",
@@ -1419,8 +1454,120 @@ def creux_machine(w, h, clear, scale=None):
     return (1.0 - float(clear) * (1.0 - k * k * (3.0 - 2.0 * k))).astype(np.float32)
 
 
+def _traits(u, largeur):
+    """Des lignes fines aux entiers de u, adoucies sur `largeur` (en unites
+    de u, ce que vaut un pixel la ou on est) : elles restent nettes de pres
+    comme de loin, sans crenelage ni moire."""
+    d = np.abs(u - np.round(u))
+    return np.clip(1.0 - d / np.maximum(largeur, 1e-6), 0.0, 1.0)
+
+
+def motif_vivant(kind, w, h, phase=0.0, seed=11, traine=0.0):
+    """Les fonds qui bougent d'eux-memes, a l'instant `phase`.
+
+    Tous se mesurent en hauteur d'image : le meme reglage donne le meme
+    dessin en 360p et en 4K. Ceux qui n'ont que des formes douces (plasma,
+    ondes, tunnel) se calculent en definition reduite puis s'agrandissent ;
+    l'horizon et les etoiles, faits de traits d'un pixel, en pleine
+    definition. `traine` etire les etoiles en filets quand elles avancent.
+    """
+    p = float(phase)
+    if kind in ("plasma", "ondes", "tunnel"):
+        f = 4 if kind == "plasma" else 2
+        hh, ww = max(2, h // f), max(2, w // f)
+        y = (np.arange(hh, dtype=np.float32)[:, None] - hh * 0.5) / hh
+        x = (np.arange(ww, dtype=np.float32)[None, :] - ww * 0.5) / hh
+        if kind == "plasma":
+            # quatre ondes qui se croisent : deux droites, une diagonale, une
+            # circulaire qui derive. Leur somme ondoie sans jamais se repeter.
+            v = (np.sin(x * 7.0 + p * 1.10) + np.sin(y * 9.0 - p * 1.35)
+                 + np.sin((x + y) * 6.0 + p * 0.70)
+                 + np.sin(np.sqrt((x - 0.35 * math.sin(p * 0.31)) ** 2
+                                  + (y - 0.25 * math.cos(p * 0.23)) ** 2) * 14.0
+                          - p * 1.60))
+            pat = 0.5 + 0.5 * np.sin(v * (math.pi * 0.5))
+            pat = 0.08 + 1.05 * pat * pat
+        elif kind == "ondes":
+            # deux sources de ronds dans l'eau : leurs cercles se croisent
+            # et dessinent des franges de moire
+            r1 = np.sqrt((x - 0.42) ** 2 + y * y)
+            r2 = np.sqrt((x + 0.42) ** 2 + y * y)
+            k = 2.0 * math.pi * 11.0
+            v = 0.5 + 0.25 * (np.cos(r1 * k - p * 3.0) + np.cos(r2 * k - p * 3.0))
+            pat = 0.10 + 1.10 * v ** 3
+        else:
+            # tunnel : des cadres emboites qui viennent vers nous. Le plus
+            # grand des deux ecarts au centre fait des carres ; la profondeur
+            # en est l'inverse.
+            u = np.maximum(np.abs(x) * 0.75, np.abs(y)) + 1e-3
+            z = 0.22 / u
+            pix = 0.22 / (u * u) / hh                 # un pixel, en profondeur
+            anneaux = _traits(z * 6.0 + p * 1.5, pix * 6.0 * 2.0)
+            # huit rayons, les aretes du couloir
+            r = np.sqrt(x * x + y * y) + 1e-3
+            ang = np.arctan2(y, x) * (8.0 / (2.0 * math.pi))
+            rayons = _traits(ang, 1.2 / (r * hh * (2.0 * math.pi / 8.0)))
+            fond = np.clip(u * 3.0, 0.0, 1.0) ** 1.5   # le fond du couloir s'eteint
+            pat = (0.06 + 1.25 * np.maximum(anneaux, 0.45 * rayons)) * fond
+        return agrandir(pat.astype(np.float32), (h, w))
+
+    if kind == "horizon":
+        # le sol quadrille d'un paysage de jeu video, qui file vers nous
+        y = np.arange(h, dtype=np.float32)
+        yh = h * 0.56                                  # la ligne d'horizon
+        dy = (y - yh) / h
+        sol = dy > 0.004
+        z = np.where(sol, 0.10 / np.maximum(dy, 1e-3), 0.0)
+        dz = np.where(sol, 0.10 / np.maximum(dy, 1e-3) ** 2 / h, 1.0)
+        lignes = np.where(sol, _traits(z * 1.5 + p, dz * 1.5 * 1.3), 0.0)
+        x = (np.arange(w, dtype=np.float32) - w * 0.5) / h
+        X = x[None, :] * (z[:, None] * 6.0)
+        colonnes = _traits(X, np.abs(x[None, :]) * dz[:, None] * 6.0
+                           + (z[:, None] * 6.0 / h) * 1.3)
+        loin = np.clip(dy * 9.0, 0.0, 1.0)[:, None]    # au loin, les lignes se fondent
+        pat = np.maximum(lignes[:, None], colonnes) * np.where(sol, 1.0, 0.0)[:, None]
+        pat = pat * (0.35 + 0.65 * loin) + 0.12 * (1.0 - loin) * sol[:, None]
+        # le ciel : une lueur qui monte de l'horizon
+        ciel = np.where(~sol, np.exp(-np.abs(dy) / 0.10), 0.0)
+        pat = 0.05 + 1.05 * pat + 0.55 * ciel[:, None]
+        return pat.astype(np.float32)
+
+    if kind == "etoiles":
+        # un champ d'etoiles en profondeur : chacune garde sa place, et
+        # l'animation les fait venir vers nous depuis le centre
+        rng = np.random.default_rng(seed + 404)
+        n = int(900 * (w / max(h, 1)) / 1.78)
+        sx = rng.uniform(-1.0, 1.0, n) * (w / h) * 0.9
+        sy = rng.uniform(-1.0, 1.0, n) * 0.9
+        z0 = rng.uniform(0.0, 1.0, n)
+        pat = np.full((h, w), 0.04, dtype=np.float32)
+        zz = np.mod(z0 - p * 0.12, 1.0) * 0.95 + 0.05
+        ecl = (np.clip(1.15 - zz, 0.0, 1.0) ** 1.2).astype(np.float32)
+        x1, y1 = sx / zz * 0.25 * h + w * 0.5, sy / zz * 0.25 * h + h * 0.5
+        # le filet : ou etait l'etoile un peu avant, trace point par point
+        # en ecran — assez de points pour que le trait reste continu
+        zp = np.minimum(zz + 0.05 * min(1.0, traine), 1.0)
+        x0, y0 = sx / zp * 0.25 * h + w * 0.5, sy / zp * 0.25 * h + h * 0.5
+        long = np.hypot(x1 - x0, y1 - y0)
+        pas = int(np.clip(np.ceil(long.max(initial=0.0)), 1, 160)) if traine > 0 else 1
+        for k in range(pas):
+            f = k / max(pas - 1, 1) if pas > 1 else 1.0
+            px = (x0 + (x1 - x0) * f).astype(np.int64)
+            py = (y0 + (y1 - y0) * f).astype(np.int64)
+            ok = (px >= 0) & (px < w - 1) & (py >= 0) & (py < h - 1)
+            e = ecl * (0.25 + 0.75 * f) if pas > 1 else ecl
+            np.add.at(pat, (py[ok], px[ok]), e[ok] * 3.0)
+        # les proches, sur quatre pixels
+        px, py = x1.astype(np.int64), y1.astype(np.int64)
+        ok = (px >= 0) & (px < w - 1) & (py >= 0) & (py < h - 1) & (zz < 0.45)
+        for oy, ox in ((0, 1), (1, 0), (1, 1)):
+            np.add.at(pat, (py[ok] + oy, px[ok] + ox), ecl[ok] * 2.0)
+        return np.clip(pat, 0.0, 4.0)
+    raise ValueError("fond inconnu : %s" % kind)
+
+
 def make_background(w, h, kind="noir", color=(0.0, 0.0, 0.0), strength=1.0,
-                    clear=0.55, scale=None, seed=11):
+                    clear=0.55, scale=None, seed=11, phase=0.0, traine=0.0):
     """Construit le fond, une fois pour toutes.
 
     Renvoie soit une couleur diffusable (1,1,3), soit une vraie image (h,w,3)
@@ -1482,6 +1629,8 @@ def make_background(w, h, kind="noir", color=(0.0, 0.0, 0.0), strength=1.0,
         n = agrandir(n, (h, w))
         n *= np.float32(e0 / max(float(n.std()), 1e-6))
         pat = np.clip(0.55 + 0.75 * n, 0.0, 2.0)
+    elif kind in FONDS_VIVANTS:
+        pat = motif_vivant(kind, w, h, phase, seed, traine)
     else:
         raise ValueError("fond inconnu : %s" % kind)
 
@@ -4826,6 +4975,7 @@ class Renderer:
     _ech = 1.0
     bg_kind = "uni"
     bg_anim = 0.0
+    _bg_coul = ((0.0, 0.0, 0.0), 1.0)
     c_bg_pat = None
     c_bg_creux = None
     step_div = 2.0
@@ -5956,6 +6106,21 @@ class Renderer:
     coupure_on = "grosse caisse"
     tapestop = 0.0       # le temps ralentit puis rattrape, comme une bande
     tapestop_on = "grosse caisse"
+    # ---- glitchs avances : l'art video plutot que la panne
+    tri = 0.0            # tri de pixels par clarte
+    tri_on = "caisse claire"
+    rvb = 0.0            # les trois couleurs dechirees par bandes
+    rvb_on = "caisse claire"
+    retro = 0.0          # retroaction : l'image filmee dans son ecran
+    retro_on = "grosse caisse"
+    macro = 0.0          # macroblocs d'une compression cassee
+    macro_on = "caisse claire"
+    tourbillon = 0.0     # l'image aspiree en spirale vers le centre
+    tourbillon_on = "basse"
+    bits = 0.0           # ecran huit bits : gros pixels et trame
+    bits_on = "grosse caisse"
+    tracking = 0.0       # bande de tracking d'une cassette
+    tracking_on = "grosse caisse"
     # ---- trip hop, lo-fi : des textures continues, pas des impacts
     cadence = 0          # images tenues (2 = 15 i/s, 3 = 10 i/s)
     poussiere = 0.0      # poussiere et rayures de pellicule
@@ -6015,6 +6180,8 @@ class Renderer:
         self.bg_periode = maille * (0.25 if self.bg_kind == "scan" else 1.0)
         anime = (self.bg_anim > 1e-4 and pat.shape[0] > 1
                  and self.bg_kind not in ("uni", "degrade"))
+        # de quoi redessiner un fond vivant a chaque image
+        self._bg_coul = (pbg if bg_color is None else bg_color, bg_strength)
         if anime:
             self.c_bg, self.c_bg_pat, self.c_bg_creux = None, pat, creux
         else:
@@ -6058,7 +6225,15 @@ class Renderer:
     def _fond_anime(self, t):
         pat = self.c_bg_pat
         h, w = pat.shape[0], pat.shape[1]
-        if self.bg_kind == "bruit":
+        if self.bg_kind in FONDS_VIVANTS:
+            # redessine a l'instant t : ces fonds ne defilent pas, ils vivent
+            col, force = self._bg_coul
+            pat = make_background(w, h, kind=self.bg_kind, color=col,
+                                  strength=force, clear=0.0,
+                                  scale=self.scale * self.taille, seed=self.seed,
+                                  phase=t * self.bg_anim,
+                                  traine=self.bg_anim / 3.0)
+        elif self.bg_kind == "bruit":
             # le grain saute huit fois par seconde et par cran de vitesse :
             # entre deux sauts il reste fixe, comme un grain de pellicule qui
             # tient le temps d'une photogramme
@@ -6266,8 +6441,168 @@ class Renderer:
                 b = img[y0:y0 + self.BANDE]
                 np.clip(b, 0.0, 1.0, out=b)
                 np.subtract(np.float32(1.0), b, out=b)
+        self._glitchs_avances(img, t, rng)
         self._texture_lofi(img, t, rng)
         return img
+
+    def _glitchs_avances(self, img, t, rng):
+        """Les glitchs d'un art video plutot que d'une panne : tri de pixels,
+        canaux dechires, retroaction, compression cassee, tourbillon, ecran
+        huit bits, bande de tracking. Meme regle que les avaries : sur
+        l'image finie, avant le tube, et tires du hasard de l'image."""
+        H, W = self.H, self.W
+
+        # ---- tri de pixels : dans quelques bandes, chaque ligne est rangee
+        # par clarte. Le trait se ramasse a un bout en un degrade qui coule —
+        # le geste fondateur du glitch art (Kim Asendorf, 2010).
+        a = self.tri * self.hit_env(t, self.tri_on, fall=10.0,
+                                    plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            for _ in range(int(1 + 5 * a)):
+                hb = int(rng.integers(max(2, H // 90), max(4, int(H * 0.16 * min(a, 1.5))) + 3))
+                y0 = int(rng.integers(0, max(1, H - hb)))
+                lg = int(W * float(rng.uniform(0.25, 0.85)))
+                x0 = int(rng.integers(0, max(1, W - lg)))
+                seg = img[y0:y0 + hb, x0:x0 + lg]
+                lum = seg[:, :, 0] + seg[:, :, 1] + seg[:, :, 2]
+                ordre = np.argsort(lum, axis=1, kind="stable")
+                if rng.random() < 0.5:
+                    ordre = ordre[:, ::-1]
+                seg[...] = np.take_along_axis(seg, ordre[..., None], axis=1)
+
+        # ---- dechirure RVB : par bandes, les trois couleurs partent chacune
+        # de son cote — le rouge, le vert et le bleu ne se recouvrent plus
+        a = self.rvb * self.hit_env(t, self.rvb_on, fall=14.0,
+                                    plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            amp = int(W * 0.05 * a) + 2
+            for _ in range(int(3 + 9 * a)):
+                hb = int(rng.integers(3, max(5, int(H * 0.12 * min(a, 1.5))) + 4))
+                y0 = int(rng.integers(0, max(1, H - hb)))
+                for c in range(3):
+                    d = int(rng.integers(-amp, amp + 1))
+                    if d:
+                        img[y0:y0 + hb, :, c] = np.roll(img[y0:y0 + hb, :, c], d, axis=1)
+
+        # ---- retroaction video : la camera filme son propre ecran. L'image
+        # se repete en plus petit vers le centre, chaque reprise virant de
+        # couleur — un couloir de copies d'elle-meme.
+        a = self.retro * self.hit_env(t, self.retro_on, fall=8.0,
+                                      plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            base = img.copy()
+            ech = 0.80 - 0.04 * min(a, 2.0)
+            poids = 0.62 * min(a, 1.6)
+            tourne = 1 if int(t * 2.0) % 2 else 2       # le sens du virage
+            for k in range(1, 3 + int(2 * min(a, 2.0))):
+                s = ech ** k
+                hs, ws = int(H * s), int(W * s)
+                if hs < 4 or ws < 4:
+                    break
+                ys = (np.arange(hs) / s).astype(np.int64).clip(0, H - 1)
+                xs = (np.arange(ws) / s).astype(np.int64).clip(0, W - 1)
+                y0, x0 = (H - hs) // 2, (W - ws) // 2
+                copie = base[np.ix_(ys, xs)]
+                copie = np.roll(copie, k * tourne, axis=2)   # la couleur vire
+                zone = img[y0:y0 + hs, x0:x0 + ws]
+                np.maximum(zone, copie * np.float32(poids * 0.72 ** (k - 1)), out=zone)
+
+        # ---- compression cassee : des macroblocs de 16 pixels comme un flux
+        # numerique qui perd des paquets — blocs figes en aplat, couleurs
+        # permutees, et colonnes qui bavent vers le bas (le « datamosh »)
+        a = self.macro * self.hit_env(t, self.macro_on, fall=12.0,
+                                      plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            q = max(8, int(round(16 * H / 1080.0)))
+            ny, nx = H // q, W // q
+            if ny > 1 and nx > 1:
+                for _ in range(int(6 + 50 * a)):
+                    by, bx = int(rng.integers(0, ny)), int(rng.integers(0, nx))
+                    y0, x0 = by * q, bx * q
+                    bloc = img[y0:y0 + q, x0:x0 + q]
+                    genre = rng.random()
+                    if genre < 0.40:
+                        # aplat a la couleur moyenne, canaux melanges
+                        m = bloc.mean(axis=(0, 1))
+                        bloc[...] = m[rng.permutation(3)] * np.float32(1.4)
+                    elif genre < 0.75:
+                        # la bavure : la ligne du haut coule sur plusieurs blocs
+                        n = int(rng.integers(2, 4 + int(8 * min(a, 1.5))))
+                        bas = min(H, y0 + n * q)
+                        img[y0:bas, x0:x0 + q] = img[y0:y0 + 1, x0:x0 + q]
+                    else:
+                        # quantifie grossierement, les couleurs a l'envers
+                        bloc[...] = (np.round(bloc[:, :, ::-1] * 3.0) / 3.0)
+
+        # ---- tourbillon : l'image tourne sur elle-meme autour du centre,
+        # d'autant plus qu'on s'en approche, comme aspiree par un siphon
+        a = self.tourbillon * self.hit_env(t, self.tourbillon_on, fall=9.0,
+                                           plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            R = int(H * 0.62)
+            cy, cx = H // 2, W // 2
+            y0, y1 = max(0, cy - R), min(H, cy + R)
+            x0, x1 = max(0, cx - R), min(W, cx + R)
+            yy = np.arange(y0, y1, dtype=np.float32)[:, None] - cy
+            xx = np.arange(x0, x1, dtype=np.float32)[None, :] - cx
+            r = np.sqrt(xx * xx + yy * yy)
+            k = np.clip(1.0 - r / R, 0.0, 1.0)
+            ang = np.arctan2(yy, xx) + np.float32(2.4 * min(a, 2.0)) * k * k
+            sy = (cy + r * np.sin(ang)).astype(np.int64).clip(0, H - 1)
+            sx = (cx + r * np.cos(ang)).astype(np.int64).clip(0, W - 1)
+            img[y0:y1, x0:x1] = img[sy, sx]
+
+        # ---- ecran huit bits : gros pixels, une poignee de teintes, et la
+        # trame ordonnee des vieilles consoles pour passer de l'une a l'autre
+        a = self.bits * self.hit_env(t, self.bits_on, fall=12.0,
+                                     plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            niv = max(2, int(round(7 - 4 * min(a, 1.25))))
+            px = max(1, int(round((1.0 + 3.0 * min(a, 2.0)) * H / 540.0)))
+            h2, w2 = H // px, W // px
+            if h2 > 0 and w2 > 0:
+                vue = img[:h2 * px, :w2 * px].reshape(h2, px, w2, px, 3)
+                petit = vue.mean(axis=(1, 3)) if px > 1 else vue[:, 0, :, 0].copy()
+                bayer = np.float32([[0, 8, 2, 10], [12, 4, 14, 6],
+                                    [3, 11, 1, 9], [15, 7, 13, 5]]) / 16.0
+                seuil = np.tile(bayer, (-(-h2 // 4), -(-w2 // 4)))[:h2, :w2]
+                petit = np.floor(np.clip(petit, 0.0, 1.0) * (niv - 1)
+                                 + seuil[..., None]) / (niv - 1)
+                vue[...] = petit[:, None, :, None, :]
+
+        # ---- bande de tracking : la bande magnetique deraille. Une bande
+        # de neige monte dans l'image en y dechirant les lignes, comme sur
+        # une cassette VHS mal calee.
+        a = self.tracking * self.hit_env(t, self.tracking_on, fall=7.0,
+                                         plancher=PLANCHER_AVARIE)
+        if a > 0.02:
+            hb = max(4, int(H * (0.05 + 0.10 * min(a, 2.0))))
+            yc = int((1.0 - (t * 0.37) % 1.0) * (H + hb)) - hb
+            y0, y1 = max(0, yc), min(H, yc + hb)
+            if y1 > y0:
+                n = y1 - y0
+                amp = W * 0.04 * a
+                off = (rng.uniform(-amp, amp, n)
+                       * np.sin(np.linspace(0.0, math.pi, n))).astype(np.int64)
+                idx = (np.arange(W)[None, :] - off[:, None]) % W
+                bande = np.take_along_axis(img[y0:y1], idx[..., None], axis=1)
+                neige = rng.random((n, max(1, W // 3))).astype(np.float32)
+                neige = np.repeat(neige ** 8, 3, axis=1)[:, :W]
+                if neige.shape[1] < W:
+                    neige = np.pad(neige, ((0, 0), (0, W - neige.shape[1])))
+                bande += (neige * np.float32(0.9 * min(a, 1.5)))[..., None]
+                img[y0:y1] = bande
+                # la couture claire en haut de la bande
+                img[y0:min(H, y0 + max(1, H // 360))] += np.float32(0.25 * min(a, 1.5))
+            # sous la bande, les lignes penchent encore un peu
+            sous = min(H, max(0, yc + hb))
+            fin = min(H, sous + hb)
+            if fin > sous:
+                dx = (np.linspace(W * 0.012 * a, 0.0, fin - sous)).astype(np.int64)
+                for d in np.unique(dx):
+                    if d:
+                        sel = sous + np.nonzero(dx == d)[0]
+                        img[sel] = np.roll(img[sel], int(d), axis=1)
 
     def _texture_lofi(self, img, t, rng):
         """Les textures continues : celles qui ne frappent pas, mais vieillissent.
